@@ -3,9 +3,9 @@
   <PropertyGroup>
     <Authors></Authors>
     <Company></Company>
-    <Version>1.1.16.815</Version>
-    <AssemblyVersion>1.1.16.815</AssemblyVersion>
-    <FileVersion>1.1.16.815</FileVersion>
+    <Version>1.1.16.2149</Version>
+    <AssemblyVersion>1.1.16.2149</AssemblyVersion>
+    <FileVersion>1.1.16.2149</FileVersion>
     <Description>Through the power of Living Memory, this plugin harmonizes your Penumbra modifications and Glamourer configurations across all connected souls, ensuring endless synchronization in your shared digital realm.</Description>
     <Copyright></Copyright>
     <PackageProjectUrl>https://github.com/SpheneDev/client</PackageProjectUrl>
@@ -49,9 +49,9 @@
     <BuildDate>$([System.DateTime]::Now.ToString("ddMM"))</BuildDate>
     <BuildTime>$([System.DateTime]::Now.ToString("HHMM"))</BuildTime>
     <BuildTimestamp>$([System.DateTime]::Now.ToString("dd-MM-yy HH:mm:ss"))</BuildTimestamp>
-    <Version>1.1.16.815</Version>
-    <AssemblyVersion>1.1.16.815</AssemblyVersion>
-    <FileVersion>1.1.16.815</FileVersion>
+    <Version>1.1.16.2149</Version>
+    <AssemblyVersion>1.1.16.2149</AssemblyVersion>
+    <FileVersion>1.1.16.2149</FileVersion>
     <DefineConstants>$(DefineConstants);BUILD_TIMESTAMP</DefineConstants>
   </PropertyGroup>
   
@@ -70,6 +70,16 @@
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
     <NoWarn>$(NoWarn);NU1903</NoWarn>
   </PropertyGroup>
+
+  <!-- Accepted-risk advisories on SixLabors.ImageSharp 3.1.12: the pin is
+       deliberate - 3.2.0+ enforces a paid-license build check and 4.x is a
+       major API rewrite (see AGENTS.md NuGet Pins). Both advisories are
+       moderate-severity ReDoS/denial-of-service issues in image parsing
+       paths Sphene uses for trusted local textures only. -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-gwg2-r3hj-4w44" />
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-wmxv-xphr-5c9g" />
+  </ItemGroup>
 
   <ItemGroup>
     <Compile Remove="PlayerData/Export/**" />
@@ -99,6 +109,7 @@
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Protocols.MessagePack" Version="10.0.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.*" />
     <PackageReference Include="Glamourer.Api" Version="2.8.2" />
+    <PackageReference Include="Markdig" Version="1.4.2" />
     <PackageReference Include="NReco.Logging.File" Version="1.2.2" />
     <PackageReference Include="Penumbra.Api" Version="5.19.2" />
     <PackageReference Include="Penumbra.String" Version="1.0.8" />
@@ -139,6 +150,10 @@
       <HintPath>$(DalamudLibPath)CheapLoc.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="TerraFX.Interop.Windows">
+      <HintPath>$(DalamudLibPath)TerraFX.Interop.Windows.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
@@ -158,9 +173,15 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <EmbeddedResource Include="images/icon.png" />
+    <EmbeddedResource Include="images/supporter_halo.webp" />
+    <EmbeddedResource Include="images/plugins/*.png" />
     <EmbeddedResource Include="Resources/Sounds/not1.wav" />
     <EmbeddedResource Include="Resources/Sounds/not2.wav" />
     <EmbeddedResource Include="Resources/Sounds/not3.wav" />
+    <!-- Precompiled nameplate mask pixel shader (npsh-<sourceHash>.dxbc).
+         Refresh by copying the file the runtime writes to the plugin
+         config dir; the hash in the filename makes stale blobs a miss. -->
+    <EmbeddedResource Include="Resources/Shaders/npsh-*.dxbc" />
   </ItemGroup>
 
 </Project>

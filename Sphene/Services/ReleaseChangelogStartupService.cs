@@ -52,7 +52,15 @@ public sealed class ReleaseChangelogStartupService : IHostedService, IMediatorSu
             var lastSeen = _configService.Current.LastSeenVersionChangelog ?? string.Empty;
             _logger.LogDebug("ReleaseChangelogStartupService: current={current}, lastSeen={last}", currentVersion, lastSeen);
 
-            if (ShouldShowChangelog(version, lastSeen))
+            // Fresh installs go through the first-run setup wizard instead -
+            // the release notes popup would steal focus from the intro flow.
+            if (string.IsNullOrWhiteSpace(lastSeen) && !_configService.Current.AcceptedAgreement)
+            {
+                _configService.Current.LastSeenVersionChangelog = currentVersion;
+                _configService.Save();
+                _logger.LogDebug("First-run setup in progress; release changelog suppressed for {version}", currentVersion);
+            }
+            else if (ShouldShowChangelog(version, lastSeen))
             {
                 _pendingVersionString = currentVersion;
                 _logger.LogDebug("Release changelog pending until UI is initialized. version={version}", currentVersion);

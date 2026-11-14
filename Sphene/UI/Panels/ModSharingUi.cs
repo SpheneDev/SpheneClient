@@ -15,7 +15,7 @@ namespace Sphene.UI.Panels;
 
 public sealed class ModSharingUi : WindowMediatorSubscriberBase
 {
-    /// <summary>Flat sub-pages of the Mod Sharing section — shared by the standalone window rail and the Hub-embedded rail.</summary>
+    /// <summary>Flat sub-pages of the Mod Sharing section · shared by the standalone window rail and the Hub-embedded rail.</summary>
     public enum ModSharingPage
     {
         Send,
@@ -98,19 +98,29 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         _ => ModSharingPage.Activity
     };
 
-    /// <summary>Raised when the active mod sharing page changes through user navigation — args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
+    /// <summary>Raised when the active mod sharing page changes through user navigation · args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
     internal event Action<ModSharingPage, ModSharingPage, bool>? SubPageChanged;
 
-    /// <summary>The page the Hub-embedded mod sharing shows — read by the hub for its crumb. The standalone window has its own page state.</summary>
+    /// <summary>The page the Hub-embedded mod sharing shows · read by the hub for its crumb. The standalone window has its own page state.</summary>
     internal ModSharingPage ActiveSubPageValue => _embeddedPage;
 
     /// <summary>Label of the embedded mod sharing page for the hub breadcrumb.</summary>
     internal string ActiveCrumbLabel => PageLabel(_embeddedPage);
 
-    /// <summary>Applies a page to the Hub-embedded mod sharing without recording it — used for hub-driven restores.</summary>
+    /// <summary>Applies a page to the Hub-embedded mod sharing without recording it · used for hub-driven restores.</summary>
     internal void ApplySubPageQuiet(ModSharingPage page)
     {
         _embeddedPage = page;
+    }
+
+    /// <summary>
+    /// Fresh entry into the Hub-embedded mod sharing lands on the send page  · 
+    /// the embedded surface doesn't resurrect its last tab on a new visit.
+    /// History restores (SubPage on the hub location) bypass this.
+    /// </summary>
+    internal void ResetEmbeddedNavigation()
+    {
+        _embeddedPage = ModSharingPage.Send;
     }
 
     private void SetPage(ModSharingPage page)
@@ -140,7 +150,10 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
 
         void SidebarButton(string label, FontAwesomeIcon icon, ModSharingPage page, Vector4 accent)
         {
-            if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activePage == page, accent))
+            // one shared flyout id · only the active row may show it, or a
+            // visited sibling would display the wrong page's intro.
+            if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activePage == page, accent,
+                    helpId: _activePage == page ? "modsharing" : null))
             {
                 SetPage(page);
             }
@@ -156,7 +169,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The mod sharing nav rendered inside the Sphene Hub rail — same items
+    /// The mod sharing nav rendered inside the Sphene Hub rail · same items
     /// as the standalone rail plus a pop-out shortcut so the windowed section
     /// stays one click away.
     /// </summary>
@@ -183,12 +196,21 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         }
     }
 
+    /// <summary>The Mod Sharing "?" flyout · shared by the hub rail's nav
+    /// help dock and the embedded page registration.</summary>
+    internal static void ModSharingHelpContent()
+    {
+        SpheneUI.Text.MutedWrapped("Send and receive mod files between paired users - packages, history and pending transfers.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+    }
+
     /// <summary>
     /// The active mod sharing page rendered inside an already-scrollable
-    /// container (the Sphene Hub nav content child) — no own scroll area.
+    /// container (the Sphene Hub nav content child) · no own scroll area.
     /// </summary>
     internal void DrawEmbeddedContent()
     {
+        SpheneUI.Layout.RegisterPageHelp("modsharing", ModSharingHelpContent);
+
         var previousScope = _embeddedScope;
         _embeddedScope = true;
         try
@@ -201,8 +223,35 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
         }
     }
 
+    private ModSharingPage? _lastDrawnEmbeddedPage;
+    private ModSharingPage? _lastDrawnStandalonePage;
+
+    public override void OnOpen()
+    {
+        base.OnOpen();
+        // Reopening starts at the page top · the scroll child keeps its
+        // offset across close/open, so the sentinel is cleared instead.
+        _lastDrawnStandalonePage = null;
+    }
+
     private void DrawPageContent()
     {
+        // Both surfaces share one scroll child each · switching pages keeps a
+        // stale scroll offset that shifts fresh content and leaves an empty
+        // tail. Snap back to the top so each page starts from its header.
+        if (_embeddedScope)
+        {
+            if (_lastDrawnEmbeddedPage != _activePage)
+            {
+                _lastDrawnEmbeddedPage = _activePage;
+                ImGui.SetScrollY(0f);
+            }
+        }
+        else if (_lastDrawnStandalonePage != _activePage)
+        {
+            _lastDrawnStandalonePage = _activePage;
+            ImGui.SetScrollY(0f);
+        }
         switch (_activePage)
         {
             case ModSharingPage.Send:
@@ -220,9 +269,9 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
     private void DrawReceivePage()
     {
         var accent = SpheneUI.Palette.NetworkActive;
-        // The page intro belongs above everything — including this options card.
+        // The page intro belongs above everything · including this options card.
         SpheneUI.Text.PageIntro(
-            "Mods shared with you by paired users — install or discard them here.");
+            "Mods shared with you by paired users · install or discard them here.");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.SectionCard(() =>
         {
@@ -240,7 +289,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
 
         if (!_configService.Current.AllowReceivingPenumbraMods)
         {
-            SpheneUI.Layout.Callout("Receiving mod packages is currently disabled — enable it above to review pending packages.",
+            SpheneUI.Layout.Callout("Receiving mod packages is currently disabled · enable it above to review pending packages.",
                 FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
             SpheneUI.Layout.VerticalSpace();
         }

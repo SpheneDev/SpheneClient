@@ -63,7 +63,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     // Lazily resolved per visible mod row: meta.json details + optional artwork.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<ShrinkU.Services.PenumbraIpc.ModMetadata?>> _modMetaTasks
         = new(StringComparer.OrdinalIgnoreCase);
-    // Last decoded avatar bytes per user — a new array instance means the
+    // Last decoded avatar bytes per user · a new array instance means the
     // profile was (re)fetched and the cached texture must be evicted.
     private readonly Dictionary<string, byte[]> _avatarBytes = new(StringComparer.Ordinal);
     private float _sendTailReserve = -1f;
@@ -108,7 +108,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         _shrinkuPenumbraIpc.ModPathChanged += OnPenumbraModPathChanged;
     }
 
-    // AlwaysAutoResize fights the fold animation — the window would not shrink.
+    // AlwaysAutoResize fights the fold animation · the window would not shrink.
     protected override bool ChromeCollapsible => false;
 
     private void OnOpenMessage(OpenSendPenumbraModWindow message)
@@ -166,7 +166,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         var style = ImGui.GetStyle();
         var navAvail = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
         // Diagnostics: a nonzero host scroll range here is the residual scroll
-        // behind the wheel jitter — logged on change so /xllog shows it.
+        // behind the wheel jitter · logged on change so /xllog shows it.
         var hostScroll = ImGui.GetScrollY();
         var hostMax = ImGui.GetScrollMaxY();
         if (MathF.Abs(hostScroll - _debugHostScroll) > 0.5f
@@ -198,19 +198,21 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         ImGui.PopStyleVar();
         if (regionBegun)
         {
-            // EndTable appends ItemSpacing after the last row — keep the bound
+            // EndTable appends ItemSpacing after the last row · keep the bound
             // that far inside the clip edge or the region's own scrollMax
             // stays a few px positive and chaining can nudge it.
             var colBottom = ImGui.GetCursorScreenPos().Y + regionH - style.ItemSpacing.Y - scale;
 
             if (!isEmbedded)
             {
-                SpheneUI.Text.PageHeader("Send Mods",
-                    "Pick the Penumbra mods to package, choose the recipients, then share.");
+                SpheneUI.Layout.PageHeader("Send Mods", "sendmods", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Pick the Penumbra mods to package, choose the recipients, then share.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
             }
             else
             {
-                // Embedded: the page title already lives in the hub breadcrumb —
+                // Embedded: the page title already lives in the hub breadcrumb  · 
                 // the uniform page intro is a single muted line.
                 SpheneUI.Text.PageIntro(
                     "Pick the Penumbra mods to package, choose the recipients, then share.");
@@ -234,7 +236,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         DrawSendFooterBar(scale, accent, idSuffix);
 
         // Self-calibrating reserve: the leftover under the last row must cover
-        // the host scroll area's trailing inset — anything less leaves a few
+        // the host scroll area's trailing inset · anything less leaves a few
         // px of scrollMax that shows as a scroll/snap jitter on wheel input.
         var leftover = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
         var targetTail = style.ItemSpacing.Y
@@ -300,31 +302,32 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        if (ImGui.BeginTable("SendModLayout" + idSuffix, 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
+        using var layoutTable = SpheneUI.Tables.Begin("SendModLayout" + idSuffix,
+            2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp);
+        if (layoutTable.Success)
         {
-            ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthStretch, 0.55f);
-            ImGui.TableSetupColumn("Send", ImGuiTableColumnFlags.WidthStretch, 0.45f);
+            SpheneUI.Tables.Column("Library", ImGuiTableColumnFlags.WidthStretch, 0.55f);
+            SpheneUI.Tables.Column("Send", ImGuiTableColumnFlags.WidthStretch, 0.45f);
 
-            ImGui.TableNextRow();
+            SpheneUI.Tables.Row();
 
-            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Tables.SetColumn(0);
             SpheneUI.Layout.SectionCard(
                 () => DrawModLibrary(filtered, accent, idSuffix, colBottom),
                 title: "1 · Mod Library", accentColor: accent);
 
-            ImGui.TableSetColumnIndex(1);
+            SpheneUI.Tables.SetColumn(1);
             var recipientsCardBottom = MathF.Max(ImGui.GetCursorScreenPos().Y + 170f * scale, colBottom);
             SpheneUI.Layout.SectionCard(
                 () => DrawRecipientPicker(candidatePairs, recipientsCardBottom, accent, idSuffix),
                 title: "2 · Recipients", accentColor: accent);
 
-            ImGui.EndTable();
             SpheneUI.Lint.CheckFillBottom(colBottom, "SendMods.Table");
         }
     }
 
     /// <summary>
-    /// The user's Sphene profile picture as a cached texture — null while the
+    /// The user's Sphene profile picture as a cached texture · null while the
     /// profile or texture is still loading. Evicts the cache entry when the
     /// profile data instance changes (avatar updated/refetched).
     /// </summary>
@@ -439,7 +442,8 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         {
             if (candidatePairs.Count == 0)
             {
-                SpheneUI.Text.Muted("No paired users available for mod delivery.");
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.Users, "No recipients",
+                    "Pair with someone to send them mods.");
             }
             else
             {

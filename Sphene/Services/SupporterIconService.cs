@@ -13,6 +13,9 @@ namespace Sphene.Services;
 
 public sealed class SupporterIconService : IDisposable
 {
+    public const string BuiltInHaloId = "builtin:sphene-halo";
+    public const string BuiltInHaloName = "Sphene Halo";
+
     private enum IconLoadState { Loading, Failed, Ready }
 
     private sealed class SupporterIconEntry
@@ -69,7 +72,7 @@ public sealed class SupporterIconService : IDisposable
 
     public bool IsIconKnown(string? iconId)
     {
-        if (string.IsNullOrWhiteSpace(iconId))
+        if (string.IsNullOrWhiteSpace(iconId) || IsBuiltInHalo(iconId))
             return true;
         var catalog = GetCatalog();
         for (var i = 0; i < catalog.Count; i++)
@@ -79,6 +82,10 @@ public sealed class SupporterIconService : IDisposable
         }
         return false;
     }
+
+    /// <summary>Recognizes the client-bundled supporter icon identifier.</summary>
+    public static bool IsBuiltInHalo(string? iconId)
+        => string.Equals(iconId, BuiltInHaloId, StringComparison.OrdinalIgnoreCase);
 
     private void EnsureCatalog()
     {
@@ -108,10 +115,17 @@ public sealed class SupporterIconService : IDisposable
     {
         try
         {
-            var bytes = await _apiController.SupporterGetIconFile(iconId).ConfigureAwait(false);
+            var bytes = IsBuiltInHalo(iconId)
+                ? await Task.Run(ReadBuiltInHalo).ConfigureAwait(false)
+                : await _apiController.SupporterGetIconFile(iconId).ConfigureAwait(false);
             var icon = bytes == null || bytes.Length == 0 ? null : await DecodeIconAsync(bytes).ConfigureAwait(false);
             lock (_iconsLock)
             {
+                if (_disposed)
+                {
+                    icon?.Dispose();
+                    return;
+                }
                 entry.Icon = icon;
                 entry.State = icon == null ? IconLoadState.Failed : IconLoadState.Ready;
             }
@@ -125,6 +139,21 @@ public sealed class SupporterIconService : IDisposable
                 entry.State = IconLoadState.Failed;
             }
         }
+    }
+
+    private static byte[]? ReadBuiltInHalo()
+    {
+        var assembly = typeof(SupporterIconService).Assembly;
+        var name = Array.Find(assembly.GetManifestResourceNames(),
+            n => n.EndsWith("images.supporter_halo.webp", StringComparison.OrdinalIgnoreCase));
+        if (name == null)
+            return null;
+        using var stream = assembly.GetManifestResourceStream(name);
+        if (stream == null)
+            return null;
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        return bytes.ToArray();
     }
 
     private async Task<SupporterAnimatedIcon?> DecodeIconAsync(byte[] bytes)

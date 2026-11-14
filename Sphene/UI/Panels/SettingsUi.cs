@@ -1,5 +1,4 @@
 using Dalamud.Bindings.ImGui;
-using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.ImGuiFileDialog;
@@ -61,28 +60,25 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly FileUploadManager _fileTransferManager;
     private readonly FileTransferOrchestrator _fileTransferOrchestrator;
     private readonly IpcManager _ipcManager;
-    private readonly PairManager _pairManager;
     private readonly PerformanceCollectorService _performanceCollector;
     private readonly PlayerPerformanceConfigService _playerPerformanceConfigService;
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly UiSharedService _uiShared;
+    private readonly PluginInstallerService _pluginInstaller;
     private readonly ShrinkUHostService _shrinkUHostService;
     private readonly ReleaseChangelogUi _releaseChangelogUi;
-    private readonly SupporterIconService _supporterIconService;
-    private readonly SupporterNameplateService _supporterNameplateService;
+    private readonly SupporterNameplateStudioUi _supporterStudio;
     private readonly GameSoundManager _gameSoundManager;
     private readonly FileDialogManager _fileDialogManager;
     private readonly string _shrinkUVersion;
     private readonly IProgress<(int, int, FileCacheEntity)> _validationProgress;
     private (int, int, FileCacheEntity) _currentProgress;
-    private const string SeaOfStarsRepoUrl = "https://raw.githubusercontent.com/Ottermandias/SeaOfStars/refs/heads/main/repo.json";
     private const string SeaOfStarsRepoName = "SeaOfStars Repo";
+    private const string BypassEmoteRepoName = "BypassEmote Repo";
     private bool _deleteAccountPopupModalShown = false;
     private bool _deleteFilesPopupModalShown = false;
     private string _lastTab = string.Empty;
 
-    private bool? _notesSuccessfullyApplied = null;
-    private bool _overwriteExistingLabels = false;
     private bool _readClearCache = false;
     private bool _showAdvancedCharacterMode = false;
     private bool _styleguideToggle = true;
@@ -92,8 +88,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private static readonly string[] StyleguideComboItems = ["First option", "Second option", "Third option"];
     private int _selectedSecretKeyForNewCharacter = -1;
     private string _customSecretKeyInput = string.Empty;
-    private int _selectedEntry = -1;
-    private string _uidToAddForIgnore = string.Empty;
     private CancellationTokenSource? _validationCts;
     private Task<List<FileCacheEntity>>? _validationTask;
     private bool _wasOpen = false;
@@ -106,8 +100,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
     internal enum SettingsPage
     {
         Home,
+        Account,
         Connectivity,
-        PeopleNotes,
         Display,
         Theme,
         Alerts,
@@ -117,6 +111,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SyncBehavior,
         Acknowledgment,
         Supporter,
+        SupporterNameplate,
         ReleaseNotes,
         Debug
     }
@@ -129,7 +124,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private bool _embeddedScope;
 
     /// <summary>
-    /// The active page of the surface currently drawing or navigating — the
+    /// The active page of the surface currently drawing or navigating · the
     /// standalone window and the Hub-embedded settings each keep their own
     /// page and back/forward history so neither hijacks the other.
     /// </summary>
@@ -187,8 +182,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private string _backupShrinkUPath = string.Empty;
 
     public SettingsUi(ILogger<SettingsUi> logger,
-        UiSharedService uiShared, SpheneConfigService configService,
-        PairManager pairManager,
+        UiSharedService uiShared, PluginInstallerService pluginInstaller, SpheneConfigService configService,
         ServerConfigurationManager serverConfigurationManager,
         PlayerPerformanceConfigService playerPerformanceConfigService,
         SpheneMediator mediator, PerformanceCollectorService performanceCollector,
@@ -200,15 +194,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
         ShrinkUHostService shrinkUHostService,
         DalamudUtilService dalamudUtilService, HttpClient httpClient,
         ReleaseChangelogUi releaseChangelogUi,
-        SupporterIconService supporterIconService,
-        SupporterNameplateService supporterNameplateService,
+        SupporterNameplateStudioUi supporterStudio,
         GameSoundManager gameSoundManager,
         FileDialogManager fileDialogManager,
         ConfigBackupService configBackupService,
         ShrinkUConfigService shrinkUConfigService) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
-        _pairManager = pairManager;
         _serverConfigurationManager = serverConfigurationManager;
         _playerPerformanceConfigService = playerPerformanceConfigService;
         _performanceCollector = performanceCollector;
@@ -222,10 +214,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _httpClient = httpClient;
         _fileCompactor = fileCompactor;
         _uiShared = uiShared;
+        _pluginInstaller = pluginInstaller;
         _shrinkUHostService = shrinkUHostService;
         _releaseChangelogUi = releaseChangelogUi;
-        _supporterIconService = supporterIconService;
-        _supporterNameplateService = supporterNameplateService;
+        _supporterStudio = supporterStudio;
         _gameSoundManager = gameSoundManager;
         _fileDialogManager = fileDialogManager;
         _configBackupService = configBackupService;
@@ -277,6 +269,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
         
         // Subscribe to theme changes to mark unsaved changes across all tabs
         SpheneTheme.Current.ThemeChanged += OnThemeChanged;
+        // Reopening starts at the page top · the scroll child keeps its
+        // offset across close/open, so the sentinel is cleared instead.
+        _lastDrawnStandalonePage = null;
     }
 
     public override void OnClose()
@@ -292,7 +287,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
 
         _uiShared.EditTrackerPosition = false;
-        _uidToAddForIgnore = string.Empty;
         _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
         _downloadServersTask = null;
         _speedTestTask = null;
@@ -407,16 +401,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SpheneUI.Text.SectionHeader("Blocked Transfers");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
-        if (ImGui.BeginTable("TransfersTable", 2, ImGuiTableFlags.SizingStretchProp))
+        using var transfersTable = SpheneUI.Tables.Begin("TransfersTable", 2, ImGuiTableFlags.SizingStretchProp);
+        if (transfersTable.Success)
         {
-            ImGui.TableSetupColumn("Hash/Filename", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableSetupColumn("Forbidden by", ImGuiTableColumnFlags.WidthFixed, 120);
+            SpheneUI.Tables.Column("Hash/Filename", ImGuiTableColumnFlags.WidthStretch);
+            SpheneUI.Tables.Column("Forbidden by", ImGuiTableColumnFlags.WidthFixed, 120);
 
-            ImGui.TableHeadersRow();
+            SpheneUI.Tables.HeaderRow();
 
             foreach (var item in _fileTransferOrchestrator.ForbiddenTransfers)
             {
-                ImGui.TableNextColumn();
+                SpheneUI.Tables.BeginRow();
                 if (item is UploadFileTransfer transfer)
                 {
                     SpheneUI.Text.Plain(transfer.LocalFile);
@@ -425,10 +420,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     SpheneUI.Text.Plain(item.Hash);
                 }
-                ImGui.TableNextColumn();
+                SpheneUI.Tables.NextColumn();
                 SpheneUI.Text.Plain(item.ForbiddenBy);
             }
-            ImGui.EndTable();
         }
     }
 
@@ -436,7 +430,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Transfers", "Control transfer limits, monitor behavior, and transmission visuals.");
 
-        DrawSettingsCard("Transfer Limits", () =>
+        DrawSettingsCard("Transfer Limits", FontAwesomeIcon.SlidersH, () =>
         {
         ImGui.AlignTextToFramePadding();
         SpheneUI.Text.Plain("Global Receive Limit");
@@ -454,7 +448,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         TransfersOptionBlock.DrawUseAlternativeTransmissionMethodOption(_configService, _uiShared, "TransfersUseAlternativeTransmissionMethod");
         });
 
-        DrawSettingsCard("Transfer Monitor", () =>
+        DrawSettingsCard("Transfer Monitor", FontAwesomeIcon.ChartLine, () =>
         {
         var showTransferWindow = TransfersOptionBlock.DrawShowSeparateTransmissionMonitorOption(_configService, _uiShared, "TransfersShowSeparateTransmissionMonitor");
         using (ImRaii.Disabled(!showTransferWindow))
@@ -486,7 +480,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         if (_apiController.IsConnected)
         {
-            DrawSettingsCard("Speed Test to Servers", () =>
+            DrawSettingsCard("Speed Test to Servers", FontAwesomeIcon.TachometerAlt, () =>
             {
             using var tree = ImRaii.TreeNode("Speed Test to Servers");
             if (tree)
@@ -504,7 +498,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     if (_speedTestTask == null || _speedTestTask.IsCompleted)
                     {
-                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowRight, "Start Speedtest"))
+                        if (SpheneUI.Controls.PrimaryButton("Start Speedtest", FontAwesomeIcon.ArrowRight))
                         {
                             _speedTestTask = RunSpeedTest(_downloadServersTask.Result!, _speedTestCts?.Token ?? CancellationToken.None);
                         }
@@ -541,7 +535,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             });
         }
 
-        DrawSettingsCard("Current Transfers", () =>
+        DrawSettingsCard("Current Transfers", FontAwesomeIcon.ExchangeAlt, () =>
         {
         var transferTabs = new List<string>(2);
         if (ApiController.ServerState is ServerState.Connected)
@@ -557,37 +551,34 @@ public class SettingsUi : WindowMediatorSubscriberBase
             case "Transfers":
             {
                 SpheneUI.Text.Plain("Uploads");
-                if (ImGui.BeginTable("UploadsTable", 3, ImGuiTableFlags.SizingStretchProp))
+                using var uploadsTable = SpheneUI.Tables.Begin("UploadsTable", 3, ImGuiTableFlags.SizingStretchProp);
+                if (uploadsTable.Success)
                 {
-                    ImGui.TableSetupColumn("File", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("Uploaded", ImGuiTableColumnFlags.WidthFixed, 80);
-                    ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
-                    ImGui.TableHeadersRow();
+                    SpheneUI.Tables.Column("File", ImGuiTableColumnFlags.WidthStretch);
+                    SpheneUI.Tables.Column("Uploaded", ImGuiTableColumnFlags.WidthFixed, 80);
+                    SpheneUI.Tables.Column("Size", ImGuiTableColumnFlags.WidthFixed, 80);
+                    SpheneUI.Tables.HeaderRow();
                     foreach (var transfer in _fileTransferManager.CurrentUploads.ToArray())
                     {
                         var color = SpheneUI.Colors.UploadProgress((transfer.Transferred, transfer.Total));
                         var col = ImRaii.PushColor(ImGuiCol.Text, color);
-                        ImGui.TableNextColumn();
-                        SpheneUI.Text.Plain(transfer.Hash);
-                        ImGui.TableNextColumn();
-                        SpheneUI.Text.Plain(UiSharedService.ByteToString(transfer.Transferred));
-                        ImGui.TableNextColumn();
-                        SpheneUI.Text.Plain(UiSharedService.ByteToString(transfer.Total));
+                        SpheneUI.Tables.Row();
+                        SpheneUI.Tables.Cell(transfer.Hash);
+                        SpheneUI.Tables.Cell(UiSharedService.ByteToString(transfer.Transferred));
+                        SpheneUI.Tables.Cell(UiSharedService.ByteToString(transfer.Total));
                         col.Dispose();
-                        ImGui.TableNextRow();
                     }
-
-                    ImGui.EndTable();
                 }
                 SpheneUI.Layout.Separator();
                 SpheneUI.Text.Plain("Downloads");
-                if (ImGui.BeginTable("DownloadsTable", 4, ImGuiTableFlags.SizingStretchProp))
+                using var downloadsTable = SpheneUI.Tables.Begin("DownloadsTable", 4, ImGuiTableFlags.SizingStretchProp);
+                if (downloadsTable.Success)
                 {
-                    ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 100);
-                    ImGui.TableSetupColumn("Server", ImGuiTableColumnFlags.WidthStretch);
-                    ImGui.TableSetupColumn("Files", ImGuiTableColumnFlags.WidthFixed, 60);
-                    ImGui.TableSetupColumn("Download", ImGuiTableColumnFlags.WidthFixed, 100);
-                    ImGui.TableHeadersRow();
+                    SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthFixed, 100);
+                    SpheneUI.Tables.Column("Server", ImGuiTableColumnFlags.WidthStretch);
+                    SpheneUI.Tables.Column("Files", ImGuiTableColumnFlags.WidthFixed, 60);
+                    SpheneUI.Tables.Column("Download", ImGuiTableColumnFlags.WidthFixed, 100);
+                    SpheneUI.Tables.HeaderRow();
 
                     foreach (var transfer in _currentDownloads.ToArray())
                     {
@@ -595,22 +586,15 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         foreach (var entry in transfer.Value)
                         {
                             var color = SpheneUI.Colors.UploadProgress((entry.Value.TransferredBytes, entry.Value.TotalBytes));
-                            ImGui.TableNextColumn();
-                            SpheneUI.Text.Plain(userName);
-                            ImGui.TableNextColumn();
-                            SpheneUI.Text.Plain(entry.Key);
+                            SpheneUI.Tables.Row();
+                            SpheneUI.Tables.Cell(userName);
+                            SpheneUI.Tables.Cell(entry.Key);
                             var col = ImRaii.PushColor(ImGuiCol.Text, color);
-                            ImGui.TableNextColumn();
-                            SpheneUI.Text.Plain(entry.Value.TransferredFiles + "/" + entry.Value.TotalFiles);
-                            ImGui.TableNextColumn();
-                            SpheneUI.Text.Plain(UiSharedService.ByteToString(entry.Value.TransferredBytes) + "/" + UiSharedService.ByteToString(entry.Value.TotalBytes));
-                            ImGui.TableNextColumn();
+                            SpheneUI.Tables.Cell(entry.Value.TransferredFiles + "/" + entry.Value.TotalFiles);
+                            SpheneUI.Tables.Cell(UiSharedService.ByteToString(entry.Value.TransferredBytes) + "/" + UiSharedService.ByteToString(entry.Value.TotalBytes));
                             col.Dispose();
-                            ImGui.TableNextRow();
                         }
                     }
-
-                    ImGui.EndTable();
                 }
             }
             break;
@@ -707,15 +691,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawDebug()
     {
-        string pageLabel;
-#if IS_TEST_BUILD
-        pageLabel = "Debug Diagnostics";
-#else
-        pageLabel = "Diagnostics";
-#endif
-
-        DrawSettingsPageHeader(pageLabel, "Diagnostics and troubleshooting tools for sync, logs, and runtime status.");
-        DrawSettingsCard("Diagnostic Data", () =>
+        DrawSettingsPageHeader(DiagnosticsPageLabel, "Diagnostics and troubleshooting tools for sync, logs, and runtime status.");
+        DrawSettingsCard("Diagnostic Data", FontAwesomeIcon.Database, () =>
         {
 #if IS_TEST_BUILD
         if (LastCreatedCharacterData != null && SpheneUI.Controls.CollapsibleSection("Last created character data"))
@@ -747,25 +724,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DebugOptionBlock.DrawLogLevelOption(_configService, _uiShared, "DebugLogLevel");
         });
 
-        DrawSettingsCard("Performance Metrics", () =>
+        DrawSettingsCard("Performance Metrics", FontAwesomeIcon.ChartBar, () =>
         {
         bool logPerformance = DebugOptionBlock.DrawLogNetworkPerformanceMetricsOption(_configService, _uiShared, "DebugLogNetworkPerformanceMetrics");
         DebugOptionBlock.DrawPrintNetworkMetricsActions(_uiShared, logPerformance, () => _performanceCollector.PrintPerformanceStats(), () => _performanceCollector.PrintPerformanceStats(60), "DebugPrintNetworkMetricsActions");
         DebugOptionBlock.DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(_configService, _uiShared, "DebugDoNotNotifyForModifiedGameFilesOrEnabledLod");
         });
 
-        DrawSettingsCard("Diagnostic Windows", () =>
+        DrawSettingsCard("Diagnostic Windows", FontAwesomeIcon.Tools, () =>
         {
         DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
         DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
         }, "Open dedicated windows for acknowledgment and status monitoring.");
 
-        DrawSettingsCard("Active Mismatch Tracker", () =>
+        DrawSettingsCard("Active Mismatch Tracker", FontAwesomeIcon.Search, () =>
         {
         DebugOptionBlock.DrawActiveMismatchTrackerFilterOptions(_configService, _uiShared, "DebugMismatchTrackerFilters");
         }, "Control which paths and file types are recorded and shown.");
 
-        DrawSettingsCard("Design Lint", () =>
+        DrawSettingsCard("Supporter Nameplates", FontAwesomeIcon.Crown, () =>
+        {
+            SupporterNameplateOptionBlock.DrawSupporterDebugOverlayOption(_configService, "DebugSupporterDebugOverlay");
+            SupporterNameplateOptionBlock.DrawSupporterDebugOverlayFiltersOption(_configService, "DebugSupporterDebugOverlayFilters");
+            SupporterNameplateOptionBlock.DrawSupporterTestRectOption(_configService, "DebugSupporterTestRect");
+            SupporterNameplateOptionBlock.DrawSupporterDebugLogOption(_configService, "DebugSupporterDebugLog");
+            SupporterNameplateOptionBlock.DrawSupporterAnchorExtrapolateOption(_configService, "DebugSupporterAnchorExtrapolate");
+            SupporterNameplateOptionBlock.DrawSupporterDebugInfoWindowOption(_configService, "DebugSupporterInfoWindow");
+            SupporterNameplateOptionBlock.DrawSupporterNameplateTuningOption(_configService, "DebugSupporterNameplateTuning");
+        }, "Development diagnostics for supporter nameplate text masking · block frames, line bands, mask quads and anchor tuning.");
+
+        DrawSettingsCard("Design Lint", FontAwesomeIcon.ClipboardCheck, () =>
         {
         var lintEnabled = SpheneUI.Lint.Enabled;
         if (SpheneUI.Controls.Toggle("Highlight layout violations##designLintEnabled", ref lintEnabled))
@@ -789,13 +777,13 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 {
                     var violation = violations[i];
                     SpheneUI.Text.ColoredWrapped(
-                        $"• {violation.Context} — {violation.Rule}: {violation.Detail}", ImGuiColors.DalamudGrey3);
+                        $"• {violation.Context} · {violation.Rule}: {violation.Detail}", ImGuiColors.DalamudGrey3);
                 }
             }
         }
         }, "Runtime checks that flag controls poking past the shared card edge.");
 
-        DrawSettingsCard("Design System", () =>
+        DrawSettingsCard("Design System", FontAwesomeIcon.Swatchbook, () =>
         {
         SpheneUI.Text.SectionHeader("Text & Icons");
         SpheneUI.Text.Plain("Plain body text");
@@ -836,7 +824,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             "Sphene stores downloaded files from paired users to improve loading speed and reduce repeated downloads. Storage is self-managed by size limit.");
 
         _uiShared.DrawFileScanState();
-        DrawSettingsCard("Monitoring", () =>
+        DrawSettingsCard("Monitoring", FontAwesomeIcon.Eye, () =>
         {
         ImGui.AlignTextToFramePadding();
         SpheneUI.Text.Plain("Monitoring Penumbra Folder: " + (_cacheMonitor.PenumbraWatcher?.Path ?? "Not monitoring"));
@@ -888,7 +876,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         });
 
-        DrawSettingsCard("Storage & Compactor", () =>
+        DrawSettingsCard("Storage & Compactor", FontAwesomeIcon.FileArchive, () =>
         {
         _uiShared.DrawCacheDirectorySetting();
 
@@ -950,11 +938,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
         });
 
-        DrawSettingsCard("Storage Validation", () =>
+        DrawSettingsCard("Storage Validation", FontAwesomeIcon.CheckCircle, () =>
         {
         using (ImRaii.Disabled(_validationTask != null && !_validationTask.IsCompleted))
         {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Start File Storage Validation"))
+            if (SpheneUI.Controls.PrimaryButton("Start File Storage Validation", FontAwesomeIcon.Check))
             {
                 _validationCts?.Cancel();
                 _validationCts?.Dispose();
@@ -990,7 +978,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         }, "Validation checks local storage integrity and removes invalid files. This can take time and may be CPU and disk intensive.");
 
-        DrawSettingsCard("Clear Local Storage", () =>
+        DrawSettingsCard("Clear Local Storage", FontAwesomeIcon.TrashAlt, () =>
         {
         ImGui.Indent();
         SpheneUI.Text.ColoredWrapped("Clearing the local storage forces a re-download of all synced data:" + Environment.NewLine
@@ -1039,7 +1027,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Performance",
             "Configure warning indicators and automatic actions for performance-heavy synced players.");
-        DrawSettingsCard("Warnings & Indicators", () =>
+        DrawSettingsCard("Warnings & Indicators", FontAwesomeIcon.ExclamationTriangle, () =>
         {
             bool showPerformanceIndicator = PerformanceOptionBlock.DrawShowPerformanceIndicatorOption(_playerPerformanceConfigService, _uiShared, "PerformanceShowPerformanceIndicator");
             bool warnOnExceedingThresholds = PerformanceOptionBlock.DrawWarnOnLoadingInPlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarnOnLoadingInPlayersExceedingThresholds");
@@ -1054,7 +1042,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 PerformanceOptionBlock.DrawWarningTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceWarningTriangleThreshold");
             }
         });
-        DrawSettingsCard("Auto Pause", () =>
+        DrawSettingsCard("Auto Pause", FontAwesomeIcon.PauseCircle, () =>
         {
             bool autoPause = PerformanceOptionBlock.DrawAutomaticallyPausePlayersExceedingThresholdsOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutomaticallyPausePlayersExceedingThresholds");
             using (ImRaii.Disabled(!autoPause))
@@ -1065,81 +1053,78 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 PerformanceOptionBlock.DrawAutoPauseTriangleThresholdOption(_playerPerformanceConfigService, _uiShared, "PerformanceAutoPauseTriangleThreshold");
             }
         });
-        DrawSettingsCard("Whitelisted Users", () =>
-        {
-            var addUidTrailing = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Plus, "Add handle to whitelist")
-                + ImGui.GetStyle().ItemSpacing.X + SpheneUI.Icons.Size(FontAwesomeIcon.QuestionCircle).X
-                + ImGui.GetStyle().ItemSpacing.X;
-            ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX() - addUidTrailing);
-        SpheneUI.Controls.InputText("##ignoreuid", ref _uidToAddForIgnore, 20);
-        ImGui.SameLine();
-        using (ImRaii.Disabled(string.IsNullOrEmpty(_uidToAddForIgnore)))
-        {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Add handle to whitelist"))
-            {
-                if (!_playerPerformanceConfigService.Current.UIDsToIgnore.Contains(_uidToAddForIgnore, StringComparer.Ordinal))
-                {
-                    _playerPerformanceConfigService.Current.UIDsToIgnore.Add(_uidToAddForIgnore);
-                    _playerPerformanceConfigService.Save();
-                }
-                _uidToAddForIgnore = string.Empty;
-            }
-        }
-        SpheneUI.Controls.HelpText("Hint: handles are case sensitive.");
-        var playerList = _playerPerformanceConfigService.Current.UIDsToIgnore;
-        ImGui.SetNextItemWidth(ClampSettingsItemWidth(420f, 200f));
-        using (var lb = ImRaii.ListBox("Handle whitelist"))
-        {
-            if (lb)
-            {
-                for (int i = 0; i < playerList.Count; i++)
-                {
-                    bool shouldBeSelected = _selectedEntry == i;
-                    var identifier = playerList[i];
-                    
-                    // Try to get user note by finding the pair
-                    var pair = _pairManager.GetPairByUID(identifier);
-                    if (pair == null)
-                    {
-                        // If not found by UID, try to find by alias
-                        pair = _pairManager.DirectPairs.FirstOrDefault(p => 
-                            string.Equals(p.UserData.Alias, identifier, StringComparison.Ordinal));
-                    }
-                    
-                    var displayText = pair?.UserData.PreferredName ?? identifier;
-                    var note = pair?.GetNote();
-                    if (!string.IsNullOrEmpty(note))
-                    {
-                        displayText = $"{displayText} ({note})";
-                    }
-                    
-                    if (SpheneUI.Controls.Selectable(displayText + "##" + i, shouldBeSelected))
-                    {
-                        _selectedEntry = i;
-                    }
-                }
-            }
-        }
-        using (ImRaii.Disabled(_selectedEntry == -1))
-        {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Delete selected entry"))
-            {
-                _playerPerformanceConfigService.Current.UIDsToIgnore.RemoveAt(_selectedEntry);
-                _selectedEntry = -1;
-                _playerPerformanceConfigService.Save();
-            }
-        }
-        }, "Entries below are ignored for warnings and auto-pause operations.");
     }
 
-    private void DrawServerConfiguration()
+    private void DrawConnectivityPage()
     {
-        DrawSettingsPageHeader("Connectivity", "Manage server connection, account actions, and service-related settings.");
+        DrawSettingsPageHeader("Connectivity", "Manage the service connection, transport and protocol settings.");
+
+        DrawSettingsCard("Service & Connection", FontAwesomeIcon.Plug, () =>
+        {
+            ConnectivityOptionBlock.DrawSendStatisticalCensusDataOption(_serverConfigurationManager, _uiShared, "ConnectivitySendStatisticalCensusData");
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
+
+            var connServer = DrawServicePicker();
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+            SpheneUI.Text.Wrapped($"Service: {connServer.ServerName}");
+            SpheneUI.Text.Wrapped($"URI: {connServer.ServerUri}");
+            SpheneUI.Text.Wrapped($"Status: {_apiController.ServerState}");
+            SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+            DrawConnectionOverview();
+        });
+
+        DrawSettingsCard("Service Configuration", FontAwesomeIcon.Server, () =>
+        {
+            var cfgServer = _serverConfigurationManager.GetServerByIndex(_lastSelectedServerIndex);
+            DrawServiceConfigurationOptions(cfgServer, cfgServer.UseOAuth2);
+        });
+    }
+
+    private void DrawAccountPage()
+    {
+        DrawSettingsPageHeader("Account", "Manage your characters, authentication, default permissions and account actions.");
+
+        DrawSettingsCard("Characters & Login", FontAwesomeIcon.SignInAlt, () =>
+        {
+            var selectedServer = DrawServicePicker();
+            DrawCharacterManagement(selectedServer, _lastSelectedServerIndex, selectedServer.UseOAuth2);
+        }, "Characters listed here automatically connect to the selected service.");
+
+        var accountServer = _serverConfigurationManager.GetServerByIndex(_lastSelectedServerIndex);
+        if (!accountServer.UseOAuth2)
+        {
+            DrawSettingsCard("Secret Keys", FontAwesomeIcon.Key, () => DrawSecretKeyManagement(accountServer));
+        }
+
+        DrawSettingsCard("Default Permissions", FontAwesomeIcon.ShieldAlt, () => DrawDefaultPermissions(accountServer));
+
         if (ApiController.ServerAlive)
         {
-            DrawSettingsCard("Service Actions", () =>
-            {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+            DrawSettingsCard("Danger Zone", FontAwesomeIcon.ExclamationTriangle, DrawAccountDangerActions,
+                accent: ImGuiColors.DalamudRed);
+        }
+    }
+
+    private ServerStorage DrawServicePicker()
+    {
+        int idx = _uiShared.DrawServiceSelection();
+        if (_lastSelectedServerIndex != idx)
+        {
+            _uiShared.ResetOAuthTasksState();
+            _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
+            _secretKeysConversionTask = null;
+            _lastSelectedServerIndex = idx;
+        }
+        var selectedServer = _serverConfigurationManager.GetServerByIndex(idx);
+        if (selectedServer == _serverConfigurationManager.CurrentServer)
+        {
+            SpheneUI.Text.ColoredWrapped("For any changes to be applied to the current service you need to reconnect to the service.", ImGuiColors.DalamudYellow);
+        }
+        return selectedServer;
+    }
+
+    private void DrawAccountDangerActions()
+    {
             if (SpheneUI.Controls.Button("Delete all my files"))
             {
                 _deleteFilesPopupModalShown = true;
@@ -1204,54 +1189,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.SetScaledWindowSize(325);
                 SpheneUI.Popups.EndStyled();
             }
-            }, accent: ImGuiColors.DalamudRed);
-        }
+    }
 
-        DrawSettingsCard("Service & Character Settings", () =>
-        {
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-        ConnectivityOptionBlock.DrawSendStatisticalCensusDataOption(_serverConfigurationManager, _uiShared, "ConnectivitySendStatisticalCensusData");
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
-
-        int idx = _uiShared.DrawServiceSelection();
-        if (_lastSelectedServerIndex != idx)
-        {
-            _uiShared.ResetOAuthTasksState();
-            _secretKeysConversionCts = _secretKeysConversionCts.CancelRecreate();
-            _secretKeysConversionTask = null;
-            _lastSelectedServerIndex = idx;
-        }
-
-        SpheneUI.Layout.Space(SpheneUI.Spacing.X10);
-
-        var selectedServer = _serverConfigurationManager.GetServerByIndex(idx);
-        if (selectedServer == _serverConfigurationManager.CurrentServer)
-        {
-            SpheneUI.Text.ColoredWrapped("For any changes to be applied to the current service you need to reconnect to the service.", ImGuiColors.DalamudYellow);
-        }
-
-        bool useOauth = selectedServer.UseOAuth2;
-
-        var serverTabs = new List<string>(5) { "Overview", "Character Management" };
-        if (!useOauth)
-        {
-            serverTabs.Add("Secret Keys");
-        }
-        serverTabs.Add("Service Configuration");
-        serverTabs.Add("Permission Settings");
-        var serverTab = SpheneUI.Layout.TabStrip("serverTabs", serverTabs,
-            scrollIntoViewOnChange: true);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        switch (serverTabs[serverTab])
-        {
-            // Overview tab: quick status and actions
-            case "Overview":
-            {
-                SpheneUI.Text.Big("Network Overview");
-                SpheneUI.Text.Wrapped($"Service: {selectedServer.ServerName}");
-                SpheneUI.Text.Wrapped($"URI: {selectedServer.ServerUri}");
-                SpheneUI.Text.Wrapped($"Status: {_apiController.ServerState}");
-                SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
+    private void DrawConnectionOverview()
+    {
                 if (_apiController.IsConnected)
                 {
                     if (SpheneUI.Controls.Button("Disconnect from Service") && _serverConfigurationManager.CurrentServer != null)
@@ -1264,7 +1205,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    if (SpheneUI.Controls.Button("Connect to Service") && _serverConfigurationManager.CurrentServer != null)
+                    if (SpheneUI.Controls.PrimaryButton("Connect to Service", FontAwesomeIcon.Plug)
+                        && _serverConfigurationManager.CurrentServer != null)
                     {
                         _serverConfigurationManager.CurrentServer.FullPause = false;
                         _serverConfigurationManager.Save();
@@ -1273,11 +1215,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     SpheneUI.Controls.HelpText("Establish a connection to the selected service.");
                 }
 
-            }
-            break;
+    }
 
-            case "Character Management":
-            {
+    private void DrawCharacterManagement(ServerStorage selectedServer, int idx, bool useOauth)
+    {
                 // Primary authentication & character linking
                 if (selectedServer.SecretKeys.Any() || useOauth)
                 {
@@ -1421,8 +1362,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     {
                         SpheneUI.Controls.Toggle("Edit Mode", ref _showAdvancedCharacterMode);
                         SpheneUI.AttachTooltip("When enabled, character names and homeworlds become editable and the stored CID is visible in the tooltip.");
-                        SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
-                        SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
+                        SpheneUI.Layout.Space(SpheneUI.Spacing.X8);
                     }
 
                     var sortedAuths = selectedServer.Authentications
@@ -1566,7 +1506,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                         if (thisIsYou)
                         {
-                            uint bgColor = ImGui.GetColorU32(new Vector4(0.0f, 1.0f, 0.0f, 0.06f));
+                            uint bgColor = ImGui.GetColorU32(
+                                SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.Success, 0.08f));
                             var winPos = ImGui.GetWindowPos();
                             var contentMin = ImGui.GetWindowContentRegionMin();
                             var contentMax = ImGui.GetWindowContentRegionMax();
@@ -1590,7 +1531,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                     bool currentCidKnown = selectedServer.Authentications.Any(c => c.LastSeenCID != null && c.LastSeenCID != 0 && c.LastSeenCID == youCid);
 
-                    if (!currentCidKnown && SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Add new character"))
+                    if (!currentCidKnown && SpheneUI.Controls.PrimaryButton("Add new character", FontAwesomeIcon.Plus))
                     {
                         _serverConfigurationManager.AddEmptyCharacterToServer(idx);
                     }
@@ -1601,13 +1542,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     SpheneUI.Text.ColoredWrapped("Please go to the 'Secret Keys' tab to add authentication keys.", ImGuiColors.DalamudYellow);
                 }
 
-            }
-            break;
+    }
 
-            // Secret Key management in separate tab (non-OAuth only)
-            case "Secret Keys":
-            {
-                SpheneUI.Text.Big("Secret Key Management");
+    private void DrawSecretKeyManagement(ServerStorage selectedServer)
+    {
                 SpheneUI.Text.ColoredWrapped("Secret keys are used to authenticate your characters with the Sphene service. Each character must be assigned to a secret key.", ImGuiColors.DalamudYellow);
                 SpheneUI.Layout.Space(SpheneUI.Spacing.X4);
 
@@ -1660,7 +1598,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                 SpheneUI.Layout.Separator();
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Add new Secret Key"))
+                if (SpheneUI.Controls.PrimaryButton("Add new Secret Key", FontAwesomeIcon.Plus))
                 {
                     selectedServer.SecretKeys.Add(selectedServer.SecretKeys.Any() ? selectedServer.SecretKeys.Max(p => p.Key) + 1 : 0, new SecretKey()
                     {
@@ -1669,11 +1607,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     _serverConfigurationManager.Save();
                 }
 
-            }
-            break;
+    }
 
-            case "Service Configuration":
-            {
+    private void DrawServiceConfigurationOptions(ServerStorage selectedServer, bool useOauth)
+    {
                 var serverName = selectedServer.ServerName;
                 var serverUri = selectedServer.ServerUri;
                 var isMain = string.Equals(serverName, ApiController.MainServer, StringComparison.OrdinalIgnoreCase) ||
@@ -1717,12 +1654,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
                 ConnectivityOptionBlock.DrawUseDiscordOAuthOption(selectedServer, useOauth, _serverConfigurationManager, _uiShared, "ConnectivityUseDiscordOAuth");
 
-            }
-            break;
+    }
 
-            case "Permission Settings":
-            {
-                SpheneUI.Text.Big("Default Permission Settings");
+    private void DrawDefaultPermissions(ServerStorage selectedServer)
+    {
                 if (selectedServer == _serverConfigurationManager.CurrentServer && _apiController.IsConnected)
                 {
                     SpheneUI.Text.Wrapped("Note: The default permissions settings here are not applied retroactively to existing pairs or joined Syncshells.");
@@ -1745,10 +1680,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
                         "You need to connect to this service to change the default permissions since they are stored on the service.", ImGuiColors.DalamudYellow);
                 }
 
-            }
-            break;
-        }
-        });
     }
 
     private int _lastSelectedServerIndex = -1;
@@ -1835,14 +1766,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
 #endif
 
     /// <summary>
-    /// The settings nav items — shared between the standalone sidebar and
+    /// The settings nav items · shared between the standalone sidebar and
     /// the Sphene Hub rail so both compute the same rail width.
     /// </summary>
     internal static IReadOnlyList<(FontAwesomeIcon Icon, string Label)> EmbeddedNavItems =>
     [
         (FontAwesomeIcon.Home, "Home"),
+        (FontAwesomeIcon.UserCircle, "Account"),
         (FontAwesomeIcon.Wifi, "Connectivity"),
-        (FontAwesomeIcon.AddressBook, "People & Notes"),
         (FontAwesomeIcon.Palette, "Appearance"),
         (FontAwesomeIcon.Brush, "Theme"),
         (FontAwesomeIcon.Bell, "Notifications"),
@@ -1852,7 +1783,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         (FontAwesomeIcon.Hdd, "Storage"),
         (FontAwesomeIcon.SyncAlt, "Sync"),
         (FontAwesomeIcon.Handshake, "Acknowledgment"),
-        (FontAwesomeIcon.Crown, "Supporter"),
         (FontAwesomeIcon.Bug, DiagnosticsPageLabel),
     ];
 
@@ -1867,7 +1797,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         var navItems = EmbeddedNavItems;
 
-        if (_activeSettingsPage == SettingsPage.Supporter && !_apiController.SupporterFeaturesEnabled)
+        if ((_activeSettingsPage == SettingsPage.Supporter
+                || _activeSettingsPage == SettingsPage.SupporterNameplate)
+            && !_apiController.SupporterFeaturesEnabled)
         {
             _activeSettingsPage = SettingsPage.Home;
         }
@@ -1939,7 +1871,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The settings nav buttons — standalone draws them inside its own
+    /// The settings nav buttons · standalone draws them inside its own
     /// sidebar scroll area (with pinned categories collected for the pin
     /// band); embedded inside the Sphene Hub rail they render in-flow and
     /// categories simply scroll with the items.
@@ -1960,9 +1892,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         void SidebarDivider(Vector4 from, Vector4 to) => SpheneUI.Layout.NavRailDivider(from, to);
 
-        void SidebarButton(string label, FontAwesomeIcon icon, SettingsPage page, Vector4 accent, bool special = false)
+        void SidebarButton(string label, FontAwesomeIcon icon, SettingsPage page, Vector4 accent, bool special = false, string? helpKey = null)
         {
-            if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activeSettingsPage == page, accent, special))
+            if (SpheneUI.Layout.NavRailSegmentItem(label, icon, _activeSettingsPage == page, accent, special,
+                    helpId: "settings-" + (helpKey ?? label)))
             {
                 SetSettingsPage(page);
             }
@@ -1970,14 +1903,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         SidebarCategory("General", accentGeneral);
         SidebarButton("Home", FontAwesomeIcon.Home, SettingsPage.Home, accentGeneral);
+        SidebarButton("Account", FontAwesomeIcon.UserCircle, SettingsPage.Account, accentGeneral);
         SidebarButton("Connectivity", FontAwesomeIcon.Wifi, SettingsPage.Connectivity, accentGeneral);
-        SidebarButton("People & Notes", FontAwesomeIcon.AddressBook, SettingsPage.PeopleNotes, accentGeneral);
         SidebarButton("Notifications", FontAwesomeIcon.Bell, SettingsPage.Alerts, accentGeneral);
         SidebarButton("Update", FontAwesomeIcon.History, SettingsPage.ReleaseNotes, accentGeneral);
-        if (_apiController.SupporterFeaturesEnabled)
-        {
-            SidebarButton("Supporter", FontAwesomeIcon.Crown, SettingsPage.Supporter, SpheneUI.Palette.SpheneGold, special: true);
-        }
         SidebarDivider(accentGeneral, accentAppearance);
 
         SidebarCategory("Appearance", accentAppearance);
@@ -1986,7 +1915,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         SidebarDivider(accentAppearance, accentSync);
 
         SidebarCategory("Sync & Data", accentSync);
-        SidebarButton("Sync", FontAwesomeIcon.SyncAlt, SettingsPage.SyncBehavior, accentSync);
+        SidebarButton("Sync", FontAwesomeIcon.SyncAlt, SettingsPage.SyncBehavior, accentSync, helpKey: "Sync Behavior");
         SidebarButton("Acknowledgment", FontAwesomeIcon.Handshake, SettingsPage.Acknowledgment, accentSync);
         SidebarButton("Transfers", FontAwesomeIcon.ExchangeAlt, SettingsPage.Transfers, accentSync);
         SidebarButton("Storage", FontAwesomeIcon.Hdd, SettingsPage.Storage, accentSync);
@@ -1998,11 +1927,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The settings nav rendered inside the Sphene Hub rail — same items as
+    /// The settings nav rendered inside the Sphene Hub rail · same items as
     /// the standalone sidebar plus a pop-out shortcut so the windowed
     /// settings stay one click away. When <paramref name="pinnedCategories"/>
     /// is supplied, category labels are recorded so the hub can pin the
-    /// current one below its own fixed header — same behavior as the
+    /// current one below its own fixed header · same behavior as the
     /// standalone sidebar band.
     /// </summary>
     internal void DrawEmbeddedRail(
@@ -2031,7 +1960,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     /// <summary>
     /// The active settings page rendered inside an already-scrollable
-    /// container (the Sphene Hub nav content child) — no own scroll area.
+    /// container (the Sphene Hub nav content child) · no own scroll area.
     /// </summary>
     internal void DrawEmbeddedContent()
     {
@@ -2045,6 +1974,32 @@ public class SettingsUi : WindowMediatorSubscriberBase
             DrawUnsavedCustomThemePrompt();
             DrawExportBackupModal();
             DrawImportBackupModal();
+        }
+        finally
+        {
+            _embeddedScope = previousScope;
+        }
+    }
+
+    /// <summary>
+    /// The Supporter hub page · renders only the supporter surfaces (the
+    /// Supporter page itself and the Nameplate studio) inside the hub's
+    /// scrollable content, without the settings rail or chrome. The embedded
+    /// page is clamped to the supporter set so it acts as its own surface.
+    /// </summary>
+    internal void DrawEmbeddedSupporterContent()
+    {
+        var previousScope = _embeddedScope;
+        _embeddedScope = true;
+        try
+        {
+            if (!_apiController.SupporterFeaturesEnabled
+                || _embeddedSettingsPage is not (SettingsPage.Supporter
+                    or SettingsPage.SupporterNameplate))
+            {
+                _embeddedSettingsPage = SettingsPage.Supporter;
+            }
+            DrawSettingsPageContent();
         }
         finally
         {
@@ -2085,8 +2040,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         => page switch
         {
             SettingsPage.Home => ("General", "Home"),
+            SettingsPage.Account => ("General", "Account"),
             SettingsPage.Connectivity => ("General", "Connectivity"),
-            SettingsPage.PeopleNotes => ("General", "People & Notes"),
             SettingsPage.Display => ("Appearance", "Appearance"),
             SettingsPage.Theme => ("Appearance", "Theme"),
             SettingsPage.Alerts => ("General", "Notifications"),
@@ -2096,33 +2051,51 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SettingsPage.SyncBehavior => ("Sync & Data", "Sync"),
             SettingsPage.Acknowledgment => ("Sync & Data", "Acknowledgment"),
             SettingsPage.Supporter => ("General", "Supporter"),
+            SettingsPage.SupporterNameplate => ("Supporter", "Nameplate"),
             SettingsPage.ReleaseNotes => ("General", "Update"),
             SettingsPage.Debug => ("Advanced", diagnosticsPageLabel),
             _ => ("General", "Home")
         };
 
+    private SettingsPage? _lastDrawnEmbeddedPage;
+    private SettingsPage? _lastDrawnStandalonePage;
+
     private void DrawSettingsPageContent()
     {
-        // Pages start flush — the host provides the top inset (the Hub's
+        // Both surfaces share one scroll child each · switching pages keeps a
+        // stale scroll offset that shifts fresh content and leaves an empty
+        // tail. Snap back to the top so each page starts from its header.
+        if (_embeddedScope)
+        {
+            if (_lastDrawnEmbeddedPage != _activeSettingsPage)
+            {
+                _lastDrawnEmbeddedPage = _activeSettingsPage;
+                ImGui.SetScrollY(0f);
+            }
+        }
+        else if (_lastDrawnStandalonePage != _activeSettingsPage)
+        {
+            _lastDrawnStandalonePage = _activeSettingsPage;
+            ImGui.SetScrollY(0f);
+        }
+        // Pages start flush · the host provides the top inset (the Hub's
         // NavContent applies PagePadding; the standalone window adds the
         // equivalent space in its scroll area before this runs).
         var contentAvail = ImGui.GetContentRegionAvail().X;
         var safeContentWidth = MathF.Max(220f * ImGuiHelpers.GlobalScale, contentAvail);
-        var maxPageWidth = MathF.Min(safeContentWidth, 1040f * ImGuiHelpers.GlobalScale);
-        var pageStartX = ImGui.GetCursorPosX();
-        if (contentAvail > maxPageWidth)
+        var maxPageWidth = MathF.Min(safeContentWidth,
+            SettingsPageContentMaxWidth * ImGuiHelpers.GlobalScale);
+        // Pages dock to the rail; the cap bounds only the right edge so wide
+        // windows keep a readable measure without a dead left margin.
+        // ContentRegion enforces it for every widget inside (wrapped text,
+        // right-aligned rows, stretched tables, full-width children) and
+        // pushes the matching content bound for docked controls.
+        SpheneUI.Layout.ContentRegion(maxPageWidth, "settings-page", () =>
         {
-            pageStartX = ImGui.GetCursorPosX() + (contentAvail - maxPageWidth) * 0.5f;
-            ImGui.SetCursorPosX(pageStartX);
-        }
+            ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale,
+                ImGui.GetContentRegionAvail().X * 0.6f));
 
-        using (var pageGroup = ImRaii.Group())
-        {
-            ImGui.PushTextWrapPos(pageStartX + maxPageWidth
-                - SpheneUI.Layout.ScrollAreaContentInset * ImGuiHelpers.GlobalScale);
-            ImGui.PushItemWidth(MathF.Min(360f * ImGuiHelpers.GlobalScale, maxPageWidth * 0.6f));
-
-            var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+            var settingsOptionsIndentX = SettingsContentIndentX;
             IDisposable? contentIndent = null;
             if (_activeSettingsPage != SettingsPage.Home)
             {
@@ -2135,11 +2108,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 case SettingsPage.Home:
                     DrawOverview();
                     break;
-                case SettingsPage.Connectivity:
-                    DrawServerConfiguration();
+                case SettingsPage.Account:
+                    DrawAccountPage();
                     break;
-                case SettingsPage.PeopleNotes:
-                    DrawGeneralUserManagement();
+                case SettingsPage.Connectivity:
+                    DrawConnectivityPage();
                     break;
                 case SettingsPage.Display:
                     DrawGeneralUiDisplaySettings();
@@ -2168,6 +2141,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 case SettingsPage.Supporter:
                     DrawSupporterPage();
                     break;
+                case SettingsPage.SupporterNameplate:
+                    _supporterStudio.DrawStudioPage();
+                    break;
                 case SettingsPage.ReleaseNotes:
                     _releaseChangelogUi.DrawEmbedded();
                     break;
@@ -2177,44 +2153,48 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
             contentIndent?.Dispose();
             ImGui.PopItemWidth();
-            ImGui.PopTextWrapPos();
-        }
+        });
     }
 
     private void DrawSettingsPageHeader(string tabKey, string? description = null)
     {
-        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        var settingsOptionsIndentX = SettingsContentIndentX;
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
         _lastTab = tabKey;
-        if (!string.IsNullOrWhiteSpace(description))
+        // The rail selection and the "?" help dock already name the section
+        // in both embedded and standalone mode - no title row is drawn.
+        SpheneUI.Layout.RegisterPageHelp("settings-" + tabKey, () =>
         {
-            SpheneUI.Text.PageIntro(description);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        }
+            SpheneUI.Text.MutedWrapped(description ?? "Settings for this section.",
+                ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Indent(settingsOptionsIndentX);
     }
 
-    private void DrawSettingsSectionHeader(string title, string? description = null)
+    private void DrawSettingsSectionHeader(string title, string? description = null,
+        Vector4? accent = null)
     {
-        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        var settingsOptionsIndentX = SettingsContentIndentX;
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        SpheneUI.Text.SectionHeader(title, description);
+        SpheneUI.Text.SectionHeader(title, description, accent: accent);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Indent(settingsOptionsIndentX);
     }
 
     /// <summary>
-    /// Wraps a settings block in a section card (see
-    /// <see cref="SpheneUI.Layout.SectionCard"/>). Spans the same
-    /// unindented width as section headers and adds trailing spacing.
+    /// Wraps a settings block in a section header + row group (see
+    /// <see cref="SpheneUI.Layout.RowGroup"/>): the iOS-style grouped
+    /// surface where each option control draws its own hairline separator.
+    /// Non-row content (previews, lists, custom blocks) renders inside the
+    /// same tonal surface without separators.
     /// </summary>
-    private void DrawSettingsCard(string title, Action content, string? description = null,
-        Vector4? accent = null)
+    private void DrawSettingsCard(string title, FontAwesomeIcon icon, Action content,
+        string? description = null, Vector4? accent = null)
     {
         // Inter-card spacing leads each card so the last card of a page ends
         // flush at the shared bottom rule instead of leaving a stray dummy.
@@ -2222,38 +2202,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         }
-        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        var settingsOptionsIndentX = SettingsContentIndentX;
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
-        SpheneUI.Layout.SectionCard(content, title, accent, description,
-            animatedBackdrop: true);
+        SpheneUI.Layout.HeadedRowGroup(title, content,
+            icon, description, accent,
+            id: $"settings-{title}");
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Indent(settingsOptionsIndentX);
     }
 
-    private static float GetSettingsOptionsIndentX(SettingsPage page)
-        => page switch
-        {
-            SettingsPage.Theme => 8f * ImGuiHelpers.GlobalScale,
-            SettingsPage.ReleaseNotes => 0f,
-            SettingsPage.Connectivity => 14f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Storage => 14f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Transfers => 13f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Performance => 13f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Acknowledgment => 13f * ImGuiHelpers.GlobalScale,
-            SettingsPage.SyncBehavior => 13f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Debug => 12f * ImGuiHelpers.GlobalScale,
-            SettingsPage.PeopleNotes => 12f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Display => 12f * ImGuiHelpers.GlobalScale,
-            SettingsPage.Alerts => 12f * ImGuiHelpers.GlobalScale,
-            _ => 12f * ImGuiHelpers.GlobalScale,
-        };
+    /// <summary>
+    /// Uniform content inset for non-card rows on settings pages · cards and
+    /// section headers unindent to the full width, bare rows sit at this
+    /// indent so text aligns roughly with card content. Single grid token for
+    /// every page (was a per-page 8-14px table).
+    /// </summary>
+    private static float SettingsContentIndentX => SpheneUI.Spacing.X12.Scaled;
+
+    /// <summary>
+    /// Unscaled maximum width a settings page may occupy. Pages dock to the
+    /// rail, so wider windows only gain right margin · see
+    /// <see cref="DrawSettingsPageContent"/>.
+    /// </summary>
+    private const float SettingsPageContentMaxWidth = 1040f;
 
     private static float GetSettingsSafeContentWidth()
     {
         var scale = ImGuiHelpers.GlobalScale;
-        var reserve = ImGui.GetStyle().ScrollbarSize + 10f * scale;
-        return MathF.Max(220f * scale, ImGui.GetContentRegionAvail().X - reserve);
+        var reserve = ImGui.GetStyle().ScrollbarSize + SpheneUI.Spacing.X10.Scaled;
+        return MathF.Max(220f * scale, SpheneUI.Controls.BoundedAvailX() - reserve);
     }
 
     private static float ClampSettingsItemWidth(float desiredWidth, float minWidth = 80f)
@@ -2327,30 +2305,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         drawList.PathStroke(u32, ImDrawFlags.None, thickness);
     }
 
-    private static bool DrawToggleSwitch(string id, bool value)
-    {
-        var height = ImGui.GetFrameHeight();
-        var width = height * 1.8f;
-        var position = ImGui.GetCursorScreenPos();
-        ImGui.InvisibleButton(id, new Vector2(width, height));
-
-        if (ImGui.IsItemClicked())
-        {
-            value = !value;
-        }
-
-        // Same proportions as SpheneUI.Controls.Toggle: the track is drawn at
-        // 70% of the frame height, centered inside the full-height hit box.
-        var trackHeight = MathF.Round(height * 0.7f);
-        var trackMin = new Vector2(position.X + (width - trackHeight * 1.8f) * 0.5f,
-            position.Y + (height - trackHeight) * 0.5f);
-        var animT = SpheneUI.Controls.ToggleAnimValue(ImGui.GetID(id), value);
-        SpheneUI.Controls.SwitchVisual(ImGui.GetWindowDrawList(), trackMin,
-            trackMin + new Vector2(trackHeight * 1.8f, trackHeight), animT, ImGui.GetStyle().Alpha);
-
-        return value;
-    }
-
     private void DrawPluginListRow(string name, string description, string statusOrVersion, bool isInstalled, bool isEnabled, Func<Task>? onInstallAction = null, Func<Task>? onEnableAction = null, Func<Task>? onDisableAction = null, Action? onOpenSettings = null, string? settingsLabel = null)
     {
         using var id = ImRaii.PushId("PluginRow_" + name);
@@ -2410,7 +2364,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         var rowHovered = ImGui.IsMouseHoveringRect(rowMin, rowMax) && ImGui.IsWindowHovered();
         if (rowHovered)
         {
-            var tint = SpheneUI.Palette.AccentBlue with { W = 0.06f * ImGui.GetStyle().Alpha };
+            var tint = SpheneUI.Colors.Accent with { W = 0.06f * ImGui.GetStyle().Alpha };
             ImGui.GetWindowDrawList().AddRectFilled(rowMin, rowMax,
                 ImGui.ColorConvertFloat4ToU32(tint), 4f * ImGuiHelpers.GlobalScale, ImDrawFlags.RoundCornersAll);
         }
@@ -2488,10 +2442,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
                 var toggleHeight = ImGui.GetFrameHeight();
                 var toggleY = startPos.Y + (rowHeight - toggleHeight) / 2;
                 ImGui.SetCursorScreenPos(new Vector2(controlX, toggleY));
-                var toggled = DrawToggleSwitch("EnabledToggle", isEnabled);
-                if (toggled != isEnabled)
+                var switchValue = isEnabled;
+                if (SpheneUI.Controls.Switch("EnabledToggle", ref switchValue))
                 {
-                    if (toggled)
+                    if (switchValue)
                     {
                         _ = onEnableAction!.Invoke();
                     }
@@ -2513,7 +2467,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         _lastTab = "Overview";
 
-        DrawSettingsCard("Service & Connection", () =>
+        DrawSettingsCard("Service & Connection", FontAwesomeIcon.Plug, () =>
         {
         var currentServer = _serverConfigurationManager.CurrentServer;
         if (currentServer == null)
@@ -2588,12 +2542,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         // --- Plugins Section ---
 
-        string GetPluginStatusLabel(UiSharedService.PluginInstallState state)
+        string GetPluginStatusLabel(PluginInstallerService.PluginInstallState state)
         {
             return !state.IsInstalled ? "Missing" : state.IsEnabled ? "Detected" : "Deactivated";
         }
 
-        DrawSettingsCard("Sphene Plugins", () =>
+        DrawSettingsCard("Sphene Plugins", FontAwesomeIcon.PuzzlePiece, () =>
         {
             // 1. Sphene (Self)
             var assembly = System.Reflection.Assembly.GetExecutingAssembly();
@@ -2627,115 +2581,115 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SpheneUI.Layout.SectionSeparator("Required Plugins");
 
             // 3. Penumbra (External)
-            var penumbraState = _uiShared.GetPluginInstallState("Penumbra");
+            var penumbraState = _pluginInstaller.GetPluginInstallState("Penumbra");
             DrawPluginListRow("Penumbra", "Mod management framework. Required for Sphene.", GetPluginStatusLabel(penumbraState), penumbraState.IsInstalled, penumbraState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("Penumbra").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("Penumbra").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Penumbra").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Penumbra").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("Penumbra").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("Penumbra").ConfigureAwait(false));
 
             // 4. Glamourer (External)
-            var glamourerState = _uiShared.GetPluginInstallState("Glamourer");
+            var glamourerState = _pluginInstaller.GetPluginInstallState("Glamourer");
             DrawPluginListRow("Glamourer", "Appearance customization tool. Required for full functionality.", GetPluginStatusLabel(glamourerState), glamourerState.IsInstalled, glamourerState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("Glamourer").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("Glamourer").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Glamourer").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Glamourer").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("Glamourer").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("Glamourer").ConfigureAwait(false));
 
             SpheneUI.Layout.SectionSeparator("Optional Plugins");
 
             // 5. Customize+
-            var customizePlusState = _uiShared.GetPluginInstallState("CustomizePlus");
+            var customizePlusState = _pluginInstaller.GetPluginInstallState("CustomizePlus");
             DrawPluginListRow("Customize+", "Body scale customization.", GetPluginStatusLabel(customizePlusState), customizePlusState.IsInstalled, customizePlusState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("CustomizePlus").ConfigureAwait(false));
 
             // 6. Heels
-            var heelsState = _uiShared.GetPluginInstallState("SimpleHeels");
+            var heelsState = _pluginInstaller.GetPluginInstallState("SimpleHeels");
             DrawPluginListRow("Heels", "Adjusts character height based on footwear.", GetPluginStatusLabel(heelsState), heelsState.IsInstalled, heelsState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("SimpleHeels").ConfigureAwait(false));
 
             // 7. Honorific
-            var honorificState = _uiShared.GetPluginInstallState("Honorific");
+            var honorificState = _pluginInstaller.GetPluginInstallState("Honorific");
             DrawPluginListRow("Honorific", "Adds titles and plates to characters.", GetPluginStatusLabel(honorificState), honorificState.IsInstalled, honorificState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.InstallPluginViaReflectionAsync("Honorific").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("Honorific").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Honorific").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Honorific").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("Honorific").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("Honorific").ConfigureAwait(false));
 
             // 8. Moodles
-            var moodlesState = _uiShared.GetPluginInstallState("Moodles");
+            var moodlesState = _pluginInstaller.GetPluginInstallState("Moodles");
             DrawPluginListRow("Moodles", "Status icon customization.", GetPluginStatusLabel(moodlesState), moodlesState.IsInstalled, moodlesState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("Moodles").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("Moodles").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Moodles").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Moodles").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("Moodles").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("Moodles").ConfigureAwait(false));
             
             // 9. PetNames
-            var petNamesState = _uiShared.GetPluginInstallState("PetRenamer");
+            var petNamesState = _pluginInstaller.GetPluginInstallState("PetRenamer");
             DrawPluginListRow("PetNames", "Custom names for minions and pets.", GetPluginStatusLabel(petNamesState), petNamesState.IsInstalled, petNamesState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.InstallPluginViaReflectionAsync("PetRenamer").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("PetRenamer").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("PetRenamer").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("PetRenamer").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("PetRenamer").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("PetRenamer").ConfigureAwait(false));
 
             // 10. Brio
-            var brioState = _uiShared.GetPluginInstallState("Brio");
+            var brioState = _pluginInstaller.GetPluginInstallState("Brio");
             DrawPluginListRow("Brio", "Animation and posing tool.", GetPluginStatusLabel(brioState), brioState.IsInstalled, brioState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync(SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.SeaOfStarsRepoUrl, SeaOfStarsRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", $"{SeaOfStarsRepoName} added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("Brio").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("Brio").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("Brio").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("Brio").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("Brio").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("Brio").ConfigureAwait(false));
             
             // 11. BypassEmote
-            var bypassEmoteState = _uiShared.GetPluginInstallState("BypassEmote");
+            var bypassEmoteState = _pluginInstaller.GetPluginInstallState("BypassEmote");
             DrawPluginListRow("BypassEmote", "Lets you plya any emote, without restriction.", GetPluginStatusLabel(bypassEmoteState), bypassEmoteState.IsInstalled, bypassEmoteState.IsEnabled,
                 onInstallAction: async () =>
                 {
-                    await _uiShared.AddRepoViaReflectionAsync("https://raw.githubusercontent.com/Aspher0/BypassEmote/refs/heads/main/repo.json", "BypassEmote Repo").ConfigureAwait(false);
+                    await _pluginInstaller.AddRepoViaReflectionAsync(PluginInstallerService.BypassEmoteRepoUrl, BypassEmoteRepoName).ConfigureAwait(false);
                     Mediator.Publish(new NotificationMessage("Repository Added", "BypassEmote Repo added. Installing...", NotificationType.Info));
-                    await _uiShared.InstallPluginViaReflectionAsync("BypassEmote").ConfigureAwait(false);
+                    await _pluginInstaller.InstallPluginViaReflectionAsync("BypassEmote").ConfigureAwait(false);
                 },
-                onEnableAction: async () => await _uiShared.EnablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false),
-                onDisableAction: async () => await _uiShared.DisablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false));
+                onEnableAction: async () => await _pluginInstaller.EnablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false),
+                onDisableAction: async () => await _pluginInstaller.DisablePluginViaReflectionAsync("BypassEmote").ConfigureAwait(false));
         });
 
-        DrawSettingsCard("Backup & Restore", () =>
+        DrawSettingsCard("Backup & Restore", FontAwesomeIcon.FileExport, () =>
         {
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FileExport, "Export Config Backup"))
+        if (SpheneUI.Controls.PrimaryButton("Export Config Backup", FontAwesomeIcon.FileExport))
         {
             _showExportModal = true;
             _exportPassword = string.Empty;
@@ -2743,7 +2697,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             _lastImportSuccess = null;
         }
         ImGui.SameLine();
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FileImport, "Import Config Backup"))
+        if (SpheneUI.Controls.PrimaryButton("Import Config Backup", FontAwesomeIcon.FileImport))
         {
             _showImportModal = true;
             _importPassword = string.Empty;
@@ -2775,40 +2729,41 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         DrawSupporterHeroCard();
 
-        if (_apiController.IsSupporter)
+        if (_apiController.IsSupporterEffective)
         {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            DrawSupporterNameplateSettings();
+            _supporterStudio.DrawSummaryCard(() => SetSettingsPage(SettingsPage.SupporterNameplate));
 
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            DrawSupporterSection(() =>
-            {
-                if (SpheneUI.Controls.CollapsibleSection("What you unlock"))
-                {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                    SpheneUI.Layout.SectionCard(
-                        () => SupporterPerks.DrawList(),
-                        accentColor: SpheneUI.Palette.SpheneGold,
-                        description: "Supporter status is synced from the server automatically once your Ko-fi donation is linked to your Discord account.");
-                }
-            });
         }
         else
         {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            // the action first: the live teaser + Browse is what the user came
+            // for - perks and linking info sit collapsed below so they fit on
+            // minimal window heights
+            _supporterStudio.DrawTeaserCard(() => SetSettingsPage(SettingsPage.SupporterNameplate));
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             DrawSupporterSection(() =>
-                SpheneUI.Layout.SectionCard(
-                    () => SupporterPerks.DrawList(),
-                    title: "What you unlock",
-                    accentColor: SpheneUI.Palette.SpheneGold,
-                    description: "Supporter status is synced from the server automatically once your Ko-fi donation is linked to your Discord account."));
+            {
+                if (SpheneUI.Controls.CollapsibleSection("What you unlock", defaultOpen: false))
+                {
+                    SpheneUI.Text.MutedWrapped(
+                        "Supporter status is synced from the server automatically once your Ko-fi donation is linked to your Discord account.");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SupporterPerks.DrawList();
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
+            });
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             DrawSupporterSection(() =>
                 SpheneUI.Layout.Callout(
-                    "Include your Discord username or ID in the donation message so your supporter status can be linked to your account. Linking is checked periodically — re-login refreshes it immediately.",
+                    "Include your Discord username or ID in the donation message so your supporter status can be linked to your account. Linking is checked periodically · re-login refreshes it immediately.",
                     FontAwesomeIcon.InfoCircle, SpheneUI.Palette.CrystalBlue,
                     title: "How linking works"));
         }
+
+        // the perks preview window draws while this page is open
+        _supporterStudio.DrawUnlockWindow();
     }
 
     private void DrawSupporterHeroCard()
@@ -2835,8 +2790,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             SpheneUI.Text.MutedWrapped(supporter
-                ? "Thank you for supporting Sphene — your supporter perks are active and visible to other users."
-                : "Every donation keeps Sphene's development and servers running — and unlocks the personal perks listed below for your account.");
+                ? "Thank you for supporting Sphene · your supporter perks are active and visible to other users."
+                : "Every donation keeps Sphene's development and servers running · and unlocks the personal perks listed below for your account.");
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
             if (SpheneBrandIcons.IconTextButton(SpheneBrandIcons.Brand.Kofi,
@@ -2849,11 +2804,11 @@ public class SettingsUi : WindowMediatorSubscriberBase
         });
     }
 
-    /// <summary>Unindents to the card edge, runs the draw, re-indents — the shared
+    /// <summary>Unindents to the card edge, runs the draw, re-indents · the shared
     /// wrapper for every block on the supporter page.</summary>
     private void DrawSupporterSection(Action content)
     {
-        var settingsOptionsIndentX = GetSettingsOptionsIndentX(_activeSettingsPage);
+        var settingsOptionsIndentX = SettingsContentIndentX;
         if (_activeSettingsPage != SettingsPage.Home)
             ImGui.Unindent(settingsOptionsIndentX);
         content();
@@ -2863,848 +2818,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
     private void DrawSupporterCard(Action content)
         => DrawSupporterSection(() => SpheneUI.Layout.AccentCard(content));
-
-    private void DrawSupporterNameplateSettings()
-    {
-        DrawSettingsSectionHeader("Supporter Nameplate", "Display a symbol or text next to the nameplates of Sphene supporters. Supporter status is automatically synced from the server via Ko-fi donations.");
-
-        var showNameplate = _configService.Current.ShowSupporterNameplate;
-        if (SpheneUI.Controls.Toggle("Show Supporter Nameplate Indicators", ref showNameplate))
-        {
-            _configService.Current.ShowSupporterNameplate = showNameplate;
-            _configService.Save();
-        }
-
-        if (!showNameplate)
-        {
-            return;
-        }
-
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        DrawSupporterSection(() =>
-            SpheneUI.Layout.SectionCard(() =>
-            {
-            DrawSupporterNameplatePreview();
-            SpheneUI.Layout.DistanceSeparator();
-
-            BeginSupporterRow("Symbol");
-            BeginSupporterSwatchCluster(3);
-            DrawSupporterSymbolPicker("supporterSymbol", dockRight: false);
-            ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-            DrawSupporterColorKeyPicker("supporterSymbolColor", _configService.Current.SupporterColorKey,
-                key => _configService.Current.SupporterColorKey = key, dockRight: false);
-            ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-            DrawSupporterGlowKeyPicker("supporterSymbolGlow",
-                _configService.Current.SupporterSymbolGlowEnabled, _configService.Current.SupporterSymbolGlowKey,
-                (enabled, key) =>
-                {
-                    _configService.Current.SupporterSymbolGlowEnabled = enabled;
-                    _configService.Current.SupporterSymbolGlowKey = key;
-                }, dockRight: false);
-            SpheneUI.AttachTooltip("Glyph, text color and optional edge glow for the mark next to your name.");
-
-            BeginSupporterRow("Position");
-            var position = (int)_configService.Current.SupporterSymbolPosition;
-            if (SpheneUI.Controls.LabeledCombo("##supporterPosition", ref position, "Left\0Right\0Both\0"))
-            {
-                _configService.Current.SupporterSymbolPosition = (SupporterSymbolPosition)position;
-                _configService.Save();
-            }
-            SpheneUI.AttachTooltip("Where the mark sits relative to your name. Both repeats the symbol on the right.");
-
-            SpheneUI.Layout.DistanceSeparator();
-
-            var textEnabled = _configService.Current.SupporterTextEnabled;
-            if (SpheneUI.Controls.Toggle("Text label##supporterTextEnabled", ref textEnabled))
-            {
-                _configService.Current.SupporterTextEnabled = textEnabled;
-                _configService.Save();
-            }
-            SpheneUI.AttachTooltip("Show a custom text together with the symbol on your nameplate.");
-
-            if (textEnabled)
-            {
-                BeginSupporterRow("Text", true);
-                var labelText = _configService.Current.SupporterLabelText ?? string.Empty;
-                if (SpheneUI.Controls.InputText("##supporterLabelText", ref labelText, 30,
-                        dockRight: true))
-                {
-                    _configService.Current.SupporterLabelText = labelText;
-                    _configService.Save();
-                }
-
-                BeginSupporterRow("Order", true);
-                var labelOrder = (int)_configService.Current.SupporterLabelOrder;
-                if (SpheneUI.Controls.LabeledCombo("##supporterLabelOrder", ref labelOrder, "Symbol then Text\0Text then Symbol\0",
-                        trailingWidth: SpheneUI.Metrics.TrailingIconReserve
-                            + 2f * SpheneUI.Metrics.SwatchSize + 2f * SpheneUI.Metrics.Gap))
-                {
-                    _configService.Current.SupporterLabelOrder = (SupporterLabelOrder)labelOrder;
-                    _configService.Save();
-                }
-                SpheneUI.AttachTooltip("Whether the symbol or the label text comes first.");
-
-                ImGui.SameLine();
-                BeginSupporterSwatchCluster(2);
-                DrawSupporterColorKeyPicker("supporterLabelColor", _configService.Current.SupporterLabelColorKey,
-                    key => _configService.Current.SupporterLabelColorKey = key, dockRight: false);
-                ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-                DrawSupporterGlowKeyPicker("supporterLabelGlow",
-                    _configService.Current.SupporterLabelGlowEnabled, _configService.Current.SupporterLabelGlowKey,
-                    (enabled, key) =>
-                    {
-                        _configService.Current.SupporterLabelGlowEnabled = enabled;
-                        _configService.Current.SupporterLabelGlowKey = key;
-                    }, dockRight: false);
-            }
-
-            SpheneUI.Layout.DistanceSeparator();
-
-            var iconEnabled = _configService.Current.SupporterIconEnabled;
-            if (SpheneUI.Controls.Toggle("Sphene icon##supporterIconEnabled", ref iconEnabled))
-            {
-                _configService.Current.SupporterIconEnabled = iconEnabled;
-                _configService.Save();
-            }
-            SpheneUI.AttachTooltip("Draws the Sphene icon at the end of the nameplate of supporters.");
-
-            if (iconEnabled)
-            {
-                DrawSupporterIconPicker();
-
-                var iconLabelEnabled = _configService.Current.SupporterIconLabelEnabled;
-                if (SpheneUI.Controls.Toggle("Icon label##supporterIconLabelEnabled", ref iconLabelEnabled,
-                    indented: true))
-                {
-                    _configService.Current.SupporterIconLabelEnabled = iconLabelEnabled;
-                    _configService.Save();
-                }
-                SpheneUI.AttachTooltip("Draws the configured label text next to the Sphene icon (overlay, not part of the nameplate).");
-
-                if (iconLabelEnabled)
-                {
-                    BeginSupporterRow("Text", true);
-                    var iconLabelText = _configService.Current.SupporterIconLabelText ?? string.Empty;
-                    if (SpheneUI.Controls.InputText("##supporterIconLabelText", ref iconLabelText, 30,
-                            dockRight: true))
-                    {
-                        _configService.Current.SupporterIconLabelText = iconLabelText;
-                        _configService.Save();
-                    }
-                    SpheneUI.AttachTooltip("Text drawn next to the Sphene icon. Set independently from the nameplate label.");
-
-                    BeginSupporterRow("Colors", true);
-                    BeginSupporterSwatchCluster(2);
-                    DrawIconLabelColorPicker("supporterIconLabelFg",
-                        _configService.Current.SupporterIconLabelColor,
-                        color => _configService.Current.SupporterIconLabelColor = color);
-                    ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-                    DrawIconLabelEdgePicker("supporterIconLabelEdge",
-                        _configService.Current.SupporterIconLabelEdgeEnabled,
-                        _configService.Current.SupporterIconLabelEdgeColor,
-                        (enabled, color) =>
-                        {
-                            _configService.Current.SupporterIconLabelEdgeEnabled = enabled;
-                            _configService.Current.SupporterIconLabelEdgeColor = color;
-                        });
-                }
-            }
-            }, title: "Nameplate", accentColor: SpheneUI.Palette.LuminousGold,
-            description: "How your name appears to other Sphene users in game."));
-    }
-
-    /// <summary>
-    /// Mock nameplate strip inside the settings card: renders the configured
-    /// mark, label, icon and colors around the player's name so every control
-    /// below shows its effect immediately.
-    /// </summary>
-    private void DrawSupporterNameplatePreview()
-    {
-        var cfg = _configService.Current;
-        var scale = SpheneUI.Scale;
-        var symbol = cfg.SupporterSymbolChar ?? string.Empty;
-        var label = cfg.SupporterTextEnabled ? cfg.SupporterLabelText ?? string.Empty : string.Empty;
-
-        // Real nameplate data captured by the service — formatted display name,
-        // quoted title + FC tag and the actual nameplate text/edge colors.
-        var plate = _supporterNameplateService.LocalPlate;
-        var name = plate?.Name;
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = _uiShared.PlayerName;
-        }
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = "Player Name";
-        }
-        var fcTag = plate?.QuotedFreeCompanyTag ?? string.Empty;
-        var title = plate?.QuotedTitle ?? string.Empty;
-        // Title order in the preview mirrors the real plate: the game's own
-        // nameplate setting, or Honorific's override when it is installed.
-        var titleShown = title.Length > 0 && (plate?.DisplayTitle ?? false);
-        var titleAbove = plate?.IsPrefixTitle ?? true;
-        var textColor = plate.HasValue ? PlateColor(plate.Value.TextColor) : SpheneUI.Colors.TextPrimary;
-        var edgeColor = plate.HasValue ? (Vector4?)PlateColor(plate.Value.EdgeColor) : null;
-        var nameFg = plate?.NameColors.Foreground is { } nf ? PlateColor(nf) : textColor;
-        var nameEdge = plate?.NameColors.Edge is { } ne ? (Vector4?)PlateColor(ne) : edgeColor;
-        var titleFg = plate?.TitleColors.Foreground is { } tf ? PlateColor(tf) : textColor;
-        var titleEdge = plate?.TitleColors.Edge is { } te ? (Vector4?)PlateColor(te) : edgeColor;
-        var fcFg = plate?.FreeCompanyColors.Foreground is { } ff ? PlateColor(ff) : textColor;
-        var fcEdge = plate?.FreeCompanyColors.Edge is { } fe ? (Vector4?)PlateColor(fe) : edgeColor;
-
-        // Key 0 disables the color payload — the part renders in the
-        // nameplate's own text color.
-        var symbolFg = cfg.SupporterColorKey == 0 ? textColor : ResolveUiForegroundColor(cfg.SupporterColorKey);
-        var labelFg = cfg.SupporterLabelColorKey == 0 ? textColor : ResolveUiForegroundColor(cfg.SupporterLabelColorKey);
-        // Without an explicit glow the game renders supporter parts with the
-        // regular nameplate text edge.
-        var symbolGlow = cfg.SupporterSymbolGlowEnabled ? ResolveUiGlowColor(cfg.SupporterSymbolGlowKey) : edgeColor;
-        var labelGlow = cfg.SupporterLabelGlowEnabled ? ResolveUiGlowColor(cfg.SupporterLabelGlowKey) : edgeColor;
-        var symbolFirst = cfg.SupporterLabelOrder == SupporterLabelOrder.SymbolThenText;
-        var position = cfg.SupporterSymbolPosition;
-        var showLeft = position != SupporterSymbolPosition.Right;
-        var showRight = position != SupporterSymbolPosition.Left;
-
-        var icon = cfg.SupporterIconEnabled
-            ? _supporterIconService.GetIcon(cfg.SupporterIconId ?? string.Empty) : null;
-        // The default Sphene icon is not a catalog entry — it lives in the
-        // nameplate service's embedded texture.
-        IDalamudTextureWrap? defaultIconWrap = null;
-        if (cfg.SupporterIconEnabled && icon == null)
-        {
-            _ = _supporterNameplateService.TryGetDefaultIconWrap(out defaultIconWrap);
-        }
-        var iconLabel = cfg.SupporterIconLabelEnabled
-            ? cfg.SupporterIconLabelText ?? string.Empty : string.Empty;
-        var iconLabelFg = ImGui.ColorConvertU32ToFloat4(cfg.SupporterIconLabelColor);
-        var iconLabelEdge = cfg.SupporterIconLabelEdgeEnabled
-            ? (Vector4?)ImGui.ColorConvertU32ToFloat4(cfg.SupporterIconLabelEdgeColor)
-            : null;
-
-        var textH = ImGui.GetTextLineHeight();
-        var spaceW = ImGui.CalcTextSize(" ").X;
-        var markGap = 8f * scale;
-        var iconHeight = textH * 1.15f;
-        var iconSize = icon != null ? icon.AspectSize(iconHeight)
-            : defaultIconWrap != null ? new Vector2(iconHeight) : Vector2.Zero;
-
-        float PartW(string s) => s.Length == 0 ? 0f : ImGui.CalcTextSize(s).X;
-        float MarkW(bool withLabel)
-        {
-            var w = (symbol.Length > 0 ? PartW(symbol) : 0f)
-                + (withLabel && label.Length > 0 ? PartW(label) : 0f);
-            if (w > 0f && symbol.Length > 0 && withLabel && label.Length > 0)
-            {
-                w += spaceW;
-            }
-            return w;
-        }
-
-        var leftW = showLeft ? MarkW(withLabel: true) : 0f;
-        // "Both" repeats only the symbol on the right, mirroring the service.
-        var rightW = showRight ? MarkW(withLabel: position == SupporterSymbolPosition.Right) : 0f;
-        var fcW = PartW(fcTag);
-        var titleW = PartW(title);
-        var iconLabelW = PartW(iconLabel);
-        var totalW = leftW + PartW(name) + rightW + fcW + iconSize.X + iconLabelW
-            + (leftW > 0f ? markGap : 0f)
-            + (rightW > 0f ? markGap : 0f)
-            + (fcW > 0f ? markGap : 0f)
-            + (iconSize.X > 0f ? markGap : 0f)
-            + (iconLabelW > 0f && iconSize.X > 0f ? spaceW : 0f);
-
-        var drawList = ImGui.GetWindowDrawList();
-        var stripMin = ImGui.GetCursorScreenPos();
-        var stripW = MathF.Max(0f, SpheneUI.Controls.BoundedAvailX());
-        var padY = 7f * scale;
-        var lineGap = 3f * scale;
-        var stripH = textH + padY * 2f + (titleShown ? textH + lineGap : 0f);
-        var radius = 6f * scale;
-        drawList.AddRectFilled(stripMin, stripMin + new Vector2(stripW, stripH),
-            ImGui.ColorConvertFloat4ToU32(SpheneUI.Colors.FrameBg with { W = 0.55f }), radius);
-        drawList.AddRect(stripMin, stripMin + new Vector2(stripW, stripH),
-            ImGui.ColorConvertFloat4ToU32(SpheneUI.Colors.Border with { W = 0.6f }), radius);
-        ImGui.Dummy(new Vector2(stripW, stripH));
-
-        var nameLineY = stripMin.Y + padY + (titleShown && titleAbove ? textH + lineGap : 0f);
-        var x = stripMin.X + MathF.Max(8f * scale, (stripW - totalW) * 0.5f);
-        var y = nameLineY;
-        var glowOff = MathF.Max(1f, scale);
-
-        void DrawPart(string text, Vector4 fg, Vector4? glow)
-        {
-            if (string.IsNullOrEmpty(text))
-            {
-                return;
-            }
-            if (glow.HasValue)
-            {
-                var glowU32 = ImGui.ColorConvertFloat4ToU32(glow.Value);
-                drawList.AddText(new Vector2(x + glowOff, y), glowU32, text);
-                drawList.AddText(new Vector2(x - glowOff, y), glowU32, text);
-                drawList.AddText(new Vector2(x, y + glowOff), glowU32, text);
-                drawList.AddText(new Vector2(x, y - glowOff), glowU32, text);
-            }
-            drawList.AddText(new Vector2(x, y), ImGui.ColorConvertFloat4ToU32(fg), text);
-            x += PartW(text);
-        }
-
-        void DrawMark(bool withLabel)
-        {
-            var drew = false;
-            void Part(string text, Vector4 fg, Vector4? glow)
-            {
-                if (string.IsNullOrEmpty(text))
-                {
-                    return;
-                }
-                if (drew)
-                {
-                    x += spaceW;
-                }
-                DrawPart(text, fg, glow);
-                drew = true;
-            }
-            if (symbolFirst)
-            {
-                Part(symbol, symbolFg, symbolGlow);
-                if (withLabel)
-                {
-                    Part(label, labelFg, labelGlow);
-                }
-            }
-            else
-            {
-                if (withLabel)
-                {
-                    Part(label, labelFg, labelGlow);
-                }
-                Part(symbol, symbolFg, symbolGlow);
-            }
-        }
-
-        if (titleShown)
-        {
-            var titleY = titleAbove
-                ? stripMin.Y + padY
-                : stripMin.Y + padY + textH + lineGap;
-            var savedPos = new Vector2(x, y);
-            x = stripMin.X + MathF.Max(8f * scale, (stripW - titleW) * 0.5f);
-            y = titleY;
-            DrawPart(title, titleFg, titleEdge);
-            x = savedPos.X;
-            y = savedPos.Y;
-        }
-
-        if (leftW > 0f)
-        {
-            DrawMark(withLabel: true);
-            x += markGap;
-        }
-        DrawPart(name, nameFg, nameEdge);
-        if (rightW > 0f)
-        {
-            x += markGap;
-            DrawMark(withLabel: position == SupporterSymbolPosition.Right);
-        }
-        if (fcW > 0f)
-        {
-            x += markGap;
-            DrawPart(fcTag, fcFg, fcEdge);
-        }
-        // Small down-bias like GetNameplateIconPosition's 0.55 line factor —
-        // glyphs sit baseline-low, so the icon centers a hair below the
-        // geometric line center.
-        var iconAnchorY = nameLineY + (textH - iconSize.Y) * 0.5f + textH * 0.05f;
-        if (icon != null)
-        {
-            x += markGap;
-            var (handle, uv0, uv1) = icon.GetFrame(ImGui.GetTime());
-            SpheneUI.Media.SpriteInRect(drawList, handle,
-                new Vector2(x, iconAnchorY), new Vector2(x + iconSize.X, iconAnchorY + iconSize.Y), uv0, uv1);
-            x += iconSize.X;
-        }
-        else if (defaultIconWrap != null)
-        {
-            x += markGap;
-            SpheneUI.Media.ImageInRect(drawList, defaultIconWrap,
-                new Vector2(x, iconAnchorY), new Vector2(x + iconSize.X, iconAnchorY + iconSize.Y));
-            x += iconSize.X;
-        }
-        if (iconLabelW > 0f && (icon != null || defaultIconWrap != null))
-        {
-            x += spaceW;
-            DrawPart(iconLabel, iconLabelFg, iconLabelEdge);
-        }
-    }
-
-    /// <summary>
-    /// Positions the cursor so <paramref name="count"/> swatches drawn via
-    /// SameLine end flush at the shared control edge, vertically centered on
-    /// the current frame row.
-    /// </summary>
-    private static void BeginSupporterSwatchCluster(int count)
-    {
-        var swatch = SpheneUI.Metrics.SwatchSize;
-        var gap = SpheneUI.Metrics.Gap;
-        var width = count * swatch + (count - 1) * gap;
-        var cursor = ImGui.GetCursorScreenPos();
-        var right = cursor.X + SpheneUI.Controls.BoundedAvailX()
-            - SpheneUI.Metrics.TrailingIconReserve;
-        ImGui.SetCursorScreenPos(new Vector2(right - width,
-            cursor.Y + (ImGui.GetFrameHeight() - swatch) * 0.5f));
-    }
-
-    private static void BeginSupporterRow(string label, bool indented = false)
-    {
-        ImGui.AlignTextToFramePadding();
-        if (indented)
-        {
-            SpheneUI.Text.Colored("  " + label, ImGuiColors.DalamudGrey3);
-        }
-        else
-        {
-            SpheneUI.Text.Colored(label, ImGuiColors.DalamudGrey);
-        }
-        ImGui.SameLine(SupporterRowLabelColumn * ImGuiHelpers.GlobalScale);
-    }
-
-    private void DrawSupporterIconPicker()
-    {
-        var catalog = _supporterIconService.GetCatalog();
-        var currentId = _configService.Current.SupporterIconId ?? string.Empty;
-
-        BeginSupporterRow("Icon Image", true);
-        var previewLabel = currentId.Length == 0 ? "Default (Sphene Icon)" : currentId;
-        var previewIcon = _supporterIconService.GetIcon(currentId);
-        var previewHeight = ImGui.GetTextLineHeightWithSpacing() * 1.6f;
-        var trailingWidth = previewIcon != null
-            ? previewIcon.AspectSize(previewHeight).X + ImGui.GetStyle().ItemSpacing.X
-            : currentId.Length > 0
-                ? ImGui.CalcTextSize("(not on server)").X + ImGui.GetStyle().ItemSpacing.X
-                : 0f;
-        ImGui.SetNextItemWidth(MathF.Max(60f, SpheneUI.Controls.FillRowWidth(trailingWidth)));
-        using (var controlStyle = SpheneUI.Controls.PushValueControlStyle())
-        {
-            if (ImGui.BeginCombo("##supporterIconPicker", previewLabel))
-            {
-                if (SpheneUI.Controls.Selectable("Default (Sphene Icon)", currentId.Length == 0))
-                {
-                    _configService.Current.SupporterIconId = string.Empty;
-                    _configService.Save();
-                }
-                for (var i = 0; i < catalog.Count; i++)
-                {
-                    var iconInfo = catalog[i];
-                    var label = iconInfo.Animated ? iconInfo.Name + " (animated)" : iconInfo.Name;
-                    if (SpheneUI.Controls.Selectable(label + "##" + iconInfo.Id, string.Equals(currentId, iconInfo.Id, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        _configService.Current.SupporterIconId = iconInfo.Id;
-                        _configService.Save();
-                    }
-                }
-                ImGui.EndCombo();
-            }
-        }
-        SpheneUI.AttachTooltip(catalog.Count == 0
-            ? "No custom icons available on this server. The server admin can add PNG, GIF or WebP files to the supporter icon folder."
-            : "Pick a server-provided icon. Animated icons play on the nameplate.");
-
-        if (previewIcon != null)
-        {
-            ImGui.SameLine();
-            var (handle, uv0, uv1) = previewIcon.GetFrame(ImGui.GetTime());
-            SpheneUI.Media.Sprite(handle, previewIcon.AspectSize(previewHeight), uv0, uv1);
-        }
-        else if (currentId.Length > 0 && !_supporterIconService.IsIconKnown(currentId))
-        {
-            ImGui.SameLine();
-            SpheneUI.Text.Colored("(not on server)", ImGuiColors.DalamudOrange);
-        }
-    }
-
-    private const float SupporterRowLabelColumn = 110f;
-    private static readonly string[] SupporterSymbolPresets = ["None", "✦", "★", "☆", "♥", "♡", "◆", "◇"];
-    private const int UiForegroundKeyInlineMax = 77;
-    private const int UiForegroundKeyExtendedStart = 500;
-    private const int UiForegroundKeyExtendedMax = 511;
-    private const int UiForegroundPaletteMaxIndex = UiForegroundKeyInlineMax + (UiForegroundKeyExtendedMax - UiForegroundKeyExtendedStart + 1);
-
-    private void DrawSupporterColorKeyPicker(string id, ushort colorKey, Action<ushort> apply,
-        bool dockRight = true)
-    {
-        var preview = ResolveUiForegroundColor(colorKey);
-        var swatchSize = SpheneUI.Metrics.SwatchSize;
-        var popupId = "##" + id + "_palette";
-
-        // Dock the swatch flush with the shared control edge (bound minus the
-        // help column so it aligns with every other value control on the page).
-        if (dockRight)
-        {
-            SpheneUI.Controls.DockToRightEdge(swatchSize);
-        }
-
-        var clicked = colorKey == 0
-            ? SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "–", swatchSize)
-            : SpheneUI.Controls.ColorSwatch(popupId + "_btn", preview);
-        if (clicked)
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip(colorKey == 0
-            ? "No text color — the nameplate default is used. Click to pick a color."
-            : $"Game UI foreground color (key {colorKey}). Click to choose a color.");
-
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            // Key 0 is the payload's disabled state — the transparent cell
-            // offers it as "no color, keep the default nameplate color".
-            DrawSupporterPaletteCells(SortedUiForegroundKeys(), ResolveUiForegroundColor,
-                colorKey, colorKey != 0, apply, applyNone: () => apply(0));
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    private void DrawSupporterGlowKeyPicker(string id, bool enabled, ushort colorKey,
-        Action<bool, ushort> apply, bool dockRight = true)
-    {
-        var swatchSize = SpheneUI.Metrics.SwatchSize;
-        var popupId = "##" + id + "_palette";
-
-        if (dockRight)
-        {
-            SpheneUI.Controls.DockToRightEdge(swatchSize);
-        }
-
-        var clicked = enabled
-            ? SpheneUI.Controls.FrameSwatch(popupId + "_btn", ResolveUiGlowColor(colorKey))
-            : SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "–", swatchSize);
-        if (clicked)
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip(enabled
-            ? $"Game UI glow color (key {colorKey}). Click to change or disable."
-            : "Edge glow color disabled. Click to pick a color.");
-
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            DrawSupporterPaletteCells(SortedUiGlowKeys(), ResolveUiGlowColor,
-                colorKey, enabled, key => apply(true, key), frame: true,
-                applyNone: () => apply(false, colorKey));
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    /// <summary>
-    /// Free RGBA picker for the icon label fill — a regular filled swatch,
-    /// since the color is what fills the letters.
-    /// </summary>
-    private void DrawIconLabelColorPicker(string id, uint color, Action<uint> apply)
-    {
-        var preview = ImGui.ColorConvertU32ToFloat4(color);
-        var popupId = "##" + id + "_picker";
-        if (SpheneUI.Controls.ColorSwatch(popupId + "_btn", preview))
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip("Fill color of the icon label text. Click to pick a color.");
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            if (ImGui.ColorPicker4(popupId, ref preview,
-                ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel))
-            {
-                apply(ImGui.ColorConvertFloat4ToU32(preview));
-                _configService.Save();
-            }
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    /// <summary>
-    /// Free RGBA picker for the icon label outline — rendered as a frame ring
-    /// so the swatch reads as "edge" rather than fill. Disabled state shows a
-    /// dash like the glow pickers; the popup offers None + the color picker.
-    /// </summary>
-    private void DrawIconLabelEdgePicker(string id, bool enabled, uint color, Action<bool, uint> apply)
-    {
-        var popupId = "##" + id + "_picker";
-        var clicked = enabled
-            ? SpheneUI.Controls.FrameSwatch(popupId + "_btn", ImGui.ColorConvertU32ToFloat4(color))
-            : SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "–");
-        if (clicked)
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip(enabled
-            ? "Outline color drawn as a frame around the icon label text. Click to change or disable."
-            : "Label outline disabled. Click to pick a color.");
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            if (SpheneUI.Controls.Selectable("None", !enabled))
-            {
-                apply(false, color);
-                _configService.Save();
-                ImGui.CloseCurrentPopup();
-            }
-            var preview = ImGui.ColorConvertU32ToFloat4(color);
-            if (ImGui.ColorPicker4(popupId, ref preview,
-                ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel))
-            {
-                apply(true, ImGui.ColorConvertFloat4ToU32(preview));
-                _configService.Save();
-            }
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    private void DrawSupporterPaletteCells(List<ushort> palette, Func<ushort, Vector4> resolveColor,
-        ushort selectedKey, bool hasSelection, Action<ushort> apply,
-        bool frame = false, Action? applyNone = null)
-    {
-        const int columns = 8;
-        var cell = ImGui.GetFrameHeight() + 2f * ImGuiHelpers.GlobalScale;
-        var leadingNone = applyNone != null ? 1 : 0;
-        if (applyNone != null)
-        {
-            if (SpheneUI.Controls.TransparentSwatch("swNone", cell, !hasSelection))
-            {
-                applyNone();
-                _configService.Save();
-                ImGui.CloseCurrentPopup();
-            }
-            SpheneUI.AttachTooltip("None — no color.");
-        }
-        for (var i = 0; i < palette.Count; i++)
-        {
-            var key = palette[i];
-            if ((i + leadingNone) % columns != 0)
-            {
-                ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-            }
-            using var swatchId = ImRaii.PushId("sw" + i);
-            var clicked = frame
-                ? SpheneUI.Controls.FrameSwatch("swatch",
-                    resolveColor(key), cell, hasSelection && key == selectedKey)
-                : SpheneUI.Controls.ColorSwatch("swatch",
-                    resolveColor(key), cell, hasSelection && key == selectedKey);
-            if (clicked)
-            {
-                apply(key);
-                _configService.Save();
-                ImGui.CloseCurrentPopup();
-            }
-            SpheneUI.AttachTooltip($"Key {key}");
-        }
-    }
-
-    private static List<ushort>? _sortedUiForegroundKeys;
-
-    /// <summary>
-    /// The UI-foreground color keys in palette order: greys first (light to
-    /// dark), then hues red to magenta, saturated to muted inside one hue.
-    /// Keys resolving to an identical color value appear only once.
-    /// </summary>
-    private static List<ushort> SortedUiForegroundKeys()
-        => _sortedUiForegroundKeys ??= SortedUiColorKeys(ResolveUiForegroundColor);
-
-    /// <summary>
-    /// Glow pickers show the same key set in the same order as the foreground
-    /// palette — only the resolved cell colors differ. Sorting the glow
-    /// palette by its own colors produced a diverging order.
-    /// </summary>
-    private static List<ushort> SortedUiGlowKeys()
-        => SortedUiForegroundKeys();
-
-    private static List<ushort> SortedUiColorKeys(Func<ushort, Vector4> resolveColor)
-    {
-        var seen = new HashSet<uint>();
-        var entries = new List<(ushort Key, int HueBucket, float L, float S, float H)>();
-        for (var i = 0; i <= UiForegroundPaletteMaxIndex; i++)
-        {
-            var key = UiForegroundPaletteIndexToColorKey(i);
-            // Key 0 has no UIColor row — it is the "color off" state, not a
-            // color. Rendered as a black cell it picks a disabled payload and
-            // the nameplate falls back to the default text color.
-            if (key == 0)
-            {
-                continue;
-            }
-            var color = resolveColor(key);
-            if (!seen.Add(ImGui.ColorConvertFloat4ToU32(color)))
-            {
-                continue;
-            }
-            RgbaToHsl(color, out var h, out var s, out var l);
-            entries.Add((key, (int)(h / HueBucketDegrees), l, s, h));
-        }
-        // Greys first (light to dark), then one hue family after another; each
-        // family runs as a light-to-dark gradient so neighbours flow visually.
-        entries.Sort(static (a, b) =>
-        {
-            var greyA = a.S < 0.08f;
-            var greyB = b.S < 0.08f;
-            if (greyA != greyB)
-            {
-                return greyA ? -1 : 1;
-            }
-            if (greyA)
-            {
-                return b.L.CompareTo(a.L);
-            }
-            var bucket = a.HueBucket.CompareTo(b.HueBucket);
-            if (bucket != 0)
-            {
-                return bucket;
-            }
-            var light = b.L.CompareTo(a.L);
-            if (light != 0)
-            {
-                return light;
-            }
-            var sat = b.S.CompareTo(a.S);
-            return sat != 0 ? sat : a.H.CompareTo(b.H);
-        });
-        return entries.ConvertAll(static e => e.Key);
-    }
-
-    private const float HueBucketDegrees = 24f;
-
-    private static void RgbaToHsl(Vector4 c, out float h, out float s, out float l)
-    {
-        var max = MathF.Max(c.X, MathF.Max(c.Y, c.Z));
-        var min = MathF.Min(c.X, MathF.Min(c.Y, c.Z));
-        var d = max - min;
-        l = (max + min) * 0.5f;
-        if (d <= 0f)
-        {
-            h = 0f;
-            s = 0f;
-            return;
-        }
-        s = d / (1f - MathF.Abs(2f * l - 1f));
-        if (c.X >= c.Y && c.X >= c.Z)
-        {
-            h = (c.Y - c.Z) / d % 6f;
-        }
-        else if (c.Y >= c.Z)
-        {
-            h = (c.Z - c.X) / d + 2f;
-        }
-        else
-        {
-            h = (c.X - c.Y) / d + 4f;
-        }
-        h = (h * 60f + 360f) % 360f;
-    }
-
-    private void DrawSupporterSymbolPicker(string id, bool dockRight = true)
-    {
-        var symbolChar = _configService.Current.SupporterSymbolChar ?? string.Empty;
-        var popupId = "##" + id + "_palette";
-        var scale = ImGuiHelpers.GlobalScale;
-        var cell = ImGui.GetFrameHeight();
-        var buttonSize = SpheneUI.Metrics.SwatchSize;
-
-        // Reserve the color swatch slot that follows on the same row so both
-        // controls end flush at the shared right edge together.
-        if (dockRight)
-        {
-            SpheneUI.Controls.DockToRightEdge(buttonSize,
-                SpheneUI.Metrics.Gap + SpheneUI.Metrics.SwatchSize);
-        }
-        if (SpheneUI.Controls.GlyphSwatch(popupId + "_btn",
-                symbolChar.Length > 0 ? symbolChar : "–", buttonSize))
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip(
-            "Symbol next to supporter names. Click to pick a preset or type a custom one.");
-
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            const int columns = 4;
-            var cellSize = cell + 6f * scale;
-            for (var i = 0; i < SupporterSymbolPresets.Length; i++)
-            {
-                if (i % columns != 0)
-                {
-                    ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-                }
-                var preset = SupporterSymbolPresets[i];
-                var isCurrent = i == 0
-                    ? symbolChar.Length == 0
-                    : string.Equals(symbolChar, preset, StringComparison.Ordinal);
-                using var swatchId = ImRaii.PushId("sym" + i);
-                if (SpheneUI.Controls.GlyphSwatch("symSwatch",
-                        i == 0 ? "–" : preset, cellSize, isCurrent))
-                {
-                    _configService.Current.SupporterSymbolChar = i == 0 ? string.Empty : preset;
-                    _configService.Save();
-                    ImGui.CloseCurrentPopup();
-                }
-                SpheneUI.AttachTooltip(i == 0 ? "None" : preset);
-            }
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Colored("Custom", ImGuiColors.DalamudGrey);
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(90f * scale);
-            var custom = symbolChar;
-            if (SpheneUI.Controls.InputText("##supporterCustomSymbol", ref custom, 4,
-                    ImGuiInputTextFlags.EnterReturnsTrue))
-            {
-                _configService.Current.SupporterSymbolChar = custom;
-                _configService.Save();
-                ImGui.CloseCurrentPopup();
-            }
-            SpheneUI.AttachTooltip("Type any short symbol; Enter applies it.");
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    /// <summary>
-    /// Converts a packed nameplate color (<c>0xRRGGBBAA</c>, as stored in the
-    /// nameplate info object) to a <see cref="Vector4"/>.
-    /// </summary>
-    private static Vector4 PlateColor(uint c)
-        => new(((c >> 24) & 0xFF) / 255f, ((c >> 16) & 0xFF) / 255f,
-            ((c >> 8) & 0xFF) / 255f, (c & 0xFF) / 255f);
-
-    private static Vector4 ResolveUiForegroundColor(ushort colorKey)
-    {
-        try
-        {
-            var rgba = new UIForegroundPayload(colorKey).RGBA;
-            return new Vector4(((rgba >> 24) & 0xFF) / 255f,
-                ((rgba >> 16) & 0xFF) / 255f, ((rgba >> 8) & 0xFF) / 255f, 1f);
-        }
-        catch
-        {
-            return SpheneUI.Palette.SpheneGold;
-        }
-    }
-
-    private static Vector4 ResolveUiGlowColor(ushort colorKey)
-    {
-        try
-        {
-            var rgba = new UIGlowPayload(colorKey).RGBA;
-            return new Vector4(((rgba >> 24) & 0xFF) / 255f,
-                ((rgba >> 16) & 0xFF) / 255f, ((rgba >> 8) & 0xFF) / 255f, 1f);
-        }
-        catch
-        {
-            return SpheneUI.Palette.SpheneGold;
-        }
-    }
-
-    private static ushort UiForegroundPaletteIndexToColorKey(int index)
-    {
-        return index <= UiForegroundKeyInlineMax
-            ? (ushort)index
-            : (ushort)(UiForegroundKeyExtendedStart + index - UiForegroundKeyInlineMax - 1);
-    }
 
     private void DrawExportBackupModal()
     {
@@ -3885,63 +2998,22 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawGeneralUserManagement()
-    {
-        DrawSettingsPageHeader("People & Notes", "Manage note import/export and default note popup behavior.");
-
-        DrawSettingsCard("Note Transfer", () =>
-        {
-            var overwriteExistingLabels = _overwriteExistingLabels;
-            if (SpheneUI.Controls.Button("Export Notes"))
-            {
-                ImGui.SetClipboardText(UiSharedService.GetNotes(
-                    _pairManager.DirectPairs.UnionBy(
-                        _pairManager.GroupPairs.SelectMany(p => p.Value),
-                        p => p.UserData,
-                        UserDataComparer.Instance).ToList()));
-            }
-            ImGui.SameLine();
-            if (SpheneUI.Controls.Button("Import Notes"))
-            {
-                _notesSuccessfullyApplied = null;
-                var notes = ImGui.GetClipboardText();
-                _notesSuccessfullyApplied = _uiShared.ApplyNotesFromClipboard(notes, overwriteExistingLabels);
-            }
-            ImGui.SameLine();
-            PeopleNotesOptionBlock.DrawOverwriteExistingLabelsOption(ref overwriteExistingLabels, _uiShared, "PeopleNotesOverwriteExistingLabels");
-            _overwriteExistingLabels = overwriteExistingLabels;
-
-            if (_notesSuccessfullyApplied is not null)
-            {
-                SpheneUI.Layout.VerticalSpace();
-                if (_notesSuccessfullyApplied!.Value)
-                    SpheneUI.Text.Colored("Notes successfully applied.", ImGuiColors.ParsedGreen);
-                else
-                    SpheneUI.Text.Colored("Failed to apply notes.", ImGuiColors.DalamudRed);
-            }
-        });
-
-        DrawSettingsCard("Labels & Popups", () =>
-        {
-            PeopleNotesOptionBlock.DrawOpenNotesPopupOnUserAdditionOption(_configService, _uiShared, "PeopleNotesOpenNotesPopupOnUserAddition");
-            PeopleNotesOptionBlock.DrawAutoPopulateNotesUsingPlayerNamesOption(_configService, _uiShared, "PeopleNotesAutoPopulateNotesUsingPlayerNames");
-        });
-    }
-
     private void DrawGeneralUiDisplaySettings()
     {
         DrawSettingsPageHeader("Appearance", "Configure interface behavior, user list presentation, and profile display options.");
 
-        DrawSettingsCard("Basic Interface", () =>
+        DrawSettingsCard("Basic Interface", FontAwesomeIcon.Desktop, () =>
         {
             AppearanceOptionBlock.DrawShowSpheneIconOption(_configService, "AppearanceShowSpheneIcon");
             AppearanceOptionBlock.DrawHideSpheneIconInGposeOption(_configService, "AppearanceHideSpheneIconInGpose");
             AppearanceOptionBlock.DrawLockSpheneIconPositionOption(_configService, "AppearanceLockSpheneIconPosition");
+            AppearanceOptionBlock.DrawIconNotificationBubbleOption(_configService, "AppearanceIconNotificationBubble");
             AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
             AppearanceOptionBlock.DrawReopenSpheneHubOnStartupOption(_configService, "AppearanceReopenSpheneHubOnStartup");
+            AppearanceOptionBlock.DrawLayoutDensityOption(_configService, "AppearanceLayoutDensity");
         });
 
-        DrawSettingsCard("Window Effects", () =>
+        DrawSettingsCard("Window Effects", FontAwesomeIcon.Magic, () =>
         {
             var theme = SpheneTheme.Current;
             var themeChanged = false;
@@ -3991,7 +3063,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
         // ShrinkU integration settings moved to Overview page alongside version info
 
-        DrawSettingsCard("Server Info Bar", () =>
+        DrawSettingsCard("Server Info Bar", FontAwesomeIcon.Server, () =>
         {
             var enableDtrEntry = AppearanceOptionBlock.DrawShowStatusInServerInfoBarOption(_configService, "AppearanceShowStatusInServerInfoBar");
             using (ImRaii.Disabled(!enableDtrEntry))
@@ -4003,7 +3075,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         });
 
-        DrawSettingsCard("User List Options", () =>
+        DrawSettingsCard("User List Options", FontAwesomeIcon.ListUl, () =>
         {
             AppearanceOptionBlock.DrawSetVisiblePairsAsFocusTargetsOption(_configService, "AppearanceSetVisiblePairsAsFocusTargets");
 
@@ -4017,7 +3089,14 @@ public class SettingsUi : WindowMediatorSubscriberBase
             AppearanceOptionBlock.DrawGroupUpAllSyncshellsInOneFolderOption(_configService, _uiShared, Mediator, "AppearanceGroupUpAllSyncshellsInOneFolder");
         });
 
-        DrawSettingsCard("Profile Settings", () =>
+        DrawSettingsCard("Supporter Nameplates", FontAwesomeIcon.Crown, () =>
+        {
+            SupporterNameplateOptionBlock.DrawShowSupporterNameplateOption(_configService, _uiShared, "AppearanceShowSupporterNameplate");
+            SupporterNameplateOptionBlock.DrawSupporterIconSizeOption(_configService, "AppearanceSupporterIconSize");
+            SupporterNameplateOptionBlock.DrawGpuDepthOcclusionOption(_configService, "AppearanceGpuDepthOcclusion");
+        }, "Controls how supporter symbols, icons and labels appear on in-game nameplates for you.");
+
+        DrawSettingsCard("Profile Settings", FontAwesomeIcon.UserCog, () =>
         {
             var showProfiles = AppearanceOptionBlock.DrawShowSpheneProfilesOption(_configService, _uiShared, Mediator, "AppearanceShowSpheneProfiles");
             ImGui.Indent();
@@ -4048,7 +3127,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Notifications", "Configure where notifications appear and which sync events should trigger them.");
 
-        DrawSettingsCard("Notification Channels", () =>
+        DrawSettingsCard("Notification Channels", FontAwesomeIcon.Bell, () =>
         {
             NotificationsOptionBlock.DrawInfoNotificationDisplayOption(_configService, _uiShared, "NotificationsInfoNotificationDisplay");
             NotificationsOptionBlock.DrawWarningNotificationDisplayOption(_configService, _uiShared, "NotificationsWarningNotificationDisplay");
@@ -4060,7 +3139,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             NotificationsOptionBlock.DrawShowTestBuildUpdatesOption(_configService, _uiShared, "NotificationsShowTestBuildUpdates");
         });
 
-        DrawSettingsCard("Area-bound Syncshell Notifications", () =>
+        DrawSettingsCard("Area-bound Syncshell Notifications", FontAwesomeIcon.BroadcastTower, () =>
         {
             if (NotificationsOptionBlock.DrawEnableAreaBoundSyncshellNotificationsOption(_configService, _uiShared, "NotificationsEnableAreaBoundSyncshellNotifications"))
             {
@@ -4071,13 +3150,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
             NotificationsOptionBlock.DrawShowAreaBoundSyncshellWelcomeMessagesOption(_configService, _uiShared, "NotificationsShowAreaBoundSyncshellWelcomeMessages");
             NotificationsOptionBlock.DrawAutomaticallyShowAreaBoundSyncshellConsentOption(_configService, _uiShared, "NotificationsAutomaticallyShowAreaBoundSyncshellConsent");
         });
+
+        DrawSettingsCard("Community Notifications", FontAwesomeIcon.Users, () =>
+        {
+            NotificationsOptionBlock.DrawCommunityNotificationMutesOption(_apiController);
+        });
     }
 
     private void DrawAcknowledgmentSettings()
     {
         DrawSettingsPageHeader("Acknowledgment", "Tune acknowledgment notifications, reliability, and batching behavior.");
 
-        DrawSettingsCard("Popup Settings", () =>
+        DrawSettingsCard("Popup Settings", FontAwesomeIcon.CommentAlt, () =>
         {
             var showPopups = AcknowledgmentOptionBlock.DrawShowAcknowledgmentNotificationsOption(_configService, _uiShared, "AcknowledgmentShowAcknowledgmentNotifications");
             AcknowledgmentOptionBlock.DrawShowWaitingForAcknowledgmentPopupsOption(_configService, _uiShared, "AcknowledgmentShowWaitingForAcknowledgmentPopups");
@@ -4090,18 +3174,18 @@ public class SettingsUi : WindowMediatorSubscriberBase
             }
         });
 
-        DrawSettingsCard("Performance Settings", () =>
+        DrawSettingsCard("Performance Settings", FontAwesomeIcon.TachometerAlt, () =>
         {
             AcknowledgmentOptionBlock.DrawEnableBatchingOption(_configService, _uiShared, "AcknowledgmentEnableBatching");
             AcknowledgmentOptionBlock.DrawEnableAutoRetryOption(_configService, _uiShared, "AcknowledgmentEnableAutoRetry");
         });
 
-        DrawSettingsCard("Timeout & Reliability", () =>
+        DrawSettingsCard("Timeout & Reliability", FontAwesomeIcon.Clock, () =>
         {
             AcknowledgmentOptionBlock.DrawAcknowledgmentTimeoutOption(_configService, _uiShared, "AcknowledgmentTimeout");
         });
 
-        DrawSettingsCard("Information", () =>
+        DrawSettingsCard("Information", FontAwesomeIcon.InfoCircle, () =>
         {
             SpheneUI.Text.Wrapped("The acknowledgment system helps maintain synchronization between connected users. " +
                               "When disabled, popup notifications will not appear, but the system will continue to function in the background. " +
@@ -4116,17 +3200,17 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Sync Behavior", "Control how incoming and outgoing synchronization data is handled.");
 
-        DrawSettingsCard("Incoming Sync", () =>
+        DrawSettingsCard("Incoming Sync", FontAwesomeIcon.Download, () =>
         {
             SyncBehaviorOptionBlock.DrawIncomingSyncWithoutRedraw(_configService, _uiShared, "SettingsIncomingSyncWithoutRedraw");
         });
 
-        DrawSettingsCard("Outgoing Sync Batching", () =>
+        DrawSettingsCard("Outgoing Sync Batching", FontAwesomeIcon.Upload, () =>
         {
             SyncBehaviorOptionBlock.DrawOutgoingSyncBatching(_configService, _uiShared, "SettingsOutgoingSyncBatching");
         });
 
-        DrawSettingsCard("Filter", () =>
+        DrawSettingsCard("Filter", FontAwesomeIcon.Filter, () =>
         {
             SyncBehaviorOptionBlock.DrawFilterCharacterLegacyShpkInOutgoingCharacterData(_configService, _uiShared, Mediator, "SettingsFilterCharacterLegacyShpk");
         });
@@ -4147,10 +3231,10 @@ public class SettingsUi : WindowMediatorSubscriberBase
     {
         DrawSettingsPageHeader("Theme", "Customize colors and styling for Sphene UI elements.");
 
-        DrawSettingsCard("Themes", DrawThemeSelector,
+        DrawSettingsCard("Themes", FontAwesomeIcon.Palette, DrawThemeSelector,
             "Select from built-in themes or your custom saved themes. Changes apply immediately.");
 
-        DrawSettingsCard("Theme Editor", () =>
+        DrawSettingsCard("Theme Editor", FontAwesomeIcon.Edit, () =>
         {
             var tabLabels = new List<string>(4);
             if (ApiController.IsAdmin)
@@ -4202,7 +3286,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
         ImGui.SameLine(0, ImGui.GetStyle().ItemSpacing.X + 6f * ImGuiHelpers.GlobalScale);
         // The enclosing ThemeTabContent scroll area appends its own
-        // ScrollAreaContentInset spacer after this child — without reserving
+        // ScrollAreaContentInset spacer after this child · without reserving
         // for it the parent gains a sliver of scroll range and the wheel
         // chaining pushes the whole nav column up when scrolling to bottom.
         var sectionsBottomReserve = ImGui.GetStyle().ItemSpacing.Y
@@ -5570,7 +4654,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// Back/forward arrows plus the crumb pill inside the chrome title bar —
+    /// Back/forward arrows plus the crumb pill inside the chrome title bar  · 
     /// the same cluster the hub draws in its header, minus the profile card.
     /// </summary>
     private void DrawSettingsTitleCluster(Vector2 zoneMin, Vector2 zoneMax)
@@ -5608,19 +4692,36 @@ public class SettingsUi : WindowMediatorSubscriberBase
             zoneMax.X - crumbX, category, label, null);
     }
 
-    /// <summary>Raised when the active settings page changes through user navigation — args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
+    /// <summary>Raised when the active settings page changes through user navigation · args are (previous, next, embedded). The hub folds embedded-surface changes into its own breadcrumb/history.</summary>
     internal event Action<SettingsPage, SettingsPage, bool>? SettingsPageChanged;
 
-    /// <summary>The page the Hub-embedded settings shows — read by the hub for its crumb. The standalone window has its own page state.</summary>
+    /// <summary>The page the Hub-embedded settings shows · read by the hub for its crumb. The standalone window has its own page state.</summary>
     internal SettingsPage ActiveSettingsPageValue => _embeddedSettingsPage;
 
     /// <summary>Label of the embedded settings page for the hub breadcrumb.</summary>
     internal string ActiveCrumbLabel => SettingsCrumbInfo(DiagnosticsPageLabel, _embeddedSettingsPage).Label;
 
-    /// <summary>Applies a page to the Hub-embedded settings without recording it in history — used for hub-driven restores.</summary>
+    /// <summary>Applies a page to the Hub-embedded settings without recording it in history · used for hub-driven restores.</summary>
+    /// <summary>Selects a release in the release-notes view (news cards,
+    /// hub history restore).</summary>
+    internal void SelectReleaseNote(string version)
+        => _releaseChangelogUi.SelectRelease(version);
+
     internal void ApplySettingsPageQuiet(SettingsPage page)
     {
         _embeddedSettingsPage = page;
+    }
+
+    /// <summary>
+    /// Fresh entry into the Hub-embedded settings lands on <paramref name="page"/>
+    /// · the embedded surface doesn't resurrect its last tab on a new visit.
+    /// History restores (SubPage on the hub location) bypass this.
+    /// </summary>
+    internal void ResetEmbeddedNavigation(SettingsPage page = SettingsPage.Home)
+    {
+        _embeddedSettingsPage = page;
+        _embeddedNavBack.Clear();
+        _embeddedNavForward.Clear();
     }
 
     /// <summary>Switches the active settings page and records it in the title bar back/forward history.</summary>
@@ -6241,6 +5342,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     
     // Theme change tracking
     private bool _hasUnsavedThemeChanges = false;
+    private readonly UnsavedChangesToast _themeToast = new();
     private ThemeConfiguration? _originalThemeState = null;
     private string _currentThemeName = "";
     private bool _showThemeSavePrompt = false;
@@ -6354,53 +5456,70 @@ public class SettingsUi : WindowMediatorSubscriberBase
             ImGui.OpenPopup("SaveThemePopup");
         }
 
-        ImGui.SameLine();
-        using (ImRaii.Disabled(!_hasUnsavedThemeChanges))
-        {
-            if (SpheneUI.Controls.Button("Save Theme Changes"))
-            {
-                if (!string.IsNullOrEmpty(_currentThemeName) && !builtInThemes.Contains(_currentThemeName, StringComparer.Ordinal))
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        var success = await ThemeManager.SaveTheme(SpheneTheme.Current, _currentThemeName).ConfigureAwait(false);
-                        if (success)
-                        {
-                            _hasUnsavedThemeChanges = false;
-                        }
-                    });
-                }
-                else
-                {
-                    ImGui.OpenPopup("SaveThemePopup");
-                }
-            }
-        }
-
-        ImGui.SameLine();
-        using (ImRaii.Disabled(!_hasUnsavedThemeChanges))
-        {
-            if (SpheneUI.Controls.Button("Reset Theme Changes"))
-            {
-                if (_originalThemeState != null)
-                {
-                    ThemePropertyCopier.Copy(_originalThemeState, SpheneTheme.Current);
-                }
-                else
-                {
-                    SpheneTheme.Current.ResetToDefaults();
-                }
-                SpheneTheme.Current.NotifyThemeChanged();
-                _hasUnsavedThemeChanges = false;
-            }
-        }
-        
         // Save Theme Popup
         if (SpheneUI.Popups.BeginStyled("SaveThemePopup"))
         {
             DrawSaveThemePopup();
             SpheneUI.Popups.EndStyled();
         }
+
+        DrawThemeToast();
+    }
+
+    /// <summary>Commits the pending theme edits · saves over the current
+    /// custom theme, or asks for a name when the theme is a built-in or
+    /// unnamed one.</summary>
+    private void SaveThemeChanges()
+    {
+        if (!string.IsNullOrEmpty(_currentThemeName)
+            && !ThemePresets.BuiltInThemes.Keys.Contains(_currentThemeName, StringComparer.Ordinal))
+        {
+            _ = Task.Run(async () =>
+            {
+                var success = await ThemeManager.SaveTheme(SpheneTheme.Current, _currentThemeName).ConfigureAwait(false);
+                if (success)
+                {
+                    _hasUnsavedThemeChanges = false;
+                }
+            });
+        }
+        else
+        {
+            ImGui.OpenPopup("SaveThemePopup");
+        }
+    }
+
+    /// <summary>Drops the pending theme edits · restores the snapshot taken
+    /// when the settings surface opened (defaults as fallback).</summary>
+    private void ResetThemeChanges()
+    {
+        if (_originalThemeState != null)
+        {
+            ThemePropertyCopier.Copy(_originalThemeState, SpheneTheme.Current);
+        }
+        else
+        {
+            SpheneTheme.Current.ResetToDefaults();
+        }
+        SpheneTheme.Current.NotifyThemeChanged();
+        _hasUnsavedThemeChanges = false;
+    }
+
+    /// <summary>The floating unsaved-changes bar for the theme page · rides
+    /// the bottom of the settings content while theme edits are pending.</summary>
+    private void DrawThemeToast()
+    {
+        var wMin = ImGui.GetWindowPos() + ImGui.GetWindowContentRegionMin();
+        var wMax = ImGui.GetWindowPos() + ImGui.GetWindowContentRegionMax();
+        _themeToast.Draw(_hasUnsavedThemeChanges,
+            "You have unsaved theme changes",
+            (wMin.X + wMax.X) * 0.5f, wMax.Y,
+            new UnsavedChangesToast.Button("Reset", FontAwesomeIcon.Undo,
+                SpheneUI.Colors.Accent, true,
+                "Restore the theme as it was when settings opened.", ResetThemeChanges),
+            new UnsavedChangesToast.Button("Save Theme", FontAwesomeIcon.Check,
+                SpheneUI.Palette.LuminousGold, true,
+                "Save the pending theme changes.", SaveThemeChanges));
     }
 
     private void ApplySelectedPresetTheme(string themeName, List<string> builtInThemes)

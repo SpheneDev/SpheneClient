@@ -99,7 +99,7 @@ public class TopTabMenu
         var buttonY = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Pause).Y;
         var buttonSize = new Vector2(buttonX, buttonY);
         var drawList = ImGui.GetWindowDrawList();
-        // The rail owns the visuals — keep every button state transparent.
+        // The rail owns the visuals · keep every button state transparent.
         var btncolor = ImRaii.PushColor(ImGuiCol.Button, 0u)
             .Push(ImGuiCol.ButtonHovered, 0u)
             .Push(ImGuiCol.ButtonActive, 0u);
@@ -609,7 +609,8 @@ public class TopTabMenu
         {
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Create new Syncshell", buttonX))
             {
-                _spheneMediator.Publish(new UiToggleMessage(typeof(CreateSyncshellUI)));
+                _spheneMediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Syncshells,
+                    SyncshellSub: SyncshellHubSubPage.Create));
             }
             ImGui.SameLine();
         }
@@ -618,7 +619,8 @@ public class TopTabMenu
         {
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Users, "Join existing Syncshell", buttonX))
             {
-                _spheneMediator.Publish(new UiToggleMessage(typeof(JoinSyncshellUI)));
+                _spheneMediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Syncshells,
+                    SyncshellSub: SyncshellHubSubPage.Join));
             }
         }
     }

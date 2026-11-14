@@ -22,19 +22,54 @@ public static partial class SpheneUI
         /// (typically <see cref="ImGui.GetID"/> with the button's label).
         /// Ramps in while <paramref name="hovered"/>, eases back out otherwise.
         /// </summary>
+        private static readonly Dictionary<uint, float> TweenStates = new();
+
+        /// <summary>String-keyed overload · call sites stay consistent even
+        /// when the ImGui id stack differs between window contexts.</summary>
+        public static float Tween(string key, float target, float speed = 14f)
+            => Tween(unchecked((uint)key.GetHashCode(StringComparison.Ordinal)), target, speed);
+
+        /// <summary>
+        /// Eased value that chases <paramref name="target"/> every call -
+        /// panel-width morphs, expanding inboxes, any animated scalar a
+        /// flyout wants to resize toward instead of snapping. Persists per
+        /// <paramref name="id"/> across view switches, so a back-and-forth
+        /// morph animates in both directions.
+        /// </summary>
+        public static float Tween(uint id, float target, float speed = 14f)
+        {
+            var exists = TweenStates.TryGetValue(id, out var v);
+            if (!exists)
+            {
+                v = target;
+            }
+            v += (target - v) * (1f - MathF.Exp(-speed * ImGui.GetIO().DeltaTime));
+            TweenStates[id] = v;
+            return v;
+        }
+
+        /// <summary>String-keyed overload of <see cref="TweenSet(uint, float)"/>.</summary>
+        public static void TweenSet(string key, float value)
+            => TweenSet(unchecked((uint)key.GetHashCode(StringComparison.Ordinal)), value);
+
+        /// <summary>Snaps a tween to <paramref name="value"/> - used when a
+        /// flyout closes so the next open starts from the resting state
+        /// instead of continuing where the last view left it.</summary>
+        public static void TweenSet(uint id, float value) => TweenStates[id] = value;
+
         public static float HoverT(uint id, bool hovered, float speed = 9f)
         {
             var dt = ImGui.GetIO().DeltaTime;
             HoverStates.TryGetValue(id, out var t);
             t = Math.Clamp(t + (hovered ? dt : -dt) * speed, 0f, 1f);
             HoverStates[id] = t;
-            // smoothstep — fast in, soft out
+            // smoothstep · fast in, soft out
             return t * t * (3f - 2f * t);
         }
 
         /// <summary>
         /// Standard row/card hover treatment driven by <see cref="HoverT"/>:
-        /// a light fill and accent border that fade in — personal accent
+        /// a light fill and accent border that fade in · personal accent
         /// colors make this read as "their" color when used on
         /// friend/character rows.
         /// </summary>
@@ -49,12 +84,48 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Lifted-card hover treatment for clickable surfaces: a soft shadow
+        /// under the card plus a gentle fill brighten and accent edge, all
+        /// driven by an eased <see cref="HoverT"/> value so cards "rise"
+        /// toward the pointer instead of snapping. Draw before the card's
+        /// own fill (shadow) and after it (tint + edge), or once for a
+        /// surface that already painted its base - the layers are additive.
+        /// </summary>
+        public static void HoverLift(ImDrawListPtr drawList, Vector2 min, Vector2 max,
+            float t, float radius, Vector4? accent = null)
+        {
+            if (t <= 0f)
+            {
+                return;
+            }
+            var lift = accent ?? Colors.Accent;
+            // grounded shadow that deepens with hover progress
+            drawList.AddRectFilled(min + new Vector2(0f, (1.2f + 1.6f * t) * Scale),
+                max + new Vector2(0f, (2.5f + 3f * t) * Scale),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.Zero, 0.10f + 0.10f * t)),
+                radius + 1.5f * Scale);
+            drawList.AddRectFilled(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.015f + 0.045f * t)), radius);
+            drawList.AddRect(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(lift, 0.08f + 0.30f * t)), radius);
+        }
+
+        /// <summary>
+        /// Convenience for cards drawn by the caller: hit-test + eased hover
+        /// in one call. Pass <paramref name="id"/> from a stable widget id;
+        /// returns true while the pointer is inside (for cursor/click work
+        /// the caller still uses its own button/invisible button).
+        /// </summary>
+        public static float HoverLiftT(uint id, Vector2 min, Vector2 max, float speed = 9f)
+            => HoverT(id, ImGui.IsMouseHoveringRect(min, max), speed);
+
+        /// <summary>
         /// Traveling light band clipped to <paramref name="min"/>..<paramref name="max"/>.
         /// <paramref name="phase"/> is the sweep position 0..1; values outside
         /// draw nothing, so callers can cycle `phase = (time * speed) % 1.5`
         /// to get a sweep followed by a rest interval. With a <paramref name="radius"/>
         /// and selective <paramref name="corners"/> the clip is split so the band
-        /// never bleeds into rounded corner zones (clip rects are axis-aligned —
+        /// never bleeds into rounded corner zones (clip rects are axis-aligned  · 
         /// corner squares are excluded instead of curved).
         /// </summary>
         public static void Sheen(ImDrawListPtr drawList, Vector2 min, Vector2 max,
@@ -122,6 +193,103 @@ public static partial class SpheneUI
         public static void Reset()
         {
             HoverStates.Clear();
+            RiseStarts.Clear();
+        }
+
+        // ---- Entrance, elevation & skeleton primitives -------------------
+
+        private static readonly Dictionary<uint, double> RiseStarts = new();
+
+        /// <summary>
+        /// Staggered entrance progress 0..1 for an item inside a container  · 
+        /// the first call starts a shared timer on <paramref name="groupId"/>,
+        /// each <paramref name="index"/> delays its own ease so grid items
+        /// rise in sequence instead of popping in together.
+        /// </summary>
+        public static float RiseT(uint groupId, int index, float duration = 0.20f)
+        {
+            if (!RiseStarts.TryGetValue(groupId, out var t0))
+            {
+                t0 = ImGui.GetTime();
+                RiseStarts[groupId] = t0;
+            }
+            var delay = MathF.Min(index * 0.045f, 0.5f);
+            var e = Math.Clamp((float)(ImGui.GetTime() - t0 - delay) / duration, 0f, 1f);
+            return e * e * (3f - 2f * e);
+        }
+
+        /// <summary>
+        /// Two-pass soft drop shadow · a tight darker lift plus a wider faint
+        /// spread · giving flat surfaces a light elevation step. Draw before
+        /// the surface's own fill.
+        /// </summary>
+        public static void SoftShadow(ImDrawListPtr drawList, Vector2 min,
+            Vector2 max, float radius, float strength = 1f)
+        {
+            var s = Scale;
+            drawList.AddRectFilled(min + new Vector2(0f, 1.2f * s),
+                max + new Vector2(0f, 2.5f * s),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.Zero, 0.13f * strength)),
+                radius + 1.5f * s);
+            drawList.AddRectFilled(min + new Vector2(0f, 3f * s),
+                max + new Vector2(0f, 5.5f * s),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.Zero, 0.055f * strength)),
+                radius + 4f * s);
+        }
+
+        /// <summary>
+        /// Soft ambient glow around a rect · two expanding accent washes that
+        /// read as light spilling from the element's edge. Cheap (two draw
+        /// calls, no blur pass) · reserve for the few moments a page wants to
+        /// spotlight (primary actions, active nav pills, hero edges) rather
+        /// than wrapping every control.
+        /// </summary>
+        public static void AmbientGlow(ImDrawListPtr drawList, Vector2 min,
+            Vector2 max, float radius, Vector4 color, float strength = 1f)
+        {
+            if (strength <= 0f)
+            {
+                return;
+            }
+            var s = Scale;
+            drawList.AddRectFilled(min - new Vector2(1.5f * s), max + new Vector2(1.5f * s),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(color, 0.10f * strength)),
+                radius + 1.5f * s);
+            drawList.AddRectFilled(min - new Vector2(4f * s), max + new Vector2(4f * s),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(color, 0.045f * strength)),
+                radius + 4f * s);
+        }
+
+        /// <summary>
+        /// Skeleton placeholder · a tonal bar with a slow breathing pulse and
+        /// a periodic sheen sweep, used instead of spinners while content
+        /// streams in.
+        /// </summary>
+        public static void Skeleton(ImDrawListPtr drawList, Vector2 min,
+            Vector2 max, float radius)
+        {
+            var t = (float)ImGui.GetTime();
+            var pulse = 0.5f + 0.5f * MathF.Sin(t * 2.4f);
+            drawList.AddRectFilled(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.05f + 0.035f * pulse)),
+                radius);
+            // ~40% of the cycle carries a light sweep, the rest breathes.
+            var phase = (t * 0.55f) % 2.5f;
+            Sheen(drawList, min, max, phase, 70f * Scale,
+                ColorUtils.WithAlpha(Vector4.One, 0.06f), radius);
+        }
+
+        /// <summary>One skeleton bar as a layout item · reserves a
+        /// text-height row (or <paramref name="height"/>) and draws the
+        /// placeholder into it.</summary>
+        public static void SkeletonLine(float widthFrac = 1f, float height = -1f)
+        {
+            var h = height > 0f ? height : ImGui.GetTextLineHeight() + 8f * Scale;
+            var w = MathF.Max(40f * Scale, ImGui.GetContentRegionAvail().X * widthFrac);
+            ImGui.Dummy(new Vector2(w, h));
+            var min = ImGui.GetItemRectMin();
+            Skeleton(ImGui.GetWindowDrawList(), min, ImGui.GetItemRectMax(),
+                Metrics.ButtonRadius);
         }
 
         // ---- Star-chart backdrop & rail motes -----------------------------
@@ -143,7 +311,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Static "star chart" window backdrop: a sparse field of twinkling
-        /// stars — a few tinted with the theme accent — plus faint chart
+        /// stars · a few tinted with the theme accent · plus faint chart
         /// lines between close neighbours and a handful of brighter stars
         /// carrying a small cross glint. Geometry is generated once from a
         /// fixed seed in normalized space and scaled to the window rect.
@@ -226,7 +394,7 @@ public static partial class SpheneUI
         /// Builds the star field once: a uniform sparse layer plus extra
         /// weight toward the edges (the window center is content-dense
         /// anyway), a few bright chart stars, and short links between close
-        /// neighbours — capped so the sky never turns into a mesh.
+        /// neighbours · capped so the sky never turns into a mesh.
         /// </summary>
         private static (Star[] Stars, StarLink[] Links) BuildConstellation()
         {
@@ -283,7 +451,7 @@ public static partial class SpheneUI
             return ([.. stars], [.. links]);
         }
 
-        /// <summary>Twelve motes on individual 9–20s cycles, a third tinted accent.</summary>
+        /// <summary>Twelve motes on individual 9-20s cycles, a third tinted accent.</summary>
         private static Mote[] BuildRailMotes()
         {
             var rng = new Random(0xC0FF);

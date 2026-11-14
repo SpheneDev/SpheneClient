@@ -56,103 +56,112 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
         var style = ImGui.GetStyle();
         var indentSize = ImGui.GetFrameHeight() + style.ItemSpacing.X;
 
-        SpheneUI.Text.PageHeader("Permissions for " + Pair.UserData.AliasOrUID);
-
-        if (SpheneUI.Controls.Toggle("Preferred Permissions", ref sticky))
+        SpheneUI.Layout.PageHeader("Permissions for " + Pair.UserData.AliasOrUID, "permissions", () =>
         {
-            _ownPermissions.SetSticky(sticky);
-        }
-        SpheneUI.Controls.HelpText("Preferred Permissions, when enabled, will exclude this user from any permission changes on any syncshells you share with this user.");
+            SpheneUI.Text.MutedWrapped("Per-user sync permissions - override your defaults for this friend only. Sticky keeps them across sessions.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
-        SpheneUI.Layout.Space(SpheneUI.Spacing.Hairline);
-
-
-        if (SpheneUI.Controls.Toggle("Pause Sync", ref paused))
-        {
-            _ownPermissions.SetPaused(paused);
-        }
-        SpheneUI.Controls.HelpText("Pausing will completely cease any sync with this user." + SpheneUI.TooltipSeparator
-            + "Note: this is bidirectional, either user pausing will cease sync completely.");
         var otherPerms = Pair.UserPair.OtherPermissions;
-
         var otherIsPaused = otherPerms.IsPaused();
         var otherDisableSounds = otherPerms.IsDisableSounds();
         var otherDisableAnimations = otherPerms.IsDisableAnimations();
         var otherDisableVFX = otherPerms.IsDisableVFX();
         var otherDisableVfxInDuty = otherPerms.IsDisableVFXInDuty();
 
-        using (ImRaii.PushIndent(indentSize, false))
+        SpheneUI.Layout.RowGroup(() =>
         {
-            SpheneUI.Icons.BoolIcon(!otherIsPaused, false);
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherIsPaused ? "not " : string.Empty) + "paused you");
-        }
+            if (SpheneUI.Controls.Toggle("Preferred Permissions", ref sticky))
+            {
+                _ownPermissions.SetSticky(sticky);
+            }
+            SpheneUI.Controls.HelpText("Preferred Permissions, when enabled, will exclude this user from any permission changes on any syncshells you share with this user.");
 
-        SpheneUI.Layout.SectionSeparator("Sync Permissions");
+            if (SpheneUI.Controls.Toggle("Pause Sync", ref paused))
+            {
+                _ownPermissions.SetPaused(paused);
+            }
+            SpheneUI.Controls.HelpText("Pausing will completely cease any sync with this user." + SpheneUI.TooltipSeparator
+                + "Note: this is bidirectional, either user pausing will cease sync completely.");
 
-        if (SpheneUI.Controls.Toggle("Disable Sounds", ref disableSounds))
-        {
-            _ownPermissions.SetDisableSounds(disableSounds);
-        }
-        SpheneUI.Controls.HelpText("Disabling sounds will remove all sounds synced with this user on both sides." + SpheneUI.TooltipSeparator
-            + "Note: this is bidirectional, either user disabling sound sync will stop sound sync on both sides.");
-        using (ImRaii.PushIndent(indentSize, false))
-        {
-            SpheneUI.Icons.BoolIcon(!otherDisableSounds, false);
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableSounds ? "not " : string.Empty) + "disabled sound sync with you");
-        }
+            using (ImRaii.PushIndent(indentSize, false))
+            {
+                SpheneUI.Icons.BoolIcon(!otherIsPaused, false);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherIsPaused ? "not " : string.Empty) + "paused you");
+            }
+        }, id: "perm-general");
 
-        if (SpheneUI.Controls.Toggle("Disable Animations", ref disableAnimations))
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Text.SectionHeader("Sync Permissions");
+        SpheneUI.Layout.RowGroup(() =>
         {
-            _ownPermissions.SetDisableAnimations(disableAnimations);
-        }
-        SpheneUI.Controls.HelpText("Disabling sounds will remove all animations synced with this user on both sides." + SpheneUI.TooltipSeparator
-            + "Note: this is bidirectional, either user disabling animation sync will stop animation sync on both sides.");
-        using (ImRaii.PushIndent(indentSize, false))
-        {
-            SpheneUI.Icons.BoolIcon(!otherDisableAnimations, false);
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableAnimations ? "not " : string.Empty) + "disabled animation sync with you");
-        }
+            if (SpheneUI.Controls.Toggle("Disable Sounds", ref disableSounds))
+            {
+                _ownPermissions.SetDisableSounds(disableSounds);
+            }
+            SpheneUI.Controls.HelpText("Disabling sounds will remove all sounds synced with this user on both sides." + SpheneUI.TooltipSeparator
+                + "Note: this is bidirectional, either user disabling sound sync will stop sound sync on both sides.");
+            using (ImRaii.PushIndent(indentSize, false))
+            {
+                SpheneUI.Icons.BoolIcon(!otherDisableSounds, false);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableSounds ? "not " : string.Empty) + "disabled sound sync with you");
+            }
 
-        if (SpheneUI.Controls.Toggle("Disable VFX", ref disableVfx))
-        {
-            _ownPermissions.SetDisableVFX(disableVfx);
-        }
-        SpheneUI.Controls.HelpText("Disabling sounds will remove all VFX synced with this user on both sides." + SpheneUI.TooltipSeparator
-            + "Note: this is bidirectional, either user disabling VFX sync will stop VFX sync on both sides.");
-        using (ImRaii.PushIndent(indentSize, false))
-        {
-            SpheneUI.Icons.BoolIcon(!otherDisableVFX, false);
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVFX ? "not " : string.Empty) + "disabled VFX sync with you");
-        }
+            if (SpheneUI.Controls.Toggle("Disable Animations", ref disableAnimations))
+            {
+                _ownPermissions.SetDisableAnimations(disableAnimations);
+            }
+            SpheneUI.Controls.HelpText("Disabling sounds will remove all animations synced with this user on both sides." + SpheneUI.TooltipSeparator
+                + "Note: this is bidirectional, either user disabling animation sync will stop animation sync on both sides.");
+            using (ImRaii.PushIndent(indentSize, false))
+            {
+                SpheneUI.Icons.BoolIcon(!otherDisableAnimations, false);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableAnimations ? "not " : string.Empty) + "disabled animation sync with you");
+            }
 
-        if (SpheneUI.Controls.Toggle("Disable VFX in Duty", ref disableVfxInDuty))
-        {
-            _ownPermissions.SetDisableVFXInDuty(disableVfxInDuty);
-        }
-        SpheneUI.Controls.HelpText("When enabled, VFX files from this user will be removed while you are in duty." + SpheneUI.TooltipSeparator
-            + "Note: this is bidirectional, either user enabling this will stop duty VFX sync on both sides.");
-        using (ImRaii.PushIndent(indentSize, false))
-        {
-            SpheneUI.Icons.BoolIcon(!otherDisableVfxInDuty, false);
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVfxInDuty ? "not " : string.Empty) + "disabled VFX sync in duty with you");
-        }
+            if (SpheneUI.Controls.Toggle("Disable VFX", ref disableVfx))
+            {
+                _ownPermissions.SetDisableVFX(disableVfx);
+            }
+            SpheneUI.Controls.HelpText("Disabling sounds will remove all VFX synced with this user on both sides." + SpheneUI.TooltipSeparator
+                + "Note: this is bidirectional, either user disabling VFX sync will stop VFX sync on both sides.");
+            using (ImRaii.PushIndent(indentSize, false))
+            {
+                SpheneUI.Icons.BoolIcon(!otherDisableVFX, false);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVFX ? "not " : string.Empty) + "disabled VFX sync with you");
+            }
+
+            if (SpheneUI.Controls.Toggle("Disable VFX in Duty", ref disableVfxInDuty))
+            {
+                _ownPermissions.SetDisableVFXInDuty(disableVfxInDuty);
+            }
+            SpheneUI.Controls.HelpText("When enabled, VFX files from this user will be removed while you are in duty." + SpheneUI.TooltipSeparator
+                + "Note: this is bidirectional, either user enabling this will stop duty VFX sync on both sides.");
+            using (ImRaii.PushIndent(indentSize, false))
+            {
+                SpheneUI.Icons.BoolIcon(!otherDisableVfxInDuty, false);
+                ImGui.SameLine();
+                ImGui.AlignTextToFramePadding();
+                SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVfxInDuty ? "not " : string.Empty) + "disabled VFX sync in duty with you");
+            }
+        }, id: "perm-sync");
 
         SpheneUI.Layout.Separator();
 
         bool hasChanges = _ownPermissions != Pair.UserPair.OwnPermissions;
 
-        using (ImRaii.Disabled(!hasChanges))
-            if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.Save, "Save"))
+        var saveW = SpheneUI.Icons.TextButtonWidth(Dalamud.Interface.FontAwesomeIcon.Save, "Save");
+        SpheneUI.Layout.ActionBar(saveW, () =>
+        {
+            if (SpheneUI.Controls.PrimaryButton("Save",
+                    Dalamud.Interface.FontAwesomeIcon.Save, enabled: hasChanges))
             {
                 _ = _apiController.SetBulkPermissions(new(
                     new(StringComparer.Ordinal)
@@ -162,40 +171,37 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
                     new(StringComparer.Ordinal)
                 ));
             }
-        SpheneUI.AttachTooltip("Save and apply all changes");
-
-        var rightSideButtons = SpheneUI.Icons.TextButtonWidth(Dalamud.Interface.FontAwesomeIcon.Undo, "Revert") +
-            SpheneUI.Icons.TextButtonWidth(Dalamud.Interface.FontAwesomeIcon.ArrowsSpin, "Reset to Default");
-        var availableWidth = ImGui.GetWindowContentRegionMax().X - ImGui.GetWindowContentRegionMin().X;
-
-        ImGui.SameLine(availableWidth - rightSideButtons);
-
-        using (ImRaii.Disabled(!hasChanges))
-            if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.Undo, "Revert"))
+            SpheneUI.AttachTooltip("Save and apply all changes");
+        }, avail =>
+        {
+            if (SpheneUI.Controls.SegmentButton("Revert",
+                    Dalamud.Interface.FontAwesomeIcon.Undo, enabled: hasChanges))
             {
                 _ownPermissions = Pair.UserPair.OwnPermissions.DeepClone();
             }
-        SpheneUI.AttachTooltip("Revert all changes");
+            SpheneUI.AttachTooltip("Revert all changes");
 
-        ImGui.SameLine();
-        if (SpheneUI.Icons.TextButton(Dalamud.Interface.FontAwesomeIcon.ArrowsSpin, "Reset to Default"))
-        {
-            var defaultPermissions = _apiController.DefaultPermissions!;
-            _ownPermissions.SetSticky(Pair.IsDirectlyPaired || defaultPermissions.IndividualIsSticky);
-            _ownPermissions.SetPaused(false);
-            _ownPermissions.SetDisableVFX(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualVFX : defaultPermissions.DisableGroupVFX);
-            _ownPermissions.SetDisableVFXInDuty(false);
-            _ownPermissions.SetDisableSounds(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualSounds : defaultPermissions.DisableGroupSounds);
-            _ownPermissions.SetDisableAnimations(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualAnimations : defaultPermissions.DisableGroupAnimations);
-            _ = _apiController.SetBulkPermissions(new(
-                new(StringComparer.Ordinal)
-                {
-                    { Pair.UserData.UID, _ownPermissions }
-                },
-                new(StringComparer.Ordinal)
-            ));
-        }
-        SpheneUI.AttachTooltip("This will set all permissions to your defined default permissions in the Sphene Settings");
+            ImGui.SameLine();
+            if (SpheneUI.Controls.SegmentButton("Reset to Default",
+                    Dalamud.Interface.FontAwesomeIcon.ArrowsSpin))
+            {
+                var defaultPermissions = _apiController.DefaultPermissions!;
+                _ownPermissions.SetSticky(Pair.IsDirectlyPaired || defaultPermissions.IndividualIsSticky);
+                _ownPermissions.SetPaused(false);
+                _ownPermissions.SetDisableVFX(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualVFX : defaultPermissions.DisableGroupVFX);
+                _ownPermissions.SetDisableVFXInDuty(false);
+                _ownPermissions.SetDisableSounds(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualSounds : defaultPermissions.DisableGroupSounds);
+                _ownPermissions.SetDisableAnimations(Pair.IsDirectlyPaired ? defaultPermissions.DisableIndividualAnimations : defaultPermissions.DisableGroupAnimations);
+                _ = _apiController.SetBulkPermissions(new(
+                    new(StringComparer.Ordinal)
+                    {
+                        { Pair.UserData.UID, _ownPermissions }
+                    },
+                    new(StringComparer.Ordinal)
+                ));
+            }
+            SpheneUI.AttachTooltip("This will set all permissions to your defined default permissions in the Sphene Settings");
+        });
 
         var ySize = ImGui.GetCursorPosY() + style.FramePadding.Y * ImGuiHelpers.GlobalScale + style.FrameBorderSize;
         ImGui.SetWindowSize(new(400, ySize));

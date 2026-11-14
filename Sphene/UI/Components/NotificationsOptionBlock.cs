@@ -1,12 +1,15 @@
 using System.Linq;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Dalamud.Interface.Colors;
 using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.Services;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Models;
 using Sphene.UI.Design;
+using Sphene.WebAPI;
 
 namespace Sphene.UI.Components;
 
@@ -169,11 +172,109 @@ public static class NotificationsOptionBlock
             }
         }
 
-        DrawNotificationSection("Info Notifications", configService.Current.InfoNotificationSound, "Sphene Default – Default sound, Volume 0.30", blockId + "Info");
-        DrawNotificationSection("Warning Notifications", configService.Current.WarningNotificationSound, "Sphene Default – Error sound, Volume 0.00 (silent until changed)", blockId + "Warning");
-        DrawNotificationSection("Error Notifications", configService.Current.ErrorNotificationSound, "Sphene Default – Error sound, Volume 0.30", blockId + "Error");
-        DrawNotificationSection("Success Notifications", configService.Current.SuccessNotificationSound, "Sphene Default – Default sound, Volume 0.30", blockId + "Success");
-        DrawNotificationSection("Area-bound Syncshell Notifications", configService.Current.AreaBoundNotificationSound, "Sphene Default – Attention sound, Volume 0.30", blockId + "AreaBound");
-        DrawNotificationSection("File Transfer Notifications", configService.Current.FileTransferNotificationSound, "Sphene Default – Attention sound, Volume 0.30", blockId + "FileTransfer");
+        DrawNotificationSection("Info Notifications", configService.Current.InfoNotificationSound, "Sphene Default · Default sound, Volume 0.30", blockId + "Info");
+        DrawNotificationSection("Warning Notifications", configService.Current.WarningNotificationSound, "Sphene Default · Error sound, Volume 0.00 (silent until changed)", blockId + "Warning");
+        DrawNotificationSection("Error Notifications", configService.Current.ErrorNotificationSound, "Sphene Default · Error sound, Volume 0.30", blockId + "Error");
+        DrawNotificationSection("Success Notifications", configService.Current.SuccessNotificationSound, "Sphene Default · Default sound, Volume 0.30", blockId + "Success");
+        DrawNotificationSection("Area-bound Syncshell Notifications", configService.Current.AreaBoundNotificationSound, "Sphene Default · Attention sound, Volume 0.30", blockId + "AreaBound");
+        DrawNotificationSection("File Transfer Notifications", configService.Current.FileTransferNotificationSound, "Sphene Default · Attention sound, Volume 0.30", blockId + "FileTransfer");
+    }
+
+    /// <summary>Community-kinds that can be muted - System stays always-on.
+    /// Order matches <see cref="MutableKindGroups"/> (index ranges below).</summary>
+    private static readonly (UserNotificationKind Kind, string Label)[] MutableKinds =
+    [
+        (UserNotificationKind.MembershipApplicationReceived, "Membership applications received"),
+        (UserNotificationKind.MembershipApplicationAccepted, "Membership accepted"),
+        (UserNotificationKind.MembershipApplicationRejected, "Membership rejected"),
+        (UserNotificationKind.MembershipApplicationWithdrawn, "Membership applications withdrawn"),
+        (UserNotificationKind.CommentAdded, "Comments on your posts"),
+        (UserNotificationKind.CommentReply, "Comment replies"),
+        (UserNotificationKind.Mention, "Mentions"),
+        (UserNotificationKind.Reaction, "Reactions to your posts"),
+        (UserNotificationKind.EventInvitation, "Event invitations"),
+        (UserNotificationKind.EventReminder, "Event reminders"),
+        (UserNotificationKind.EventChanged, "Event changes"),
+        (UserNotificationKind.EventCancelled, "Event cancellations"),
+        (UserNotificationKind.EventWaitlistPromoted, "Event waitlist promotions"),
+        (UserNotificationKind.CommunityNewsPublished, "Community news published"),
+        (UserNotificationKind.ContentPendingReview, "Content pending review"),
+        (UserNotificationKind.ContentRejected, "Content rejected"),
+        (UserNotificationKind.CommentModerated, "Comment moderation"),
+        (UserNotificationKind.ReportOutcome, "Report outcomes"),
+    ];
+
+    /// <summary>Presentation grouping over <see cref="MutableKinds"/> -
+    /// index ranges only; kinds, order and bitmask values are unchanged.</summary>
+    private static readonly (string Label, FontAwesomeIcon Icon, int Start, int Count)[] MutableKindGroups =
+    [
+        ("Membership", FontAwesomeIcon.Users, 0, 4),
+        ("Posts & Interactions", FontAwesomeIcon.CommentDots, 4, 4),
+        ("Events", FontAwesomeIcon.CalendarAlt, 8, 5),
+        ("News & Publishing", FontAwesomeIcon.Newspaper, 13, 1),
+        ("Moderation", FontAwesomeIcon.ShieldAlt, 14, 4),
+    ];
+
+    private static long? _communityMuteMask;
+    private static bool _communityMuteLoading;
+    private static bool _communityMuteLoaded;
+
+    /// <summary>Per-kind mutes for community notifications - the mask lives
+    /// server-side (<c>UserGetNotificationMutes</c>/<c>UserSetNotificationMutes</c>)
+    /// so it follows the account across installs.</summary>
+    public static void DrawCommunityNotificationMutesOption(ApiController apiController, string blockId = "CommunityNotificationMutes")
+    {
+        if (!apiController.IsConnected)
+        {
+            SpheneUI.Controls.HelpText("Community notification mutes load when connected.");
+            return;
+        }
+        if (!_communityMuteLoaded && !_communityMuteLoading)
+        {
+            _communityMuteLoading = true;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    _communityMuteMask = await apiController.UserGetNotificationMutes().ConfigureAwait(false);
+                }
+                catch { /* keep unset - toggles stay optimistic-off, writes still push */ }
+                finally
+                {
+                    _communityMuteLoading = false;
+                    _communityMuteLoaded = true;
+                }
+            });
+        }
+
+        var mask = _communityMuteMask ?? 0L;
+        var index = 0;
+        var firstGroup = true;
+        foreach (var group in MutableKindGroups)
+        {
+            SpheneUI.Layout.SettingsGroup(group.Label, group.Icon, firstGroup);
+            firstGroup = false;
+            for (var i = 0; i < group.Count; i++)
+            {
+                var (kind, label) = MutableKinds[index++];
+                var bit = 1L << (int)kind;
+                var enabled = (mask & bit) == 0;
+                if (SpheneUI.Controls.Toggle($"{label}##{blockId}{kind}", ref enabled))
+                {
+                    mask = enabled ? mask & ~bit : mask | bit;
+                    _communityMuteMask = mask;
+                    _ = apiController.UserSetNotificationMutes(mask);
+                }
+            }
+        }
+        SpheneUI.Controls.HelpText("Muted community notification kinds no longer reach your inbox. System notifications are always delivered.");
+    }
+
+    /// <summary>Drops the cached mask - e.g. on reconnect the next draw refetches.</summary>
+    public static void ResetCommunityMuteCache()
+    {
+        _communityMuteMask = null;
+        _communityMuteLoading = false;
+        _communityMuteLoaded = false;
     }
 }

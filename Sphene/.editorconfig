@@ -116,6 +116,10 @@ csharp_style_prefer_primary_constructors = false
 # S3267: Loops should be simplified with "LINQ" expressions
 dotnet_diagnostic.S3267.severity = silent
 
+# Banned raw ImGui APIs are compile errors — the design-system facade is the
+# only allowed entry point. Exempt paths are listed below.
+dotnet_diagnostic.RS0030.severity = error
+
 # Design-system modules are partial classes spread across topic files;
 # a single file name cannot match every contained type.
 [UI/Design/**]
@@ -123,6 +127,22 @@ dotnet_diagnostic.MA0048.severity = silent
 # The design system itself may call the raw image APIs it wraps.
 dotnet_diagnostic.RS0030.severity = none
 
-# CompactUI keeps its own styling system and is exempt from the image-API ban.
+# CompactUI keeps its own styling system and is exempt from the banned-API
+# rule. The exemption covers the window and its dedicated component files
+# (draw entities, folder rows, tab menu) — not general UI components.
 [UI/Panels/CompactUI.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/DrawUserPair.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/DrawFolderBase.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/DrawFolderGroup.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/DrawFolderTag.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/DrawGroupedGroupFolder.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/DrawEntityFactory.cs]
+dotnet_diagnostic.RS0030.severity = none
+[UI/Components/TopTabMenu.cs]
 dotnet_diagnostic.RS0030.severity = none

@@ -56,7 +56,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string>? _localModNameToFolder;
     private DateTime _localModMapNextRefreshUtc = DateTime.MinValue;
-    // Last decoded avatar bytes per user — a new array instance means the
+    // Last decoded avatar bytes per user · a new array instance means the
     // profile was (re)fetched and the cached texture must be evicted.
     private readonly Dictionary<string, byte[]> _avatarBytes = new(StringComparer.Ordinal);
 
@@ -131,14 +131,16 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         if (SpheneUI.Layout.BeginScrollArea("modhistory-content", ImGui.GetContentRegionAvail(),
                 contentPadding: Vector2.Zero))
         {
-            SpheneUI.Text.PageHeader("Mod Activity",
-                "Everything you sent, received, uploaded and downloaded — newest first.");
+            SpheneUI.Layout.PageHeader("Mod Activity", "modpkg", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Everything you sent, received, uploaded and downloaded · newest first.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
             DrawActivity(isEmbedded: false);
         }
         SpheneUI.Layout.EndScrollArea();
     }
 
-    /// <summary>Badge style per activity kind — icon is also the row's fallback glyph.</summary>
+    /// <summary>Badge style per activity kind · icon is also the row's fallback glyph.</summary>
     private static (string Label, FontAwesomeIcon Icon, Vector4 Color) KindStyle(ActivityKind kind) => kind switch
     {
         ActivityKind.Sent => ("SENT", FontAwesomeIcon.ShareAlt, SpheneUI.Palette.EtherealPurple),
@@ -195,7 +197,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The user's Sphene profile picture as a cached texture — null while the
+    /// The user's Sphene profile picture as a cached texture · null while the
     /// profile or texture is still loading. Evicts the cache entry when the
     /// profile data instance changes (avatar updated/refetched).
     /// </summary>
@@ -238,7 +240,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
     /// <summary>
     /// Maps a history entry's display name to a local Penumbra mod folder.
-    /// The map refreshes at most every 10 seconds — the IPC list call never
+    /// The map refreshes at most every 10 seconds · the IPC list call never
     /// runs per frame.
     /// </summary>
     private string? ResolveLocalFolderForName(string? displayName)
@@ -269,9 +271,9 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The unified activity feed — merges all four history sources into one
+    /// The unified activity feed · merges all four history sources into one
     /// chronological list. Layout: intro line, toolbar, scroll-faded feed in a
-    /// fixed clip region, pinned pagination bar — same skeleton as the send page.
+    /// fixed clip region, pinned pagination bar · same skeleton as the send page.
     /// </summary>
     private void DrawActivity(bool isEmbedded)
     {
@@ -279,10 +281,10 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
 
         if (isEmbedded)
         {
-            // The page title lives in the hub breadcrumb — the uniform page
+            // The page title lives in the hub breadcrumb · the uniform page
             // intro is a single muted line.
             SpheneUI.Text.PageIntro(
-                "Everything you sent, received, uploaded and downloaded — newest first. Right-click a row for actions.");
+                "Everything you sent, received, uploaded and downloaded · newest first. Right-click a row for actions.");
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         }
 
@@ -291,7 +293,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             return;
         }
 
-        // All four sources fetch lazily and independently — the feed shows
+        // All four sources fetch lazily and independently · the feed shows
         // whatever has resolved already.
         _modUploadHistoryTask ??= GetModUploadHistory(CancellationToken.None);
         _modDownloadHistoryTask ??= GetModDownloadHistory(CancellationToken.None);
@@ -302,7 +304,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         var stillLoading = IsAnyHistoryLoading();
         var style = ImGui.GetStyle();
         var navAvail = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
-        // The tail reserve below the region is self-measured — the estimate
+        // The tail reserve below the region is self-measured · the estimate
         // only seeds the first frame (see _activityTailReserve update below).
         var tailReserve = _activityTailReserve > 0f
             ? _activityTailReserve
@@ -327,11 +329,11 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             if (failedSources.Count > 0)
             {
                 SpheneUI.Layout.Callout(
-                    $"Failed to load the {string.Join(", ", failedSources)} history — hit Refresh to retry.",
+                    $"Failed to load the {string.Join(", ", failedSources)} history · hit Refresh to retry.",
                     FontAwesomeIcon.ExclamationCircle, ImGuiColors.DalamudRed);
             }
 
-            // The feed is the region's last element — its child height stops one
+            // The feed is the region's last element · its child height stops one
             // ItemSpacing above the clip edge so no residual scrollMax survives.
             var feedH = MathF.Max(80f * scale,
                 ImGui.GetContentRegionAvail().Y - style.ItemSpacing.Y - scale);
@@ -346,7 +348,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                     else if (failedSources.Count == 0)
                     {
                         SpheneUI.Layout.Callout(
-                            "No mod activity yet — packages you send or receive appear here.",
+                            "No mod activity yet · packages you send or receive appear here.",
                             FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
                     }
                 }
@@ -373,7 +375,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             tailReserve + (targetTail - leftover), 0f, MathF.Max(0f, navAvail));
     }
 
-    /// <summary>Search field, kind chips and the refresh icon — one toolbar row.</summary>
+    /// <summary>Search field, kind chips and the refresh icon · one toolbar row.</summary>
     private void DrawActivityToolbar(float scale)
     {
         ImGui.SetNextItemWidth(200f * scale);
@@ -403,7 +405,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
     }
 
-    /// <summary>Pinned pagination bar under the feed — counts left, arrows and page size right.</summary>
+    /// <summary>Pinned pagination bar under the feed · counts left, arrows and page size right.</summary>
     private void DrawActivityPagination(int totalItems)
     {
         var scale = SpheneUI.Scale;
@@ -432,16 +434,12 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             _activityCurrentPage++;
         }
         ImGui.SameLine(0f, spacing);
-        ImGui.SetNextItemWidth(comboW);
-        using (var controlStyle = SpheneUI.Controls.PushValueControlStyle())
+        if (SpheneUI.Controls.BeginComboBox("##activityPerPage", $"{_historyItemsPerPage} per page", comboW))
         {
-            if (ImGui.BeginCombo("##activityPerPage", $"{_historyItemsPerPage} per page"))
-            {
-                if (SpheneUI.Controls.Selectable("25##activity", _historyItemsPerPage == 25)) _historyItemsPerPage = 25;
-                if (SpheneUI.Controls.Selectable("50##activity", _historyItemsPerPage == 50)) _historyItemsPerPage = 50;
-                if (SpheneUI.Controls.Selectable("100##activity", _historyItemsPerPage == 100)) _historyItemsPerPage = 100;
-                ImGui.EndCombo();
-            }
+            if (SpheneUI.Controls.Selectable("25##activity", _historyItemsPerPage == 25)) _historyItemsPerPage = 25;
+            if (SpheneUI.Controls.Selectable("50##activity", _historyItemsPerPage == 50)) _historyItemsPerPage = 50;
+            if (SpheneUI.Controls.Selectable("100##activity", _historyItemsPerPage == 100)) _historyItemsPerPage = 100;
+            SpheneUI.Controls.EndComboBox();
         }
     }
 
@@ -473,7 +471,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
            || _modShareHistoryTask is not { IsCompleted: true }
            || _modReceivedHistoryTask is not { IsCompleted: true };
 
-    /// <summary>Radio-style filter chip — selecting a kind deselects the others via "All".</summary>
+    /// <summary>Radio-style filter chip · selecting a kind deselects the others via "All".</summary>
     private void ActivityKindChip(string label, ActivityKind? kind)
     {
         var active = _activityKindFilter == kind;
@@ -594,7 +592,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     {
         var scale = SpheneUI.Scale;
         var (badge, icon, color) = KindStyle(row.Kind);
-        var date = row.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        var date = SpheneUI.Text.FormatDateTime(row.Timestamp.ToLocalTime());
         var hasOther = !string.IsNullOrWhiteSpace(row.OtherUid) || !string.IsNullOrWhiteSpace(row.OtherAlias);
         var otherName = hasOther
             ? _serverConfigurationManager.GetPreferredUserDisplayName(
@@ -644,7 +642,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             });
     }
 
-    /// <summary>Per-kind row actions — reshare targets the recorded recipient, "Send to…" opens the send flow.</summary>
+    /// <summary>Per-kind row actions · reshare targets the recorded recipient, "Send to…" opens the send flow.</summary>
     private void DrawActivityContextMenu(ActivityRow row, string? otherName)
     {
         if (row.Entry is ModShareHistoryEntryDto share &&

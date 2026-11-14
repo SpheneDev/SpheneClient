@@ -5,6 +5,7 @@ using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.UI;
 using Sphene.UI.Panels;
+using Dalamud.Interface.Utility.Raii;
 using Sphene.UI.Design;
 
 namespace Sphene.UI.Components;
@@ -35,17 +36,18 @@ public static class DebugOptionBlock
 
     public static void DrawPrintNetworkMetricsActions(UiSharedService uiShared, bool logPerformance, Action printMetrics, Action printMetricsLast60, string blockId = "PrintNetworkMetricsActions")
     {
-        if (!logPerformance) ImGui.BeginDisabled();
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog"))
+        using (ImRaii.Disabled(!logPerformance))
         {
-            printMetrics.Invoke();
-        }
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics to /xllog"))
+            {
+                printMetrics.Invoke();
+            }
 
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog"))
-        {
-            printMetricsLast60.Invoke();
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.StickyNote, "Print Network Metrics (last 60s) to /xllog"))
+            {
+                printMetricsLast60.Invoke();
+            }
         }
-        if (!logPerformance) ImGui.EndDisabled();
     }
 
     public static void DrawDoNotNotifyForModifiedGameFilesOrEnabledLodOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "DoNotNotifyForModifiedGameFilesOrEnabledLod")

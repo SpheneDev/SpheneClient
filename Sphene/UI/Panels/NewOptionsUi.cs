@@ -104,7 +104,10 @@ public class NewOptionsUi : WindowMediatorSubscriberBase
             return;
         }
 
-        SpheneUI.Text.PageHeader("New Options", "These settings were added in recent updates. Review them here and adjust what you need.");
+        SpheneUI.Layout.PageHeader("New Options", "newoptions", () =>
+        {
+            SpheneUI.Text.MutedWrapped("These settings were added in recent updates. Review them here and adjust what you need.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
         var footerHeight = ImGui.GetFrameHeightWithSpacing()
             + (ImGui.GetTextLineHeightWithSpacing() * 2f)

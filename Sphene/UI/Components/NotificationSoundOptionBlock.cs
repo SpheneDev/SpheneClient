@@ -29,7 +29,8 @@ public static class NotificationSoundOptionBlock
         }
 
         var outputMode = (int)soundConfig.OutputMode;
-        if (SpheneUI.Controls.LabeledCombo("Output Mode##" + blockId, ref outputMode, "Game System\0Sphene Default\0Custom Sound\0"))
+        var outputModeItems = new[] { "Game System", "Sphene Default", "Custom Sound" };
+        if (SpheneUI.Rows.Segmented("Output Mode##" + blockId, ref outputMode, outputModeItems))
         {
             soundConfig.OutputMode = (SoundOutputMode)outputMode;
             changed = true;

@@ -215,6 +215,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
     
     protected override void DrawInternal()
     {
+        SpheneUI.Layout.PageHeader("Status Debug", "statusdebug", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Diagnostics for the connection and sync pipeline - mostly useful when something breaks.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
+
         var directPairsCount = _pairManager.DirectPairs.Count;
         var inboundRequests = _pairManager.GetInboundIndividualPairRequestsSnapshot();
         var outboundRequests = _pairManager.GetOutboundIndividualPairRequestsSnapshot();
@@ -347,10 +352,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void DrawSummaryPage(int unseenInboundRequests)
     {
-        if (ImGui.BeginTable("##SummaryTable", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV))
+        using var summaryTable = SpheneUI.Tables.Begin("##SummaryTable", 2,
+            ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerV);
+        if (summaryTable.Success)
         {
-            ImGui.TableSetupColumn("Key", ImGuiTableColumnFlags.WidthFixed, 190f * ImGuiHelpers.GlobalScale);
-            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+            SpheneUI.Tables.Column("Key", ImGuiTableColumnFlags.WidthFixed, 190f * ImGuiHelpers.GlobalScale);
+            SpheneUI.Tables.Column("Value", ImGuiTableColumnFlags.WidthStretch);
 
             DrawSummaryRow("Connection", () =>
             {
@@ -412,8 +419,6 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 var outgoing = _pairManager.GetOutboundIndividualPairRequestsSnapshot().Count;
                 SpheneUI.Text.Plain($"incoming={incoming}, outgoing={outgoing}, new={unseenInboundRequests}");
             });
-
-            ImGui.EndTable();
         }
 
         SpheneUI.Layout.VerticalSpace();
@@ -433,10 +438,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private static void DrawSummaryRow(string key, Action drawValue)
     {
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
+        SpheneUI.Tables.Row();
+        SpheneUI.Tables.SetColumn(0);
         SpheneUI.Text.Plain(key);
-        ImGui.TableSetColumnIndex(1);
+        SpheneUI.Tables.SetColumn(1);
         drawValue();
     }
 
@@ -563,35 +568,41 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
 
         var scale = ImGuiHelpers.GlobalScale;
-        var headerHeight = 210f * scale;
-        if (ImGui.BeginTable("##CharacterDataHeader", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
+        var headerHeight = 210f * scale * SpheneUI.Density.Factor;
+        using (var headerTable = SpheneUI.Tables.Begin("##CharacterDataHeader", 2,
+            ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
         {
-            ImGui.TableSetupColumn("Pairs", ImGuiTableColumnFlags.WidthFixed, 340f * scale);
-            ImGui.TableSetupColumn("Summary", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableNextRow();
-
-            ImGui.TableSetColumnIndex(0);
-            using (ImRaii.Child("##CharacterDataPairList", new Vector2(0, headerHeight), true))
+            if (headerTable.Success)
             {
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain("Pairs");
-                ImGui.SameLine();
-                SpheneUI.Text.Colored($"({pairs.Count})", ImGuiColors.DalamudGrey);
-                SpheneUI.Layout.Separator();
+                SpheneUI.Tables.Column("Pairs", ImGuiTableColumnFlags.WidthFixed, 340f * scale);
+                SpheneUI.Tables.Column("Summary", ImGuiTableColumnFlags.WidthStretch);
+                SpheneUI.Tables.Row();
 
-                using (ImRaii.Child("##CharacterDataPairListScroll", new Vector2(0, 0), false))
+                SpheneUI.Tables.SetColumn(0);
+                if (SpheneUI.Layout.BeginScrollArea("##CharacterDataPairList",
+                        new Vector2(0, headerHeight), border: true))
                 {
-                    DrawCharacterPairSelectionList(pairs);
+                    ImGui.AlignTextToFramePadding();
+                    SpheneUI.Text.Plain("Pairs");
+                    ImGui.SameLine();
+                    SpheneUI.Text.Colored($"({pairs.Count})", SpheneUI.Colors.TextMuted);
+                    SpheneUI.Layout.Separator();
+
+                    if (SpheneUI.Layout.BeginScrollArea("##CharacterDataPairListScroll", new Vector2(0, 0)))
+                    {
+                        DrawCharacterPairSelectionList(pairs);
+                    }
+                    SpheneUI.Layout.EndScrollArea();
                 }
-            }
+                SpheneUI.Layout.EndScrollArea();
 
-            ImGui.TableSetColumnIndex(1);
-            using (ImRaii.Child("##CharacterDataPairSummary", new Vector2(0, headerHeight), true))
-            {
-                DrawCharacterHeaderSummary(selectedPair);
+                SpheneUI.Tables.SetColumn(1);
+                if (SpheneUI.Layout.BeginScrollArea("##CharacterDataPairSummary", new Vector2(0, headerHeight), border: true))
+                {
+                    DrawCharacterHeaderSummary(selectedPair);
+                }
+                SpheneUI.Layout.EndScrollArea();
             }
-
-            ImGui.EndTable();
         }
 
         SpheneUI.Layout.Separator();
@@ -651,26 +662,28 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             return;
         }
 
-        if (!ImGui.BeginTable("PairedUsersTable", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        using var pairsTable = SpheneUI.Tables.Begin("PairedUsersTable", 5,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp);
+        if (!pairsTable.Success)
         {
             return;
         }
 
-        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 150);
-        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 95);
-        ImGui.TableSetupColumn("Online", ImGuiTableColumnFlags.WidthFixed, 55);
-        ImGui.TableSetupColumn("My Ack", ImGuiTableColumnFlags.WidthFixed, 65);
-        ImGui.TableSetupColumn("Partner Ack", ImGuiTableColumnFlags.WidthFixed, 85);
-        ImGui.TableHeadersRow();
+        SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthFixed, 150);
+        SpheneUI.Tables.Column("Status", ImGuiTableColumnFlags.WidthFixed, 95);
+        SpheneUI.Tables.Column("Online", ImGuiTableColumnFlags.WidthFixed, 55);
+        SpheneUI.Tables.Column("My Ack", ImGuiTableColumnFlags.WidthFixed, 65);
+        SpheneUI.Tables.Column("Partner Ack", ImGuiTableColumnFlags.WidthFixed, 85);
+        SpheneUI.Tables.HeaderRow();
 
         foreach (var pair in pairs)
         {
-            ImGui.TableNextRow();
+            SpheneUI.Tables.Row();
 
-            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Tables.SetColumn(0);
             SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
 
-            ImGui.TableSetColumnIndex(1);
+            SpheneUI.Tables.SetColumn(1);
             var statusColor = pair.IndividualPairStatus switch
             {
                 API.Data.Enum.IndividualPairStatus.Bidirectional => ImGuiColors.HealerGreen,
@@ -679,7 +692,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             };
             SpheneUI.Text.Colored(pair.IndividualPairStatus.ToString(), statusColor);
 
-            ImGui.TableSetColumnIndex(2);
+            SpheneUI.Tables.SetColumn(2);
             if (pair.IsOnline)
             {
                 DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.HealerGreen);
@@ -689,7 +702,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 DrawStatusIcon(FontAwesomeIcon.Circle, ImGuiColors.DalamudRed);
             }
 
-            ImGui.TableSetColumnIndex(3);
+            SpheneUI.Tables.SetColumn(3);
             var incoming = pair.GetIncomingAckV3State();
             var incomingColor = incoming.Outcome switch
             {
@@ -703,7 +716,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                                           + (incoming.Hash != null ? $" hash={incoming.Hash[..Math.Min(8, incoming.Hash.Length)]}" : string.Empty)
                                           + (incoming.Outcome == Pair.AckV3Outcome.Fail ? $"{Environment.NewLine}{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}" : string.Empty));
 
-            ImGui.TableSetColumnIndex(4);
+            SpheneUI.Tables.SetColumn(4);
             if (pair.HasPendingAcknowledgment)
             {
                 DrawStatusIcon(FontAwesomeIcon.Clock, ImGuiColors.DalamudYellow);
@@ -726,10 +739,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
 
         }
-
-        ImGui.EndTable();
     }
-    
+
     private void DrawAcknowledgmentTable()
     {
         if (_acknowledgmentManager == null || _sessionAcknowledgmentManager == null)
@@ -750,31 +761,28 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         
         // Metrics overview
         SpheneUI.Text.Plain("Metrics Overview:");
-        ImGui.Columns(4, "AckMetrics", true);
-        
-        SpheneUI.Text.Plain("Total Results");
-        ImGui.NextColumn();
-        SpheneUI.Text.Plain("Success Rate");
-        ImGui.NextColumn();
-        SpheneUI.Text.Plain("Avg Response");
-        ImGui.NextColumn();
-        SpheneUI.Text.Plain("Pending");
-        ImGui.NextColumn();
-        
-        ImGui.Separator();
-        
-        SpheneUI.Text.Plain($"{resultMetrics.Total}");
-        ImGui.NextColumn();
-        SpheneUI.Text.Colored($"{successRate:F1}%", 
-            successRate > 90 ? ImGuiColors.HealerGreen : 
-            successRate > 70 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
-        ImGui.NextColumn();
-        SpheneUI.Text.Plain($"{resultMetrics.AverageResponseTimeMs:F0}ms");
-        ImGui.NextColumn();
-        SpheneUI.Text.Plain($"{pendingAcks.Count}");
-        ImGui.NextColumn();
-        
-        ImGui.Columns(1);
+        using (var metricsTable = SpheneUI.Tables.Begin("##AckMetrics", 4,
+            ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH))
+        {
+            if (metricsTable.Success)
+            {
+                SpheneUI.Tables.Column("Total Results", ImGuiTableColumnFlags.WidthStretch);
+                SpheneUI.Tables.Column("Success Rate", ImGuiTableColumnFlags.WidthStretch);
+                SpheneUI.Tables.Column("Avg Response", ImGuiTableColumnFlags.WidthStretch);
+                SpheneUI.Tables.Column("Pending", ImGuiTableColumnFlags.WidthStretch);
+                SpheneUI.Tables.HeaderRow();
+                SpheneUI.Tables.Row();
+                SpheneUI.Tables.Cell($"{resultMetrics.Total}");
+                SpheneUI.Tables.NextColumn();
+                SpheneUI.Text.Colored($"{successRate:F1}%",
+                    successRate > 90 ? ImGuiColors.HealerGreen :
+                    successRate > 70 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudRed);
+                SpheneUI.Tables.NextColumn();
+                SpheneUI.Text.Plain($"{resultMetrics.AverageResponseTimeMs:F0}ms");
+                SpheneUI.Tables.NextColumn();
+                SpheneUI.Text.Plain($"{pendingAcks.Count}");
+            }
+        }
         SpheneUI.Layout.VerticalSpace();
         
         // Configuration settings
@@ -797,83 +805,78 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.Columns(4, "PendingAcks", true);
-                
-                SpheneUI.Text.Plain("User");
-                ImGui.NextColumn();
-                SpheneUI.Text.Plain("Ack Key");
-                ImGui.NextColumn();
-                SpheneUI.Text.Plain("Status");
-                ImGui.NextColumn();
-                SpheneUI.Text.Plain("Actions");
-                ImGui.NextColumn();
-                
-                ImGui.Separator();
-                
-                foreach (var kvp in pendingAcks)
+                using var pendingTable = SpheneUI.Tables.Begin("##PendingAcks", 4,
+                    ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH);
+                if (pendingTable.Success)
                 {
-                    var userKey = kvp.Key;
-                    var ackId = kvp.Value;
-                    var displayName = GetDisplayName(userKey);
-                    var pair = _pairManager.GetPairByUID(userKey);
-                    var outgoing = pair?.GetOutgoingAckV3State();
-                    
-                    SpheneUI.Text.Plain(displayName);
-                    ImGui.NextColumn();
-                    SpheneUI.Text.Plain(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
-                    ImGui.NextColumn();
+                    SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthStretch, 1.4f);
+                    SpheneUI.Tables.Column("Ack Key", ImGuiTableColumnFlags.WidthStretch, 1.2f);
+                    SpheneUI.Tables.Column("Status", ImGuiTableColumnFlags.WidthFixed,
+                        SpheneUI.Tables.HeaderFitWidth("Status"));
+                    SpheneUI.Tables.Column("Actions", ImGuiTableColumnFlags.WidthStretch);
+                    SpheneUI.Tables.HeaderRow();
 
-                    if (outgoing.HasValue)
+                    foreach (var kvp in pendingAcks)
                     {
-                        var state = outgoing.Value;
-                        var statusColor = state.Outcome switch
+                        var userKey = kvp.Key;
+                        var ackId = kvp.Value;
+                        var displayName = GetDisplayName(userKey);
+                        var pair = _pairManager.GetPairByUID(userKey);
+                        var outgoing = pair?.GetOutgoingAckV3State();
+
+                        SpheneUI.Tables.Row();
+                        SpheneUI.Tables.Cell(displayName);
+                        SpheneUI.Tables.Cell(ackId);
+
+                        if (outgoing.HasValue)
                         {
-                            Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
-                            Pair.AckV3Outcome.Success => ImGuiColors.HealerGreen,
-                            Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
-                            _ => ImGuiColors.DalamudGrey
-                        };
-                        SpheneUI.Text.Colored(state.Outcome.ToString(), statusColor);
-                        if (state.Outcome == Pair.AckV3Outcome.Fail)
-                        {
-                            SpheneUI.AttachTooltip($"{state.ErrorCode}{(string.IsNullOrWhiteSpace(state.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{state.ErrorMessage}")}");
-                        }
-                    }
-                    else
-                    {
-                        SpheneUI.Text.Plain("-");
-                    }
-                    ImGui.NextColumn();
-                    
-                    ImGui.PushID($"clear_{userKey}");
-                    if (SpheneUI.Controls.Button("Clear"))
-                    {
-                        var user = new UserData(userKey);
-                        var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(user, ackId);
-                        if (removed)
-                        {
-                            LogCommunication($"[DEBUG] Manually cleared acknowledgment for {userKey}", "ACK");
+                            var state = outgoing.Value;
+                            var statusColor = state.Outcome switch
+                            {
+                                Pair.AckV3Outcome.Pending => ImGuiColors.DalamudYellow,
+                                Pair.AckV3Outcome.Success => ImGuiColors.HealerGreen,
+                                Pair.AckV3Outcome.Fail => ImGuiColors.DalamudRed,
+                                _ => ImGuiColors.DalamudGrey
+                            };
+                            SpheneUI.Tables.NextColumn();
+                            SpheneUI.Text.Colored(state.Outcome.ToString(), statusColor);
+                            if (state.Outcome == Pair.AckV3Outcome.Fail)
+                            {
+                                SpheneUI.AttachTooltip($"{state.ErrorCode}{(string.IsNullOrWhiteSpace(state.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{state.ErrorMessage}")}");
+                            }
                         }
                         else
                         {
-                            LogCommunication($"[DEBUG] Clear failed for {userKey} (no match)", "ACK");
+                            SpheneUI.Tables.MutedCell("-");
                         }
+
+                        SpheneUI.Tables.NextColumn();
+                        ImGui.PushID($"clear_{userKey}");
+                        if (SpheneUI.Controls.Button("Clear"))
+                        {
+                            var user = new UserData(userKey);
+                            var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(user, ackId);
+                            if (removed)
+                            {
+                                LogCommunication($"[DEBUG] Manually cleared acknowledgment for {userKey}", "ACK");
+                            }
+                            else
+                            {
+                                LogCommunication($"[DEBUG] Clear failed for {userKey} (no match)", "ACK");
+                            }
+                        }
+                        ImGui.PopID();
+
+                        ImGui.SameLine();
+                        ImGui.PushID($"timeout_{userKey}");
+                        if (SpheneUI.Controls.Button("Mark Timeout"))
+                        {
+                            _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
+                            LogCommunication($"[DEBUG] Marked acknowledgment as timeout for {userKey}", "ACK");
+                        }
+                        ImGui.PopID();
                     }
-                    ImGui.PopID();
-                    
-                    ImGui.SameLine();
-                    ImGui.PushID($"timeout_{userKey}");
-                    if (SpheneUI.Controls.Button("Mark Timeout"))
-                    {
-                        _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
-                        LogCommunication($"[DEBUG] Marked acknowledgment as timeout for {userKey}", "ACK");
-                    }
-                    ImGui.PopID();
-                    
-                    ImGui.NextColumn();
                 }
-                
-                ImGui.Columns(1);
             }
         }
         
@@ -886,24 +889,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.Columns(2, "ErrorStats", true);
-                
-                SpheneUI.Text.Plain("Error Type");
-                ImGui.NextColumn();
-                SpheneUI.Text.Plain("Count");
-                ImGui.NextColumn();
-                
-                ImGui.Separator();
-                
-                foreach (var error in resultMetrics.ErrorCounts.OrderByDescending(k => k.Value))
+                using var errorTable = SpheneUI.Tables.Begin("##ErrorStats", 2,
+                    ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH);
+                if (errorTable.Success)
                 {
-                    SpheneUI.Text.Plain(error.Key.ToString());
-                    ImGui.NextColumn();
-                    SpheneUI.Text.Colored($"{error.Value}", ImGuiColors.DalamudRed);
-                    ImGui.NextColumn();
+                    SpheneUI.Tables.Column("Error Type", ImGuiTableColumnFlags.WidthStretch);
+                    SpheneUI.Tables.Column("Count", ImGuiTableColumnFlags.WidthFixed,
+                        SpheneUI.Tables.HeaderFitWidth("Count"));
+                    SpheneUI.Tables.HeaderRow();
+
+                    foreach (var error in resultMetrics.ErrorCounts.OrderByDescending(k => k.Value))
+                    {
+                        SpheneUI.Tables.Row();
+                        SpheneUI.Tables.Cell(error.Key.ToString());
+                        SpheneUI.Tables.NextColumn();
+                        SpheneUI.Text.Colored($"{error.Value}", ImGuiColors.DalamudRed);
+                    }
                 }
-                
-                ImGui.Columns(1);
             }
         }
         
@@ -916,32 +918,32 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             }
             else
             {
-                ImGui.Columns(2, "PriorityStats", true);
-                
-                SpheneUI.Text.Plain("Priority");
-                ImGui.NextColumn();
-                SpheneUI.Text.Plain("Count");
-                ImGui.NextColumn();
-                
-                ImGui.Separator();
-                
-                foreach (var priority in sendMetrics.PriorityCounts)
+                using var priorityTable = SpheneUI.Tables.Begin("##PriorityStats", 2,
+                    ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH);
+                if (priorityTable.Success)
                 {
-                    var color = priority.Key switch
+                    SpheneUI.Tables.Column("Priority", ImGuiTableColumnFlags.WidthStretch);
+                    SpheneUI.Tables.Column("Count", ImGuiTableColumnFlags.WidthFixed,
+                        SpheneUI.Tables.HeaderFitWidth("Count"));
+                    SpheneUI.Tables.HeaderRow();
+
+                    foreach (var priority in sendMetrics.PriorityCounts)
                     {
-                        AcknowledgmentPriority.High => ImGuiColors.DalamudRed,
-                        AcknowledgmentPriority.Medium => ImGuiColors.DalamudYellow,
-                        AcknowledgmentPriority.Low => ImGuiColors.HealerGreen,
-                        _ => ImGuiColors.DalamudWhite
-                    };
-                    
-                    SpheneUI.Text.Colored(priority.Key.ToString(), color);
-                    ImGui.NextColumn();
-                    SpheneUI.Text.Plain($"{priority.Value}");
-                    ImGui.NextColumn();
+                        var color = priority.Key switch
+                        {
+                            AcknowledgmentPriority.High => ImGuiColors.DalamudRed,
+                            AcknowledgmentPriority.Medium => ImGuiColors.DalamudYellow,
+                            AcknowledgmentPriority.Low => ImGuiColors.HealerGreen,
+                            _ => ImGuiColors.DalamudWhite
+                        };
+
+                        SpheneUI.Tables.Row();
+                        SpheneUI.Tables.NextColumn();
+                        SpheneUI.Text.Colored(priority.Key.ToString(), color);
+                        SpheneUI.Tables.NextColumn();
+                        SpheneUI.Text.Plain($"{priority.Value}");
+                    }
                 }
-                
-                ImGui.Columns(1);
             }
         }
     }
@@ -1062,8 +1064,11 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         }
 
         var availableSize = ImGui.GetContentRegionAvail();
-        using var child = ImRaii.Child("CharacterDebugLogContent", availableSize, true);
-        if (child) SpheneUI.Text.Plain(logText);
+        if (SpheneUI.Layout.BeginScrollArea("CharacterDebugLogContent", availableSize, border: true))
+        {
+            SpheneUI.Text.Plain(logText);
+        }
+        SpheneUI.Layout.EndScrollArea();
     }
 
     private static string GetApplyDebugText(Pair pair)
@@ -1082,10 +1087,12 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
         SpheneUI.Layout.Separator();
 
-        if (ImGui.BeginTable("##CharacterHeaderSummaryTable", 2, ImGuiTableFlags.SizingStretchProp))
+        using var headerSummaryTable = SpheneUI.Tables.Begin("##CharacterHeaderSummaryTable", 2,
+            ImGuiTableFlags.SizingStretchProp);
+        if (headerSummaryTable.Success)
         {
-            ImGui.TableSetupColumn("Key", ImGuiTableColumnFlags.WidthFixed, 165f * ImGuiHelpers.GlobalScale);
-            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+            SpheneUI.Tables.Column("Key", ImGuiTableColumnFlags.WidthFixed, 165f * ImGuiHelpers.GlobalScale);
+            SpheneUI.Tables.Column("Value", ImGuiTableColumnFlags.WidthStretch);
 
             DrawSummaryRow("State", () =>
             {
@@ -1193,35 +1200,35 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     SpheneUI.AttachTooltip($"{incoming.ErrorCode}{(string.IsNullOrWhiteSpace(incoming.ErrorMessage) ? string.Empty : $"{Environment.NewLine}{incoming.ErrorMessage}")}");
                 }
             });
-
-            ImGui.EndTable();
         }
     }
 
     private void DrawCharacterStatistics(Pair selectedPair)
     {
         var selectedSnapshot = GetCharacterStatsSnapshot(selectedPair);
-        if (ImGui.BeginTable("CharacterStatsDetailTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        using (var statsDetailTable = SpheneUI.Tables.Begin("CharacterStatsDetailTable", 3,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
-            ImGui.TableSetupColumn("Metric", ImGuiTableColumnFlags.WidthFixed, 200);
-            ImGui.TableSetupColumn("Current", ImGuiTableColumnFlags.WidthFixed, 240);
-            ImGui.TableSetupColumn("Last", ImGuiTableColumnFlags.WidthFixed, 240);
-            ImGui.TableHeadersRow();
+            if (statsDetailTable.Success)
+            {
+                SpheneUI.Tables.Column("Metric", ImGuiTableColumnFlags.WidthFixed, 200);
+                SpheneUI.Tables.Column("Current", ImGuiTableColumnFlags.WidthFixed, 240);
+                SpheneUI.Tables.Column("Last", ImGuiTableColumnFlags.WidthFixed, 240);
+                SpheneUI.Tables.HeaderRow();
 
-            DrawStatsRow("Data Hash", selectedSnapshot.Current.DataHash, selectedSnapshot.Previous?.DataHash);
-            DrawStatsRow("Applied Bytes", selectedSnapshot.Current.AppliedBytes.ToString(), selectedSnapshot.Previous?.AppliedBytes.ToString());
-            DrawStatsRow("Applied Triangles", selectedSnapshot.Current.AppliedTris.ToString(), selectedSnapshot.Previous?.AppliedTris.ToString());
-            DrawStatsRow("Applied VRAM Bytes", selectedSnapshot.Current.AppliedVramBytes.ToString(), selectedSnapshot.Previous?.AppliedVramBytes.ToString());
-            DrawStatsRow("Visible", selectedSnapshot.Current.IsVisible ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsVisible ? "Yes" : "No") : null);
-            DrawStatsRow("Mutually Visible", selectedSnapshot.Current.IsMutuallyVisible ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsMutuallyVisible ? "Yes" : "No") : null);
-            DrawStatsRow("Paused", selectedSnapshot.Current.IsPaused ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsPaused ? "Yes" : "No") : null);
-            DrawStatsRow("Last Ack Success", FormatNullableBool(selectedSnapshot.Current.LastAckSuccess), FormatNullableBool(selectedSnapshot.Previous?.LastAckSuccess));
-            DrawStatsRow("Last Ack Time", FormatNullableTime(selectedSnapshot.Current.LastAckTime), FormatNullableTime(selectedSnapshot.Previous?.LastAckTime));
-            DrawStatsRow("Last Ack Id", selectedSnapshot.Current.LastAckId ?? "-", selectedSnapshot.Previous?.LastAckId);
-            DrawStatsRow("Retry Count", selectedSnapshot.Current.ApplyRetryCount.ToString(), selectedSnapshot.Previous?.ApplyRetryCount.ToString());
-            DrawStatsRow("Snapshot Time", selectedSnapshot.Current.SnapshotTime.ToLocalTime().ToString("HH:mm:ss"), selectedSnapshot.Previous?.SnapshotTime.ToLocalTime().ToString("HH:mm:ss"));
-
-            ImGui.EndTable();
+                DrawStatsRow("Data Hash", selectedSnapshot.Current.DataHash, selectedSnapshot.Previous?.DataHash);
+                DrawStatsRow("Applied Bytes", selectedSnapshot.Current.AppliedBytes.ToString(), selectedSnapshot.Previous?.AppliedBytes.ToString());
+                DrawStatsRow("Applied Triangles", selectedSnapshot.Current.AppliedTris.ToString(), selectedSnapshot.Previous?.AppliedTris.ToString());
+                DrawStatsRow("Applied VRAM Bytes", selectedSnapshot.Current.AppliedVramBytes.ToString(), selectedSnapshot.Previous?.AppliedVramBytes.ToString());
+                DrawStatsRow("Visible", selectedSnapshot.Current.IsVisible ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsVisible ? "Yes" : "No") : null);
+                DrawStatsRow("Mutually Visible", selectedSnapshot.Current.IsMutuallyVisible ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsMutuallyVisible ? "Yes" : "No") : null);
+                DrawStatsRow("Paused", selectedSnapshot.Current.IsPaused ? "Yes" : "No", selectedSnapshot.Previous != null ? (selectedSnapshot.Previous.IsPaused ? "Yes" : "No") : null);
+                DrawStatsRow("Last Ack Success", FormatNullableBool(selectedSnapshot.Current.LastAckSuccess), FormatNullableBool(selectedSnapshot.Previous?.LastAckSuccess));
+                DrawStatsRow("Last Ack Time", FormatNullableTime(selectedSnapshot.Current.LastAckTime), FormatNullableTime(selectedSnapshot.Previous?.LastAckTime));
+                DrawStatsRow("Last Ack Id", selectedSnapshot.Current.LastAckId ?? "-", selectedSnapshot.Previous?.LastAckId);
+                DrawStatsRow("Retry Count", selectedSnapshot.Current.ApplyRetryCount.ToString(), selectedSnapshot.Previous?.ApplyRetryCount.ToString());
+                DrawStatsRow("Snapshot Time", selectedSnapshot.Current.SnapshotTime.ToLocalTime().ToString("HH:mm:ss"), selectedSnapshot.Previous?.SnapshotTime.ToLocalTime().ToString("HH:mm:ss"));
+            }
         }
 
         SpheneUI.Layout.Separator();
@@ -1234,8 +1241,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         var receivedData = pair.LastReceivedCharacterData;
         var lastReceivedHash = pair.LastReceivedCharacterDataHash ?? "-";
         var previousReceivedHash = pair.PreviousReceivedCharacterDataHash ?? "-";
-        var lastReceivedTime = pair.LastReceivedCharacterDataTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
-        var lastChangeTime = pair.LastReceivedCharacterDataChangeTime?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+        var lastReceivedTime = pair.LastReceivedCharacterDataTime.HasValue ? SpheneUI.Text.FormatDateTime(pair.LastReceivedCharacterDataTime.Value.ToLocalTime(), true) : "-";
+        var lastChangeTime = pair.LastReceivedCharacterDataChangeTime.HasValue ? SpheneUI.Text.FormatDateTime(pair.LastReceivedCharacterDataChangeTime.Value.ToLocalTime(), true) : "-";
 
         SpheneUI.Text.Plain($"Last Received Hash: {lastReceivedHash}");
         SpheneUI.Text.Plain($"Previous Received Hash: {previousReceivedHash}");
@@ -1256,21 +1263,22 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         SpheneUI.Text.Colored($"{receivedDataJson.Length:n0} chars", ImGuiColors.DalamudGrey);
 
         var avail = ImGui.GetContentRegionAvail();
-        using var child = ImRaii.Child($"##received_character_data_{GetPairKey(pair)}", new Vector2(0, MathF.Min(260f * ImGuiHelpers.GlobalScale, avail.Y)), true);
-        if (child)
+        if (SpheneUI.Layout.BeginScrollArea($"##received_character_data_{GetPairKey(pair)}",
+            new Vector2(0, MathF.Min(260f * ImGuiHelpers.GlobalScale, avail.Y)), border: true))
         {
             SpheneUI.Text.Plain(receivedDataJson);
         }
+        SpheneUI.Layout.EndScrollArea();
     }
 
     private static void DrawStatsRow(string metric, string current, string? last)
     {
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
+        SpheneUI.Tables.Row();
+        SpheneUI.Tables.SetColumn(0);
         SpheneUI.Text.Plain(metric);
-        ImGui.TableSetColumnIndex(1);
+        SpheneUI.Tables.SetColumn(1);
         SpheneUI.Text.Plain(current);
-        ImGui.TableSetColumnIndex(2);
+        SpheneUI.Tables.SetColumn(2);
         SpheneUI.Text.Plain(last ?? "-");
     }
 
@@ -1354,24 +1362,24 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         SpheneUI.Text.Plain($"Active delivered paths: {activeDeliveredPaths.Count} | Loaded: {loadedByPath.Count} | Player Active: {playerActiveByPath.Count} | Minion Active: {minionActiveByPath.Count} | Pet Active: {petActiveByPath.Count}");
 
         var tableAvailY = MathF.Max(200f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y);
-        if (!ImGui.BeginTable("PenumbraCollectionOverviewTable", 9,
-                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
-                new Vector2(-1, tableAvailY)))
+        using var overviewTable = SpheneUI.Tables.Begin("PenumbraCollectionOverviewTable", 9,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
+            new Vector2(-1, tableAvailY));
+        if (!overviewTable.Success)
         {
             return;
         }
 
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.2f);
-        ImGui.TableSetupColumn("Kinds", ImGuiTableColumnFlags.WidthFixed, 120f);
-        ImGui.TableSetupColumn("Delivered Source", ImGuiTableColumnFlags.WidthStretch, 1.6f);
-        ImGui.TableSetupColumn("Data Flag", ImGuiTableColumnFlags.WidthFixed, 80f);
-        ImGui.TableSetupColumn("Loaded Source", ImGuiTableColumnFlags.WidthStretch, 1.4f);
-        ImGui.TableSetupColumn("Active Source", ImGuiTableColumnFlags.WidthStretch, 1.4f);
-        ImGui.TableSetupColumn("Loaded", ImGuiTableColumnFlags.WidthFixed, 70f);
-        ImGui.TableSetupColumn("Active", ImGuiTableColumnFlags.WidthFixed, 70f);
-        ImGui.TableSetupColumn("Match", ImGuiTableColumnFlags.WidthFixed, 90f);
-        ImGui.TableHeadersRow();
+        SpheneUI.Tables.Column("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.2f);
+        SpheneUI.Tables.Column("Kinds", ImGuiTableColumnFlags.WidthFixed, 120f);
+        SpheneUI.Tables.Column("Delivered Source", ImGuiTableColumnFlags.WidthStretch, 1.6f);
+        SpheneUI.Tables.Column("Data Flag", ImGuiTableColumnFlags.WidthFixed, 80f);
+        SpheneUI.Tables.Column("Loaded Source", ImGuiTableColumnFlags.WidthStretch, 1.4f);
+        SpheneUI.Tables.Column("Active Source", ImGuiTableColumnFlags.WidthStretch, 1.4f);
+        SpheneUI.Tables.Column("Loaded", ImGuiTableColumnFlags.WidthFixed, 70f);
+        SpheneUI.Tables.Column("Active", ImGuiTableColumnFlags.WidthFixed, 70f);
+        SpheneUI.Tables.Column("Match", ImGuiTableColumnFlags.WidthFixed, 90f);
+        SpheneUI.Tables.HeaderRow();
 
         foreach (var path in activeDeliveredPaths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
         {
@@ -1395,18 +1403,18 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 ? isPenumbraActive == isDataFlagActive
                 : !isPenumbraActive;
 
-            ImGui.TableNextRow();
+            SpheneUI.Tables.Row();
 
-            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Tables.SetColumn(0);
             DrawTrimmedTextWithTooltip(path, 96);
 
-            ImGui.TableSetColumnIndex(1);
+            SpheneUI.Tables.SetColumn(1);
             SpheneUI.Text.Plain(deliveredState != null ? string.Join(", ", deliveredState.ObjectKinds.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : "-");
 
-            ImGui.TableSetColumnIndex(2);
+            SpheneUI.Tables.SetColumn(2);
             SpheneUI.Text.Plain(deliveredState != null ? string.Join(", ", deliveredState.Sources.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)) : "-");
 
-            ImGui.TableSetColumnIndex(3);
+            SpheneUI.Tables.SetColumn(3);
             if (hasDelivered)
             {
                 SpheneUI.Text.Colored(isDataFlagActive ? "Yes" : "No", isDataFlagActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
@@ -1416,23 +1424,21 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 SpheneUI.Text.Plain("-");
             }
 
-            ImGui.TableSetColumnIndex(4);
+            SpheneUI.Tables.SetColumn(4);
             DrawTrimmedTextWithTooltip(string.IsNullOrEmpty(loadedSource) ? "-" : loadedSource, 72);
 
-            ImGui.TableSetColumnIndex(5);
+            SpheneUI.Tables.SetColumn(5);
             DrawTrimmedTextWithTooltip(string.IsNullOrEmpty(activeSource) ? "-" : activeSource, 72);
 
-            ImGui.TableSetColumnIndex(6);
+            SpheneUI.Tables.SetColumn(6);
             SpheneUI.Text.Colored(hasLoaded ? "Yes" : "No", hasLoaded ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
 
-            ImGui.TableSetColumnIndex(7);
+            SpheneUI.Tables.SetColumn(7);
             SpheneUI.Text.Colored(isPenumbraActive ? "Yes" : "No", isPenumbraActive ? ImGuiColors.HealerGreen : ImGuiColors.DalamudRed);
 
-            ImGui.TableSetColumnIndex(8);
+            SpheneUI.Tables.SetColumn(8);
             SpheneUI.Text.Colored(matches ? "OK" : "Diff", matches ? ImGuiColors.HealerGreen : ImGuiColors.DalamudYellow);
         }
-
-        ImGui.EndTable();
     }
 
     private static Dictionary<string, DeliveredPathState> BuildDeliveredPathState(Sphene.API.Data.CharacterData? characterData)
@@ -1703,10 +1709,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             _mismatchTracker.ResetGlobalCounters();
         }
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("Reset total check counters without clearing mismatch records");
-        }
+        SpheneUI.AttachTooltip("Reset total check counters without clearing mismatch records");
 
         var records = _mismatchTracker.GetRecords()
             .Where(r => r.MismatchCount > 0 && ShouldTrackMismatchTrackerPath(r.GamePath, r.ObjectKinds))
@@ -1724,23 +1727,23 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.Separator();
 
         var mismatchAvailY = MathF.Max(220f * ImGuiHelpers.GlobalScale, ImGui.GetContentRegionAvail().Y);
-        if (!ImGui.BeginTable("ActiveMismatchTable", 8,
-                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
-                new Vector2(-1, mismatchAvailY)))
+        using var mismatchTable = SpheneUI.Tables.Begin("ActiveMismatchTable", 8,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
+            new Vector2(-1, mismatchAvailY));
+        if (!mismatchTable.Success)
         {
             return;
         }
 
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 100f);
-        ImGui.TableSetupColumn("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.0f);
-        ImGui.TableSetupColumn("Global %", ImGuiTableColumnFlags.WidthFixed, 75f);
-        ImGui.TableSetupColumn("Local %", ImGuiTableColumnFlags.WidthFixed, 75f);
-        ImGui.TableSetupColumn("Checks", ImGuiTableColumnFlags.WidthFixed, 70f);
-        ImGui.TableSetupColumn("Last Mismatch", ImGuiTableColumnFlags.WidthFixed, 100f);
-        ImGui.TableSetupColumn("Sources", ImGuiTableColumnFlags.WidthStretch, 1.0f);
-        ImGui.TableSetupColumn("Object Kinds", ImGuiTableColumnFlags.WidthStretch, 0.8f);
-        ImGui.TableHeadersRow();
+        SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthFixed, 100f);
+        SpheneUI.Tables.Column("Game Path", ImGuiTableColumnFlags.WidthStretch, 2.0f);
+        SpheneUI.Tables.Column("Global %", ImGuiTableColumnFlags.WidthFixed, 75f);
+        SpheneUI.Tables.Column("Local %", ImGuiTableColumnFlags.WidthFixed, 75f);
+        SpheneUI.Tables.Column("Checks", ImGuiTableColumnFlags.WidthFixed, 70f);
+        SpheneUI.Tables.Column("Last Mismatch", ImGuiTableColumnFlags.WidthFixed, 100f);
+        SpheneUI.Tables.Column("Sources", ImGuiTableColumnFlags.WidthStretch, 1.0f);
+        SpheneUI.Tables.Column("Object Kinds", ImGuiTableColumnFlags.WidthStretch, 0.8f);
+        SpheneUI.Tables.HeaderRow();
 
         // Sort by global mismatch percentage (based on total checks across all paths)
         // A path with 500 mismatches out of 1000 global checks = 50%
@@ -1750,16 +1753,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             .ThenByDescending(r => r.MismatchCount)
             .ThenBy(r => r.Uid, StringComparer.Ordinal))
         {
-            ImGui.TableNextRow();
+            SpheneUI.Tables.Row();
 
-            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Tables.SetColumn(0);
             var displayName = GetDisplayName(record.Uid);
             SpheneUI.Text.Plain(displayName);
 
-            ImGui.TableSetColumnIndex(1);
+            SpheneUI.Tables.SetColumn(1);
             DrawTrimmedTextWithTooltip(record.GamePath, 100);
 
-            ImGui.TableSetColumnIndex(2);
+            SpheneUI.Tables.SetColumn(2);
             // Global % - mismatch count / total global checks
             var globalPercentage = record.GlobalMismatchPercentage;
             var globalColor = globalPercentage >= 10 ? ImGuiColors.DalamudRed 
@@ -1768,7 +1771,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 : ImGuiColors.HealerGreen;
             SpheneUI.Text.Colored($"{globalPercentage:F2}%", globalColor);
 
-            ImGui.TableSetColumnIndex(3);
+            SpheneUI.Tables.SetColumn(3);
             // Local % - mismatch count / this path's own check count
             var localPercentage = record.MismatchPercentage;
             var localColor = localPercentage >= 50 ? ImGuiColors.DalamudRed 
@@ -1777,10 +1780,10 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 : ImGuiColors.HealerGreen;
             SpheneUI.Text.Colored($"{localPercentage:F1}%", localColor);
 
-            ImGui.TableSetColumnIndex(4);
+            SpheneUI.Tables.SetColumn(4);
             SpheneUI.Text.Plain($"{record.MismatchCount}/{record.TotalCheckCount}");
 
-            ImGui.TableSetColumnIndex(5);
+            SpheneUI.Tables.SetColumn(5);
             if (record.LastSeen != DateTimeOffset.MinValue)
             {
                 SpheneUI.Text.Plain(record.LastSeen.ToLocalTime().ToString("HH:mm:ss"));
@@ -1790,16 +1793,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 SpheneUI.Text.Plain("-");
             }
 
-            ImGui.TableSetColumnIndex(6);
+            SpheneUI.Tables.SetColumn(6);
             var sourcesText = string.Join(", ", record.Sources.OrderBy(s => s, StringComparer.OrdinalIgnoreCase));
             DrawTrimmedTextWithTooltip(sourcesText, 60);
 
-            ImGui.TableSetColumnIndex(7);
+            SpheneUI.Tables.SetColumn(7);
             var kindsText = string.Join(", ", record.ObjectKinds.OrderBy(k => k, StringComparer.OrdinalIgnoreCase));
             DrawTrimmedTextWithTooltip(kindsText, 50);
         }
-
-        ImGui.EndTable();
     }
 
     private string GetDisplayName(string uid)
@@ -2018,8 +2019,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         SpheneUI.Layout.VerticalSpace();
 
-        ImGui.SetNextItemWidth(150f * ImGuiHelpers.GlobalScale);
-        if (ImGui.BeginCombo("Min Level", _debugLogMinLevel.ToString()))
+        if (SpheneUI.Controls.BeginComboBox("Min Level", _debugLogMinLevel.ToString(),
+                150f * ImGuiHelpers.GlobalScale))
         {
             foreach (var level in Enum.GetValues<DebugLogLevel>())
             {
@@ -2030,7 +2031,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 }
                 if (selected) ImGui.SetItemDefaultFocus();
             }
-            ImGui.EndCombo();
+            SpheneUI.Controls.EndComboBox();
         }
         SpheneUI.AttachTooltip("Minimum severity to show in the log list.");
 
@@ -2091,8 +2092,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
             ? selectedPair != null ? selectedPair.UserData.AliasOrUID : "Selected"
             : string.IsNullOrWhiteSpace(_debugLogSpecificUid) ? "All" : _debugLogSpecificUid;
 
-        ImGui.SetNextItemWidth(260f * ImGuiHelpers.GlobalScale);
-        if (ImGui.BeginCombo("Character Filter", uidLabel))
+        if (SpheneUI.Controls.BeginComboBox("Character Filter", uidLabel,
+                260f * ImGuiHelpers.GlobalScale))
         {
             var anySelected = string.IsNullOrWhiteSpace(_debugLogSpecificUid) && !_debugLogSelectedCharacterOnly;
             if (SpheneUI.Controls.Selectable("All", anySelected))
@@ -2122,7 +2123,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                     _debugLogSelectedCharacterOnly = false;
                 }
             }
-            ImGui.EndCombo();
+            SpheneUI.Controls.EndComboBox();
         }
         SpheneUI.AttachTooltip("Limits entries to a specific user (handle).");
 
@@ -2170,41 +2171,41 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         var entries = GetFilteredDebugLogSnapshot(maxEntries: 2500);
         var avail = ImGui.GetContentRegionAvail();
-        if (!ImGui.BeginTable("##DebugLogTable", 6,
-                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
-                new Vector2(-1, avail.Y)))
+        using var logTable = SpheneUI.Tables.Begin("##DebugLogTable", 6,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable | ImGuiTableFlags.ScrollY,
+            new Vector2(-1, avail.Y));
+        if (!logTable.Success)
         {
             return;
         }
 
-        ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed, 95f);
-        ImGui.TableSetupColumn("Lvl", ImGuiTableColumnFlags.WidthFixed, 45f);
-        ImGui.TableSetupColumn("Cat", ImGuiTableColumnFlags.WidthFixed, 70f);
-        ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 160f);
-        ImGui.TableSetupColumn("Message", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 34f);
-        ImGui.TableHeadersRow();
+        SpheneUI.Tables.Column("Time", ImGuiTableColumnFlags.WidthFixed, 95f);
+        SpheneUI.Tables.Column("Lvl", ImGuiTableColumnFlags.WidthFixed, 45f);
+        SpheneUI.Tables.Column("Cat", ImGuiTableColumnFlags.WidthFixed, 70f);
+        SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthFixed, 160f);
+        SpheneUI.Tables.Column("Message", ImGuiTableColumnFlags.WidthStretch);
+        SpheneUI.Tables.Column("", ImGuiTableColumnFlags.WidthFixed, 34f);
+        SpheneUI.Tables.HeaderRow();
 
         for (var i = 0; i < entries.Count; i++)
         {
             var entry = entries[i];
-            ImGui.TableNextRow();
+            SpheneUI.Tables.Row();
             ImGui.PushID(i);
 
-            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Tables.SetColumn(0);
             SpheneUI.Text.Plain(entry.Timestamp.ToLocalTime().ToString("HH:mm:ss.fff"));
 
-            ImGui.TableSetColumnIndex(1);
+            SpheneUI.Tables.SetColumn(1);
             DrawLevelIcon(entry.Level);
 
-            ImGui.TableSetColumnIndex(2);
+            SpheneUI.Tables.SetColumn(2);
             SpheneUI.Text.Plain(entry.Category);
 
-            ImGui.TableSetColumnIndex(3);
+            SpheneUI.Tables.SetColumn(3);
             SpheneUI.Text.Plain(string.IsNullOrEmpty(entry.Uid) ? "-" : GetDisplayName(entry.Uid));
 
-            ImGui.TableSetColumnIndex(4);
+            SpheneUI.Tables.SetColumn(4);
             SpheneUI.Text.Plain(entry.Message);
             if (ShouldIncludeDetails(entry) && ImGui.IsItemHovered())
             {
@@ -2224,7 +2225,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                 SpheneUI.Popups.EndStyled();
             }
 
-            ImGui.TableSetColumnIndex(5);
+            SpheneUI.Tables.SetColumn(5);
             if (ShouldIncludeDetails(entry))
             {
                 var size = ImGui.GetFrameHeight();
@@ -2245,10 +2246,8 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
         {
             ImGui.SetScrollHereY(1.0f);
         }
-
-        ImGui.EndTable();
     }
-    
+
     private void ClearDebugLog()
     {
         _debugLogLock.Enter();
@@ -2683,12 +2682,14 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
     private void DrawLegacyCheck()
     {
-        if (ImGui.BeginTable("LegacyCheckTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
+        using var legacyTable = SpheneUI.Tables.Begin("LegacyCheckTable", 3,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY);
+        if (legacyTable.Success)
         {
-            ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 200);
-            ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 100);
-            ImGui.TableSetupColumn("Details", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableHeadersRow();
+            SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthFixed, 200);
+            SpheneUI.Tables.Column("Status", ImGuiTableColumnFlags.WidthFixed, 100);
+            SpheneUI.Tables.Column("Details", ImGuiTableColumnFlags.WidthStretch);
+            SpheneUI.Tables.HeaderRow();
 
             var pairsToCheck = new HashSet<Pair>(_pairManager.DirectPairs);
             foreach (var groupPairs in _pairManager.GroupPairs.Values)
@@ -2701,17 +2702,16 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
             foreach (var pair in pairsToCheck)
             {
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                SpheneUI.Text.Plain(pair.UserData.AliasOrUID);
+                SpheneUI.Tables.Row();
+                SpheneUI.Tables.Cell(pair.UserData.AliasOrUID);
 
-                ImGui.TableNextColumn();
+                SpheneUI.Tables.NextColumn();
                 var data = pair.LastReceivedCharacterData;
                 if (data == null)
                 {
                     SpheneUI.Text.Colored("No Data", ImGuiColors.DalamudGrey);
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Plain("-");
+                    SpheneUI.Tables.NextColumn();
+                    SpheneUI.Text.Muted("-");
                 }
                 else
                 {
@@ -2753,19 +2753,17 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
                         {
                             SpheneUI.Text.Colored("FOUND", ImGuiColors.DalamudRed);
                         }
-                        ImGui.TableNextColumn();
+                        SpheneUI.Tables.NextColumn();
                         SpheneUI.Text.Wrapped(string.Join("\n", details));
                     }
                     else
                     {
                         SpheneUI.Text.Colored("Clean", ImGuiColors.HealerGreen);
-                        ImGui.TableNextColumn();
-                        SpheneUI.Text.Plain("-");
+                        SpheneUI.Tables.NextColumn();
+                        SpheneUI.Text.Muted("-");
                     }
                 }
             }
-
-            ImGui.EndTable();
         }
     }
 }

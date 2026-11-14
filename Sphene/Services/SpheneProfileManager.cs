@@ -20,6 +20,11 @@ public class SpheneProfileManager : MediatorSubscriberBase
     private readonly ApiController _apiController;
     private readonly SpheneConfigService _SpheneConfigService;
     private readonly ConcurrentDictionary<UserData, SpheneProfileData> _spheneProfiles = new(UserDataComparer.Instance);
+    private readonly ConcurrentDictionary<UserData, API.Dto.User.UserProfileExtrasDto> _spheneProfileExtras = new(UserDataComparer.Instance);
+    /// <summary>Last seen identity row per uid - DisplayName/Alias resolve
+    /// for surfaces that only carry a uid (comments, staff rosters).</summary>
+    private readonly ConcurrentDictionary<string, UserData> _userIdentities = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<UserData, byte> _profileExtrasLoading = new(UserDataComparer.Instance);
 
     private readonly SpheneProfileData _defaultProfileData = new(IsFlagged: false, IsNSFW: false, _spheneLogo, string.Empty, _noDescription);
     private readonly SpheneProfileData _loadingProfileData = new(IsFlagged: false, IsNSFW: false, _spheneLogoLoading, string.Empty, "Loading Data from server...");
@@ -34,11 +39,27 @@ public class SpheneProfileManager : MediatorSubscriberBase
         Mediator.Subscribe<ClearProfileDataMessage>(this, (msg) =>
         {
             if (msg.UserData != null)
+            {
                 _spheneProfiles.Remove(msg.UserData, out _);
+                _spheneProfileExtras.Remove(msg.UserData, out _);
+                _profileExtrasLoading.Remove(msg.UserData, out _);
+                _userIdentities.Remove(msg.UserData.UID, out _);
+            }
             else
+            {
                 _spheneProfiles.Clear();
+                _spheneProfileExtras.Clear();
+                _profileExtrasLoading.Clear();
+                _userIdentities.Clear();
+            }
         });
-        Mediator.Subscribe<DisconnectedMessage>(this, (_) => _spheneProfiles.Clear());
+        Mediator.Subscribe<DisconnectedMessage>(this, (_) =>
+        {
+            _spheneProfiles.Clear();
+            _spheneProfileExtras.Clear();
+            _profileExtrasLoading.Clear();
+            _userIdentities.Clear();
+        });
     }
 
     public SpheneProfileData GetSpheneProfile(UserData data)
@@ -57,19 +78,88 @@ public class SpheneProfileManager : MediatorSubscriberBase
         => !_spheneProfiles.TryGetValue(data, out var profile)
             || ReferenceEquals(profile, _loadingProfileData);
 
+    /// <summary>
+    /// Lazily-fetched profile extras (gallery + blog) - heavier content kept off
+    /// the hot profile path. Null while loading; after a write the caller
+    /// patches the cached DTO via <see cref="UpdateProfileExtras"/> so no
+    /// refetch is needed.
+    /// </summary>
+    public API.Dto.User.UserProfileExtrasDto? GetProfileExtras(UserData data)
+    {
+        if (_spheneProfileExtras.TryGetValue(data, out var extras))
+        {
+            return extras;
+        }
+        if (_profileExtrasLoading.TryAdd(data, 0))
+        {
+            _ = Task.Run(() => GetProfileExtrasFromService(data));
+        }
+        return null;
+    }
+
+    /// <summary>True while <paramref name="data"/>'s extras are being fetched.</summary>
+    public bool IsProfileExtrasLoading(UserData data)
+        => _profileExtrasLoading.ContainsKey(data);
+
+    /// <summary>Patches the cached extras after a local write - saves the refetch.</summary>
+    public void UpdateProfileExtras(UserData data,
+        Func<API.Dto.User.UserProfileExtrasDto, API.Dto.User.UserProfileExtrasDto> update)
+    {
+        if (_spheneProfileExtras.TryGetValue(data, out var current))
+        {
+            _spheneProfileExtras[data] = update(current);
+        }
+    }
+
+    /// <summary>Best-known display string for a uid - DisplayName, then
+    /// Alias; never the uid itself. Null when nothing is cached.</summary>
+    public string? GetPreferredName(string uid)
+    {
+        if (!_userIdentities.TryGetValue(uid, out var u)) return null;
+        return !string.IsNullOrWhiteSpace(u.DisplayName) ? u.DisplayName
+            : !string.IsNullOrWhiteSpace(u.Alias) ? u.Alias : null;
+    }
+
+    /// <summary>Drops the cached extras so the next read refetches.</summary>
+    public void InvalidateProfileExtras(UserData data)
+    {
+        _spheneProfileExtras.Remove(data, out _);
+        _profileExtrasLoading.Remove(data, out _);
+    }
+
+    private async Task GetProfileExtrasFromService(UserData data)
+    {
+        try
+        {
+            var extras = await _apiController.UserGetProfileExtras(new API.Dto.User.UserDto(data)).ConfigureAwait(false);
+            _spheneProfileExtras[data] = extras;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to get profile extras for user {user}", data);
+            _spheneProfileExtras[data] = new API.Dto.User.UserProfileExtrasDto(data, null, null);
+        }
+        finally
+        {
+            _profileExtrasLoading.Remove(data, out _);
+        }
+    }
+
     private async Task GetSpheneProfileFromService(UserData data)
     {
         try
         {
             _spheneProfiles[data] = _loadingProfileData;
             var profile = await _apiController.UserGetProfile(new API.Dto.User.UserDto(data)).ConfigureAwait(false);
+            if (profile.User != null) _userIdentities[profile.User.UID] = profile.User;
             SpheneProfileData profileData = new(profile.Disabled, profile.IsNSFW ?? false,
                 string.IsNullOrEmpty(profile.ProfilePictureBase64) ? _spheneLogo : profile.ProfilePictureBase64,
                 !string.IsNullOrEmpty(data.Alias) && !string.Equals(data.Alias, data.UID, StringComparison.Ordinal) ? _spheneSupporter : string.Empty,
                 string.IsNullOrEmpty(profile.Description) ? _noDescription : profile.Description,
                 profile.StatusMessage ?? string.Empty, profile.Tags ?? string.Empty,
                 profile.BannerImageBase64 ?? string.Empty, profile.Theme ?? string.Empty,
-                profile.Visibility ?? 0, profile.RowImageBase64 ?? string.Empty);
+                profile.Visibility ?? 0, profile.RowImageBase64 ?? string.Empty,
+                profile.Links);
             if (profileData.IsNSFW && !_SpheneConfigService.Current.ProfilesAllowNsfw && !string.Equals(_apiController.UID, data.UID, StringComparison.Ordinal))
             {
                 _spheneProfiles[data] = _nsfwProfileData;

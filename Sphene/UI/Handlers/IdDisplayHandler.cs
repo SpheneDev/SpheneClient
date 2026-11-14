@@ -95,7 +95,7 @@ public class IdDisplayHandler
             var noteLine = string.IsNullOrEmpty(note)
                 ? string.Empty
                 : $"Note: {note}{Environment.NewLine}";
-            ImGui.SetTooltip(noteLine
+            SpheneUI.AttachTooltip(noteLine
                 + "Middle Mouse Button to open their profile in the hub");
         }
 
@@ -110,7 +110,7 @@ public class IdDisplayHandler
     /// pair row opens it (the name text alone is too small a target, so
     /// DrawUserPair reports the row click here). The preload warms the profile
     /// fetch and texture decode in the same frame the toggle opens the strip.
-    /// Avatar areas are excluded by the caller — those keep the pair tooltip.
+    /// Avatar areas are excluded by the caller · those keep the pair tooltip.
     /// </summary>
     public void PairRowActivated(Pair pair)
     {
@@ -150,7 +150,7 @@ public class IdDisplayHandler
 
     public static string GetPlayerText(Pair pair)
     {
-        // the row name is always the display name — notes and character
+        // the row name is always the display name · notes and character
         // names never take over, and the raw UID is not a user-facing
         // identity anymore (handle/display name are)
         return pair.UserData.PreferredName;

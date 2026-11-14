@@ -27,6 +27,11 @@ public sealed class StatusDebugLogPopupUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        SpheneUI.Layout.PageHeader("Communication Log", "commlog", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Raw log of server communication - for troubleshooting sync issues.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
+
         if (SpheneUI.Layout.BeginScrollArea("debug-log-content", ImGui.GetContentRegionAvail(),
                 contentPadding: Vector2.Zero))
         {

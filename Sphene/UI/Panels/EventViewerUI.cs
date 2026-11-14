@@ -97,6 +97,11 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        SpheneUI.Layout.PageHeader("Syncshell Events", "eventviewer", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Upcoming events listed by syncshell communities - open one for details and sign-up.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
+
         if (SpheneUI.Layout.BeginScrollArea("event-viewer-content", ImGui.GetContentRegionAvail(),
                 contentPadding: Vector2.Zero))
         {
@@ -157,18 +162,17 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
         var min = ImGui.GetWindowContentRegionMin();
         var width = max.X - min.X;
         var height = max.Y - cursorPos;
-        using var table = ImRaii.Table("eventTable", 6, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY | ImGuiTableFlags.RowBg,
+        using var table = SpheneUI.Tables.Begin("eventTable", 6, ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.ScrollY | ImGuiTableFlags.RowBg,
             new Vector2(width, height));
-        if (table)
+        if (table.Success)
         {
-            ImGui.TableSetupScrollFreeze(0, 1);
-            ImGui.TableSetupColumn(string.Empty, ImGuiTableColumnFlags.NoSort);
-            ImGui.TableSetupColumn("Time");
-            ImGui.TableSetupColumn("Source");
-            ImGui.TableSetupColumn("User");
-            ImGui.TableSetupColumn("Character");
-            ImGui.TableSetupColumn("Event");
-            ImGui.TableHeadersRow();
+            SpheneUI.Tables.Column(string.Empty, ImGuiTableColumnFlags.NoSort);
+            SpheneUI.Tables.Column("Time");
+            SpheneUI.Tables.Column("Source");
+            SpheneUI.Tables.Column("User");
+            SpheneUI.Tables.Column("Character");
+            SpheneUI.Tables.Column("Event");
+            SpheneUI.Tables.HeaderRow();
             foreach (var ev in _filteredEvents.Value)
             {
                 var icon = ev.EventSeverity switch
@@ -187,37 +191,14 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
                     _ => new Vector4()
                 };
 
-                ImGui.TableNextColumn();
+                SpheneUI.Tables.BeginRow();
                 SpheneUI.Icons.Icon(icon, iconColor == new Vector4() ? null : iconColor);
                 SpheneUI.AttachTooltip(ev.EventSeverity.ToString());
-                ImGui.TableNextColumn();
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain(ev.EventTime.ToString("G", CultureInfo.CurrentCulture));
-                ImGui.TableNextColumn();
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain(ev.EventSource);
-                ImGui.TableNextColumn();
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain(string.IsNullOrEmpty(ev.UID) ? "--" : ev.UID);
-                ImGui.TableNextColumn();
-                ImGui.AlignTextToFramePadding();
-                SpheneUI.Text.Plain(string.IsNullOrEmpty(ev.Character) ? "--" : ev.Character);
-                ImGui.TableNextColumn();
-                ImGui.AlignTextToFramePadding();
-                var posX = ImGui.GetCursorPosX();
-                var maxTextLength = ImGui.GetWindowContentRegionMax().X - posX;
-                var textSize = ImGui.CalcTextSize(ev.Message).X;
-                var msg = ev.Message;
-                while (textSize > maxTextLength)
-                {
-                    msg = msg[..^5] + "...";
-                    textSize = ImGui.CalcTextSize(msg).X;
-                }
-                SpheneUI.Text.Plain(msg);
-                if (!string.Equals(msg, ev.Message, StringComparison.Ordinal))
-                {
-                    SpheneUI.AttachTooltip(ev.Message);
-                }
+                SpheneUI.Tables.Cell(ev.EventTime.ToString("G", CultureInfo.CurrentCulture));
+                SpheneUI.Tables.Cell(ev.EventSource);
+                SpheneUI.Tables.Cell(string.IsNullOrEmpty(ev.UID) ? "--" : ev.UID);
+                SpheneUI.Tables.Cell(string.IsNullOrEmpty(ev.Character) ? "--" : ev.Character);
+                SpheneUI.Tables.Cell(ev.Message);
             }
         }
     }

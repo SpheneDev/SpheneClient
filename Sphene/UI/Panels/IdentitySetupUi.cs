@@ -16,7 +16,7 @@ namespace Sphene.UI.Panels;
 
 /// <summary>
 /// Mandatory identity setup shown when the connected user has no alias yet.
-/// Non-closable until an alias is set — all other hub calls are blocked server-side.
+/// Non-closable until an alias is set · all other hub calls are blocked server-side.
 /// </summary>
 public class IdentitySetupUi : WindowMediatorSubscriberBase
 {
@@ -62,14 +62,17 @@ public class IdentitySetupUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        SpheneUI.Text.PageHeader("Set up your identity");
+        SpheneUI.Layout.PageHeader("Set up your identity", "identitysetup", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Link your character to a Sphene secret key - required once before syncing.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
         var formatOk = _aliasFormatRegex.IsMatch(_aliasInput.Trim());
-        SpheneUI.Layout.SectionCard(() =>
+        SpheneUI.Layout.RowGroup(() =>
         {
             SpheneUI.Text.Wrapped(
                 "Sphene identifies you by a unique handle instead of a raw account ID. " +
-                "Pick your handle once — it is used for pair requests and your profile. " +
+                "Pick your handle once · it is used for pair requests and your profile. " +
                 "You cannot use Sphene until a handle is set.");
             SpheneUI.Layout.VerticalSpace();
 
@@ -103,7 +106,7 @@ public class IdentitySetupUi : WindowMediatorSubscriberBase
             DrawCheckResult();
 
             SpheneUI.Layout.VerticalSpace();
-            SpheneUI.Controls.InputTextWithHint("Display name", "optional — shown instead of your alias",
+            SpheneUI.Controls.InputTextWithHint("Display name", "optional · shown instead of your alias",
                 ref _displayNameInput, Constants.DisplayNameMaxLength);
 
             if (_statusMessage != null)
@@ -118,12 +121,10 @@ public class IdentitySetupUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.VerticalSpace();
 
         var canConfirm = formatOk && !_submitting;
-        using (ImRaii.Disabled(!canConfirm))
+        if (SpheneUI.Controls.PrimaryButton("Confirm and connect", FontAwesomeIcon.Check,
+                size: new Vector2(-1, 32), enabled: canConfirm))
         {
-            if (SpheneUI.Controls.Button("Confirm and connect", new Vector2(-1, 32)))
-            {
-                _ = SubmitAsync();
-            }
+            _ = SubmitAsync();
         }
 
         SpheneUI.Layout.VerticalSpace();
@@ -148,7 +149,7 @@ public class IdentitySetupUi : WindowMediatorSubscriberBase
                 SpheneUI.Text.Colored("Available", SpheneUI.Colors.Success);
                 break;
             case AliasAvailabilityResult.Taken:
-                SpheneUI.Text.Colored("Taken — pick another", SpheneUI.Colors.Danger);
+                SpheneUI.Text.Colored("Taken · pick another", SpheneUI.Colors.Danger);
                 break;
             default:
                 SpheneUI.Text.Colored("Invalid", SpheneUI.Colors.Danger);

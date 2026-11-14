@@ -149,7 +149,7 @@ public class DrawFolderTag : DrawFolderBase
             _ => true,
         };
 
-        // Walk left from the row's right edge like the pair rows do — the
+        // Walk left from the row's right edge like the pair rows do · the
         // caller already subtracted the content inset from currentRightSideX
         var menuButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
         var rightEdge = currentRightSideX;

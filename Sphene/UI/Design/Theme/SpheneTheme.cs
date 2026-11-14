@@ -5,7 +5,7 @@ namespace Sphene.UI.Design;
 /// <summary>
 /// Holds the currently active <see cref="ThemeConfiguration"/> for the Sphene
 /// design system. Every token, scope and helper resolves against
-/// <see cref="Current"/> — this is the single source of truth for theme state.
+/// <see cref="Current"/> · this is the single source of truth for theme state.
 /// Replaces the former <c>SpheneTheme.Current</c> static.
 /// </summary>
 public static class SpheneTheme

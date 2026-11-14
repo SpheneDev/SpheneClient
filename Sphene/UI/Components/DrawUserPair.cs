@@ -46,6 +46,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     private readonly SpheneConfigService _configService;
     private readonly LocalPairEmoteForceSyncService _localPairEmoteForceSyncService;
     private readonly SpheneProfileManager _spheneProfileManager;
+    private readonly ChatService _chatService;
     private byte[] _avatarBytes = [];
     private byte[] _rowImageBytes = [];
     private byte[] _bannerBytes = [];
@@ -63,7 +64,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         ServerConfigurationManager serverConfigurationManager,
         UiSharedService uiSharedService, PlayerPerformanceConfigService performanceConfigService,
         CharaDataManager charaDataManager, PairManager pairManager, SpheneConfigService configService,
-        LocalPairEmoteForceSyncService localPairEmoteForceSyncService, SpheneProfileManager spheneProfileManager)
+        LocalPairEmoteForceSyncService localPairEmoteForceSyncService, SpheneProfileManager spheneProfileManager,
+        ChatService chatService)
     {
         _id = id;
         _pair = entry;
@@ -81,6 +83,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _configService = configService;
         _localPairEmoteForceSyncService = localPairEmoteForceSyncService;
         _spheneProfileManager = spheneProfileManager;
+        _chatService = chatService;
         _mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnPenumbraModTransferAvailable);
         _mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnPenumbraModTransferCompleted);
         _mediator.Subscribe<PenumbraModTransferDiscardedMessage>(this, OnPenumbraModTransferDiscarded);
@@ -159,7 +162,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var drawList = ImGui.GetWindowDrawList();
             var rowMin = ImGui.GetWindowPos();
             var rowMax = rowMin + new Vector2(baseFolderWidth, rowHeight);
-            // the row silhouette is the child bg — backdrop and gradients must
+            // the row silhouette is the child bg · backdrop and gradients must
             // share that radius or their corner arcs drift from the edge
             var rowRadius = MathF.Min(rowRounding, rowHeight * 0.5f);
 
@@ -172,12 +175,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var rowImage = _pair.UserData.IsSupporter && profile.RowImageData.Value.Length > 0
                 ? PairRowImage(profile)
                 : null;
-            if (profileTheme.RowHover != ProfileRowFx.None || profileTheme.RowIdle != ProfileRowFx.None
-                || rowImage != null)
-            {
-                SpheneUI.Profile.RowBackdrop(drawList, rowMin, rowMax, accent, _wasHovered, hoverT,
-                    profileTheme.RowHover, profileTheme.RowIdle, rowImage, rowRadius);
-            }
+            SpheneUI.Profile.RowBackdrop(drawList, rowMin, rowMax, accent, _wasHovered, hoverT,
+                profileTheme.RowHover, profileTheme.RowIdle, rowImage, rowRadius);
 
             if (hasTimingSyncTarget)
             {
@@ -208,7 +207,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         _wasHovered = ImGui.IsItemHovered();
         // a right-click anywhere on the row activates the profile popout; the
         // child-item hit test misses inner items, so the rect test covers
-        // name/buttons/empty space — the avatar keeps its tooltip and is excluded
+        // name/buttons/empty space · the avatar keeps its tooltip and is excluded
         var rowHovered = _wasHovered
             || (ImGui.IsMouseHoveringRect(ImGui.GetItemRectMin(), ImGui.GetItemRectMax())
                 && ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows));
@@ -219,7 +218,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         color.Dispose();
     }
 
-    /// <summary>Pair's cached avatar texture — reloads from the media cache when the profile bytes change.</summary>
+    /// <summary>Pair's cached avatar texture · reloads from the media cache when the profile bytes change.</summary>
     private IDalamudTextureWrap? PairAvatar(SpheneProfileData profile)
     {
         var data = profile.ImageData.Value;
@@ -289,6 +288,18 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 ImGui.CloseCurrentPopup();
             }
             SpheneUI.AttachTooltip("Opens the profile for this user in a new window");
+
+            if (_pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.None
+                && SpheneUI.Icons.ActionButton(FontAwesomeIcon.CommentDots, "Message", _menuWidth, ButtonStyleKeys.ContextMenu_Item))
+            {
+                _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends,
+                    null, _pair, FriendSub: FriendHubSubPage.Chat));
+                ImGui.CloseCurrentPopup();
+            }
+            if (_pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.None)
+            {
+                SpheneUI.AttachTooltip("Open the direct-message chat with " + _pair.UserData.PreferredName + " in the Sphene Hub");
+            }
         }
 
         var canSendPenumbraMod = _pair.IndividualPairStatus == API.Data.Enum.IndividualPairStatus.Bidirectional
@@ -637,7 +648,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         // the avatar ring colors by sync state: incoming pending (their change
         // still applying on this client) pulses yellow, any failed direction
-        // reads red — outgoing pending stays green since the icon covers it
+        // reads red · outgoing pending stays green since the icon covers it
         var (incomingStateForIcon, outgoingStateForIcon) = _pair.GetCombinedAckV3State();
 
         var showPerfWarning = _performanceConfigService.Current.ShowPerformanceIndicator
@@ -648,7 +659,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             && (!_pair.UserPair.OwnPermissions.IsSticky()
                 || _performanceConfigService.Current.WarnOnPreferredPermissionsExceedingThresholds);
 
-        // grace period reads as an orange dot — "offline, but may return" —
+        // grace period reads as an orange dot · "offline, but may return"  · 
         // instead of the former full-row orange highlight. The pair keeps its
         // CachedPlayer during grace so IsOnline stays true the whole window.
         var offlineGrace = hasOfflineGrace;
@@ -666,7 +677,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         // compact presence block: the avatar carries online state (dot,
         // bottom-right), mutual visibility (ring) and gpose context (camera
-        // pip, bottom-left) — one slot instead of a row of state icons
+        // pip, bottom-left) · one slot instead of a row of state icons
         var avatarSize = MathF.Max(12f * scale, rowHeight - 4f * scale);
         var avatarPos = contentMin + new Vector2(
             SpheneTheme.Current.CompactPairRowContentPadding + 1f * scale,
@@ -683,7 +694,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
         var avatarCenter = avatarPos + new Vector2(avatarSize * 0.5f);
         // ring = visibility + sync state: accent while the pair isn't sharing
-        // data; once mutually visible it colors by acknowledgment outcome —
+        // data; once mutually visible it colors by acknowledgment outcome  · 
         // green synced, yellow while their change still applies here, red failed
         var ringAlpha = 0.30f;
         var ringWidth = 1f;
@@ -732,7 +743,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         // outgoing sync rides as a tiny top-right pip in the camera pip's
-        // language — only attention states get one: a synced pair already
+        // language · only attention states get one: a synced pair already
         // reads green via the ring and needs no extra chrome
         if (_pair.IsOnline && _pair.IsMutuallyVisible && !suppressAckUi
             && outgoingStateForIcon.Outcome is Pair.AckV3Outcome.Pending or Pair.AckV3Outcome.Fail)
@@ -757,9 +768,35 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             }
         }
 
+        // Staff identity rides as a centered bottom-edge pip between the gpose
+        // and presence markers - crown for the shell owner, shield for staff.
+        var pairUidForStaff = _pair.UserData.UID;
+        var isGroupOwner = _currentGroup != null
+            && string.Equals(_currentGroup.OwnerUID, pairUidForStaff, StringComparison.Ordinal);
+        var isGroupStaff = isGroupOwner || (_currentGroup != null
+            && _currentGroup.GroupPairUserInfos.TryGetValue(pairUidForStaff, out var staffFlags)
+            && staffFlags.IsModerator());
+        if (isGroupStaff)
+        {
+            var staffPipRadius = MathF.Max(4.5f * scale, avatarSize * 0.16f);
+            var staffPipCenter = avatarPos + new Vector2(avatarSize * 0.5f, avatarSize * 0.8536f);
+            var staffPipColor = isGroupOwner ? SpheneUI.Palette.SpheneGold : accent;
+            drawList.AddCircleFilled(staffPipCenter, staffPipRadius + 1.5f * scale,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(Vector4.Zero, 0.75f)));
+            var staffGlyph = (isGroupOwner ? FontAwesomeIcon.Crown : FontAwesomeIcon.UserShield).ToIconString();
+            using (SpheneUI.Icons.PushFont())
+            {
+                ImGui.SetWindowFontScale(0.52f);
+                var staffGlyphSize = ImGui.CalcTextSize(staffGlyph);
+                drawList.AddText(staffPipCenter - staffGlyphSize * 0.5f,
+                    SpheneUI.ColorUtils.ToU32(staffPipColor), staffGlyph);
+                ImGui.SetWindowFontScale(1f);
+            }
+        }
+
 
         // syncshell-only membership rides as a tiny top-left link pip in the
-        // avatar chrome's language — a synced bidirectional pair needs no extra
+        // avatar chrome's language · a synced bidirectional pair needs no extra
         // marker since the green ring already reads "connected"
         if (isVisibleForIcon && _pair.IsOnline
             && _pair.UserPair.Groups.Any()
@@ -781,7 +818,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         }
 
         // status glyphs sit on an explicit X cursor drawn vertically centered
-        // on the row — icon-font baseline metrics otherwise offset them from
+        // on the row · icon-font baseline metrics otherwise offset them from
         // the name's text line and the avatar
         var glyphGap = ImGui.GetStyle().ItemSpacing.X;
         var iconsX = avatarPos.X + avatarSize + glyphGap;
@@ -893,8 +930,15 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             tooltipLines.Add(new(FontAwesomeIcon.ShieldAlt, "In duty", "sync hidden", ImGuiColors.DalamudYellow));
         }
 
-        // presence rides as the first spec row — frees the header for the handle
+        // presence rides as the first spec row · frees the header for the handle
         tooltipLines.Insert(0, new(FontAwesomeIcon.Circle, "Status", presenceText, presenceColor));
+
+        if (isGroupStaff)
+        {
+            tooltipLines.Insert(1, new(isGroupOwner ? FontAwesomeIcon.Crown : FontAwesomeIcon.UserShield,
+                isGroupOwner ? "Owner" : "Staff",
+                _currentGroup!.GroupAliasOrGID, isGroupOwner ? SpheneUI.Palette.SpheneGold : accent));
+        }
         var handleText = string.IsNullOrWhiteSpace(_pair.UserData.Alias) ? null : "@" + _pair.UserData.Alias;
         DrawTooltipForHoveredItem(showUserPairTooltip, avatarWrap, PairBanner(profile),
             tooltipTitle, handleText, presenceColor, profile, tooltipMeta, tooltipLines);
@@ -902,7 +946,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
     /// <summary>
     /// Draws a FontAwesome glyph vertically centered on the row via the draw
-    /// list with a Dummy hitbox for hover/tooltips — icon-font baseline
+    /// list with a Dummy hitbox for hover/tooltips · icon-font baseline
     /// metrics otherwise shift glyphs off the name's text line.
     /// </summary>
     private static float DrawCenteredGlyph(float x, float centerY, FontAwesomeIcon icon, Vector4 color, string tooltip)
@@ -1006,14 +1050,14 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var rightEdgeX = winMin.X + tipW - pad.X;
             ImGui.PushTextWrapPos(tipW - pad.X);
 
-            // slim profile banner strip bleeding to the edges — same renderer
+            // slim profile banner strip bleeding to the edges · same renderer
             // as the profile page (cover image or theme gradient + blends),
             // dissolved into the popup background over its lower half
             var theme = profile.ProfileTheme.Value;
             var accent = theme.AccentColor(SpheneTheme.Current.CompactAccent);
             var bMin = winMin;
             var bMax = new Vector2(winMin.X + tipW, bMin.Y + bannerH);
-            // the window's default clip insets by ~half the padding — replace it
+            // the window's default clip insets by ~half the padding · replace it
             // for the strip so the banner truly bleeds to the window edges
             ImGui.PushClipRect(winMin, winMin + ImGui.GetWindowSize(), false);
             SpheneUI.Profile.Banner(drawList, bMin, bMax, banner, theme,
@@ -1052,7 +1096,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                     ImGui.SameLine(0, SpheneUI.Spacing.X8.Scaled);
                     SpheneUI.Layout.Badge("NSFW", ImGuiColors.DalamudYellow);
                     // Badge draws via the draw list and parks the cursor on the
-                    // chip's end — the dummy turns it into a proper line break
+                    // chip's end · the dummy turns it into a proper line break
                     ImGui.Dummy(new Vector2(0f, SpheneUI.Layout.BadgeHeight));
                 }
                 if (!string.IsNullOrWhiteSpace(handle))
@@ -1106,7 +1150,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 }
             }
 
-            // client version footer — pinned to the bottom-right corner so a
+            // client version footer · pinned to the bottom-right corner so a
             // longer name never pushes it around
             if (!string.IsNullOrWhiteSpace(meta))
             {
@@ -1152,7 +1196,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             var failedState = outgoingFailed ? outgoing : incoming;
             var reason = GetFriendlyAckFailureReason(failedState.ErrorCode, failedState.ErrorMessage);
             var direction = outgoingFailed ? "Sending" : "Applying";
-            return (TrimWithEllipsis($"{direction} failed — {reason}", 110),
+            return (TrimWithEllipsis($"{direction} failed · {reason}", 110),
                 ImGuiColors.DalamudRed, FontAwesomeIcon.ExclamationTriangle);
         }
 
@@ -1270,6 +1314,36 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends, null, _pair));
             }
             SpheneUI.AttachTooltip("Open profile of " + _pair.UserData.PreferredName + " in the Sphene Hub");
+
+            // DM shortcut - unread rides as an accent pip on the button so an
+            // incoming message is visible at list level, not just in the inbox.
+            // IndividualPairStatus.None = shell-only contact: the server only
+            // accepts DMs between paired users, so the affordance stays hidden.
+            var canMessage = _pair.IndividualPairStatus != API.Data.Enum.IndividualPairStatus.None;
+            var hasUnread = _chatService.HasUnread(_pair.UserData.UID);
+            if (canMessage || hasUnread)
+            {
+                var chatButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.CommentDots);
+                currentRightSide -= (chatButtonSize.X + spacingX);
+                ImGui.SameLine(currentRightSide);
+                if (SpheneUI.Icons.Button(FontAwesomeIcon.CommentDots, null, null, null,
+                        null, ButtonStyleKeys.Pair_Profile))
+                {
+                    _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Friends,
+                        null, _pair, FriendSub: FriendHubSubPage.Chat));
+                }
+                SpheneUI.AttachTooltip(hasUnread
+                    ? "Unread messages from " + _pair.UserData.PreferredName + " - open chat"
+                    : "Message " + _pair.UserData.PreferredName);
+                if (hasUnread)
+                {
+                    var btnRect = ImGui.GetItemRectMax();
+                    var pipR = 3f * SpheneUI.Scale;
+                    ImGui.GetWindowDrawList().AddCircleFilled(
+                        new Vector2(btnRect.X - pipR - 1f * SpheneUI.Scale, btnRect.Y - pipR * 2f),
+                        pipR, SpheneUI.ColorUtils.ToU32(SpheneUI.Palette.SpheneGold));
+                }
+            }
         }
 
         // Reload button (only if pair is visible)
@@ -1469,7 +1543,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
                 if (userinfo.IsModerator())
                 {
                     icon = FontAwesomeIcon.UserShield;
-                    text = "User is moderator in this syncshell";
+                    text = "User is staff in this syncshell";
                 }
                 else if (userinfo.IsPinned())
                 {
@@ -1512,7 +1586,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
     {
         if (selfIsOwner || ((selfIsModerator) && (!userIsModerator)))
         {
-            SpheneUI.Text.Plain("Syncshell Moderator Functions");
+            SpheneUI.Text.Plain("Syncshell Staff Functions");
             var pinText = "Pinned in syncshell";
             var pinIcon = userIsPinned ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
             if (DrawStateColoredToggleButton(pinIcon, pinText, userIsPinned))
@@ -1550,7 +1624,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
         if (selfIsOwner)
         {
             SpheneUI.Text.Plain("Syncshell Owner Functions");
-            var modText = "Syncshell moderator";
+            var modText = "Staff member";
             var modIcon = userIsModerator ? FontAwesomeIcon.ToggleOn : FontAwesomeIcon.ToggleOff;
             if (DrawStateColoredToggleButton(modIcon, modText, userIsModerator) && UiSharedService.CtrlPressed())
             {
@@ -1566,8 +1640,8 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
 
                 _ = _apiController.GroupSetUserInfo(new GroupPairUserInfoDto(group.Group, _pair.UserData, userinfo));
             }
-            SpheneUI.AttachTooltip("Hold CTRL to change the moderator status for " + (_pair.UserData.PreferredName) + Environment.NewLine +
-                "Moderators can kick, ban/unban, pin/unpin users and clear the Syncshell.");
+            SpheneUI.AttachTooltip("Hold CTRL to change the staff status for " + (_pair.UserData.PreferredName) + Environment.NewLine +
+                "Staff members can kick, ban/unban, pin/unpin users and clear the Syncshell.");
 
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Crown, "Transfer Ownership", _menuWidth, true, ButtonStyleKeys.Pair_Transfer) && UiSharedService.CtrlPressed() && UiSharedService.ShiftPressed())
             {

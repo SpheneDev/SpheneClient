@@ -448,6 +448,16 @@ public class DalamudUtilService : IHostedService, IMediatorSubscriber
         agentMap->SetFlagMapMarker(map.TerritoryType.RowId, map.RowId, position);
     }
 
+    /// <summary>Opens the map without a flag marker - used when a destination
+    /// has no reliable position to pin.</summary>
+    public unsafe void OpenMap(Map map)
+    {
+        EnsureIsOnFramework();
+        var agentMap = AgentMap.Instance();
+        if (agentMap == null) return;
+        agentMap->OpenMapByMapId(map.RowId);
+    }
+
     public async Task<LocationInfo> GetMapDataAsync()
     {
         return await RunOnFrameworkThread(GetMapData).ConfigureAwait(false);

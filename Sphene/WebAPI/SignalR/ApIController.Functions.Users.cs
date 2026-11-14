@@ -83,6 +83,55 @@ public partial class ApiController
         return await _spheneHub!.InvokeAsync<UserProfileDto>(nameof(UserGetProfile), normalized).ConfigureAwait(false);
     }
 
+    public async Task<UserProfileExtrasDto> UserGetProfileExtras(UserDto dto)
+    {
+        var normalized = NormalizeIdentityInput(dto);
+        if (!IsConnected) return new UserProfileExtrasDto(normalized.User, null, null);
+        return await _spheneHub!.InvokeAsync<UserProfileExtrasDto>(nameof(UserGetProfileExtras), normalized).ConfigureAwait(false);
+    }
+
+    public async Task<UserProfileGalleryImageDto?> UserUpsertProfileGalleryImage(UserProfileGalleryImageUpdateDto dto)
+    {
+        if (!IsConnected) return null;
+        return await _spheneHub!.InvokeAsync<UserProfileGalleryImageDto?>(nameof(UserUpsertProfileGalleryImage), dto).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UserDeleteProfileGalleryImage(UserProfileItemDeleteDto dto)
+    {
+        if (!IsConnected) return false;
+        return await _spheneHub!.InvokeAsync<bool>(nameof(UserDeleteProfileGalleryImage), dto).ConfigureAwait(false);
+    }
+
+    public async Task<UserProfileGalleryAlbumDto?> UserUpsertProfileGalleryAlbum(UserProfileGalleryAlbumUpdateDto dto)
+    {
+        if (!IsConnected) return null;
+        return await _spheneHub!.InvokeAsync<UserProfileGalleryAlbumDto?>(nameof(UserUpsertProfileGalleryAlbum), dto).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UserDeleteProfileGalleryAlbum(UserProfileItemDeleteDto dto)
+    {
+        if (!IsConnected) return false;
+        return await _spheneHub!.InvokeAsync<bool>(nameof(UserDeleteProfileGalleryAlbum), dto).ConfigureAwait(false);
+    }
+
+    public async Task<UserProfileGalleryImageLikeResultDto?> UserToggleProfileGalleryImageLike(UserProfileGalleryImageLikeDto dto)
+    {
+        if (!IsConnected) return null;
+        return await _spheneHub!.InvokeAsync<UserProfileGalleryImageLikeResultDto?>(nameof(UserToggleProfileGalleryImageLike), dto).ConfigureAwait(false);
+    }
+
+    public async Task<UserProfileBlogPostDto?> UserUpsertProfileBlogPost(UserProfileBlogPostUpdateDto dto)
+    {
+        if (!IsConnected) return null;
+        return await _spheneHub!.InvokeAsync<UserProfileBlogPostDto?>(nameof(UserUpsertProfileBlogPost), dto).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UserDeleteProfileBlogPost(UserProfileItemDeleteDto dto)
+    {
+        if (!IsConnected) return false;
+        return await _spheneHub!.InvokeAsync<bool>(nameof(UserDeleteProfileBlogPost), dto).ConfigureAwait(false);
+    }
+
     // Track last push data time per session to debounce rapid successive pushes (e.g., after zoning)
     private DateTime _lastPushDataTime = DateTime.MinValue;
     private const int PushDataDebounceMs = 500; // Minimum 500ms between data pushes to prevent duplicates
@@ -144,6 +193,71 @@ public partial class ApiController
     {
         if (!IsConnected) return;
         await _spheneHub!.SendAsync(nameof(UserRemovePair), userDto).ConfigureAwait(false);
+    }
+
+    public async Task UserBlock(UserDto user)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserBlock), user).ConfigureAwait(false);
+    }
+
+    public async Task UserUnblock(UserDto user)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserUnblock), user).ConfigureAwait(false);
+    }
+
+    public async Task<List<UserDto>> UserGetBlockedUsers()
+    {
+        if (!IsConnected) return [];
+        return await _spheneHub!.InvokeAsync<List<UserDto>>(
+            nameof(UserGetBlockedUsers)).ConfigureAwait(false);
+    }
+
+    public async Task UserSendChatMessage(UserDto recipient, string message)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserSendChatMessage), recipient,
+            message).ConfigureAwait(false);
+    }
+
+    public async Task<List<ChatMessageDto>> UserGetChatHistory(UserDto other,
+        int skip = 0, int take = 50)
+    {
+        if (!IsConnected) return [];
+        return await _spheneHub!.InvokeAsync<List<ChatMessageDto>>(
+            nameof(UserGetChatHistory), other, skip, take).ConfigureAwait(false);
+    }
+
+    public async Task UserMarkChatRead(UserDto other)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserMarkChatRead), other)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Newest-first durable notifications for the signed-in user.</summary>
+    public async Task<List<UserNotificationDto>> UserGetNotifications(int take = 50)
+    {
+        if (!IsConnected) return [];
+        return await _spheneHub!.InvokeAsync<List<UserNotificationDto>>(
+            nameof(UserGetNotifications), take).ConfigureAwait(false);
+    }
+
+    /// <summary>Marks server-side notifications read · fire and forget.</summary>
+    public async Task UserMarkNotificationsRead(List<long> ids)
+    {
+        if (!IsConnected || ids.Count == 0) return;
+        await _spheneHub!.SendAsync(nameof(UserMarkNotificationsRead), ids)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Clears the server-side notification inbox.</summary>
+    public async Task UserClearNotifications()
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserClearNotifications))
+            .ConfigureAwait(false);
     }
 
     public async Task UserSetPairPermissions(UserPermissionsDto userPermissions)
@@ -370,20 +484,15 @@ public partial class ApiController
 
     public async Task<UserHousingPropertyDto?> UserSetHousingProperty(UserHousingPropertyUpdateDto dto)
     {
-        Logger.LogDebug("[CLIENT DEBUG] UserSetHousingProperty called with: {location}, IsConnected: {connected}", dto.Location, IsConnected);
-        
-        if (!IsConnected) 
+        if (!IsConnected)
         {
-            Logger.LogWarning("[CLIENT DEBUG] UserSetHousingProperty: Not connected to server");
+            Logger.LogWarning("UserSetHousingProperty: not connected to server");
             return null;
         }
-        
+
         try
         {
-            Logger.LogDebug("[CLIENT DEBUG] UserSetHousingProperty: Invoking hub method");
-            var result = await _spheneHub!.InvokeAsync<UserHousingPropertyDto?>(nameof(UserSetHousingProperty), dto).ConfigureAwait(false);
-            Logger.LogDebug("[CLIENT DEBUG] UserSetHousingProperty: Hub method returned: {result}", result != null ? "SUCCESS" : "NULL");
-            return result;
+            return await _spheneHub!.InvokeAsync<UserHousingPropertyDto?>(nameof(UserSetHousingProperty), dto).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

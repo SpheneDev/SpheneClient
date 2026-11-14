@@ -123,6 +123,27 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
 
     public bool IsSupporter => _connectionDto?.IsSupporter ?? false;
 
+    /// <summary>Length of the one-time supporter trial · mirrors the server's
+    /// 24h window.</summary>
+    public static readonly TimeSpan SupporterTrialDuration = TimeSpan.FromHours(24);
+
+    /// <summary>Server-stamped trial start · non-null once the trial was used.</summary>
+    public DateTime? SupporterTrialStartUtc => _connectionDto?.SupporterTrialStartUtc;
+
+    /// <summary>Trial is currently inside its 24h window.</summary>
+    public bool SupporterTrialActive => SupporterTrialStartUtc.HasValue
+        && DateTime.UtcNow - SupporterTrialStartUtc.Value < SupporterTrialDuration;
+
+    /// <summary>The trial window's end - only meaningful while active.</summary>
+    public DateTime? SupporterTrialEndsUtc => SupporterTrialStartUtc?.Add(SupporterTrialDuration);
+
+    /// <summary>Trial was used at some point (active or expired).</summary>
+    public bool SupporterTrialUsed => SupporterTrialStartUtc.HasValue;
+
+    /// <summary>Paid supporter OR inside the trial window - the gate every
+    /// perk application check should use instead of <see cref="IsSupporter"/>.</summary>
+    public bool IsSupporterEffective => IsSupporter || SupporterTrialActive;
+
     public bool RequiresAliasSetup => _connectionDto?.RequiresAliasSetup ?? false;
 
     public DateTime? AliasChangeAvailableAt => _connectionDto?.AliasChangeAvailableAt;
@@ -165,6 +186,24 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
     public SystemInfoDto SystemInfoDto { get; private set; } = new();
 
     public string UID => _connectionDto?.User.UID ?? string.Empty;
+
+    /// <summary>Asks the server to stamp the one-time supporter trial -
+    /// returns the stamped start (or the existing one if already used).</summary>
+    public Task<DateTime?> UserActivateSupporterTrial()
+        => ActivateSupporterTrialAsync();
+
+    /// <summary>Asks the server to stamp the one-time supporter trial -
+    /// returns the stamped start (or the existing one if already used).</summary>
+    public async Task<DateTime?> ActivateSupporterTrialAsync()
+    {
+        var start = await _spheneHub!.InvokeAsync<DateTime?>(
+            nameof(UserActivateSupporterTrial)).ConfigureAwait(false);
+        if (start.HasValue && _connectionDto != null)
+        {
+            _connectionDto = _connectionDto with { SupporterTrialStartUtc = start };
+        }
+        return start;
+    }
 
     public async Task<bool> CheckClientHealth()
     {
@@ -543,6 +582,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         var dto = await _spheneHub!.InvokeAsync<ConnectionDto>(nameof(GetConnectionDto)).ConfigureAwait(false);
         Logger.LogDebug("ConnectionDto received - FileServerAddress: {fileServerAddress}, ServerVersion: {serverVersion}, User: {user}", 
             dto.ServerInfo.FileServerAddress, dto.ServerVersion, dto.User.AliasOrUID);
+        Logger.LogInformation("[Supporter] trial state: start={start} supporter={supporter}",
+            dto.SupporterTrialStartUtc, dto.IsSupporter);
         if (publishConnected) 
         {
             Logger.LogDebug("Publishing ConnectedMessage with FileServerAddress: {fileServerAddress}", dto.ServerInfo.FileServerAddress);
@@ -635,6 +676,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserReceiveCharacterData((dto) => _ = Client_UserReceiveCharacterData(dto));
         OnUserRemoveClientPair(dto => _ = Client_UserRemoveClientPair(dto));
         OnUserSendOnline(dto => _ = Client_UserSendOnline(dto));
+        OnUserReceiveChatMessage(dto => _ = Client_UserReceiveChatMessage(dto));
         OnUserUpdateOtherPairPermissions(dto => _ = Client_UserUpdateOtherPairPermissions(dto));
         OnUserUpdateSelfPairPermissions(dto => _ = Client_UserUpdateSelfPairPermissions(dto));
         OnUserAckYouUpdate(dto => _ = Client_UserAckYouUpdate(dto));
@@ -675,6 +717,11 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnGposeLobbyPushPoseData((dto, data) => _ = Client_GposeLobbyPushPoseData(dto, data));
         OnGposeLobbyPushWorldData((dto, data) => _ = Client_GposeLobbyPushWorldData(dto, data));
 
+        OnAnnouncementPublished((dto) => _ = Client_AnnouncementPublished(dto));
+        OnAnnouncementsChanged(() => _ = Client_AnnouncementsChanged());
+        OnCommunityChanged((dto) => _ = Client_CommunityChanged(dto));
+        OnUserNotification((dto) => _ = Client_UserNotification(dto));
+
         if (_healthCheckTokenSource is not null)
             _ = _healthCheckTokenSource.CancelAsync();
         _healthCheckTokenSource?.Dispose();
@@ -696,6 +743,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub.Remove(nameof(Client_UserReceiveCharacterData));
         _spheneHub.Remove(nameof(Client_UserRemoveClientPair));
         _spheneHub.Remove(nameof(Client_UserSendOnline));
+        _spheneHub.Remove(nameof(Client_UserReceiveChatMessage));
         _spheneHub.Remove(nameof(Client_UserUpdateOtherPairPermissions));
         _spheneHub.Remove(nameof(Client_UserUpdateSelfPairPermissions));
         _spheneHub.Remove(nameof(Client_UserAckYouUpdate));
@@ -730,6 +778,10 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub.Remove(nameof(Client_GposeLobbyPushCharacterData));
         _spheneHub.Remove(nameof(Client_GposeLobbyPushPoseData));
         _spheneHub.Remove(nameof(Client_GposeLobbyPushWorldData));
+        _spheneHub.Remove(nameof(Client_AnnouncementPublished));
+        _spheneHub.Remove(nameof(Client_AnnouncementsChanged));
+        _spheneHub.Remove(nameof(Client_CommunityChanged));
+        _spheneHub.Remove(nameof(Client_UserNotification));
     }
 
     private async Task LoadIninitialPairsAsync()

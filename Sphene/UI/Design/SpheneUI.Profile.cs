@@ -24,9 +24,9 @@ public static partial class SpheneUI
 
         /// <summary>
         /// The surface a hero banner bleeds into: the banner fills
-        /// <see cref="Min"/>.X–<see cref="Max"/>.X starting at <see cref="Min"/>.Y,
+        /// <see cref="Min"/>.X-<see cref="Max"/>.X starting at <see cref="Min"/>.Y,
         /// optionally rounding the given top corners. When no host is passed,
-        /// the banner bleeds to the enclosing scroll child's full width — and
+        /// the banner bleeds to the enclosing scroll child's full width · and
         /// its top edge, when the hero opens the page.
         /// </summary>
         [StructLayout(LayoutKind.Auto)]
@@ -48,7 +48,7 @@ public static partial class SpheneUI
             public Action<string>? OnStatusCommitted { get; set; }
             public string DescriptionBuffer { get; set; } = string.Empty;
             public Action<string>? OnDescriptionCommitted { get; set; }
-            /// <summary>Full comma-joined tag string after an add/remove — the hero never parses it itself.</summary>
+            /// <summary>Full comma-joined tag string after an add/remove · the hero never parses it itself.</summary>
             public Action<string>? OnTagsCommitted { get; set; }
             /// <summary>Fired when the NSFW chip is toggled in edit mode.</summary>
             public Action<bool>? OnNsfwToggled { get; set; }
@@ -78,7 +78,7 @@ public static partial class SpheneUI
             public bool EditingHandle { get; set; }
             /// <summary>Set when the handle input opens so the hero can focus it once.</summary>
             public bool HandleFocusPending { get; set; }
-            /// <summary>Cooldown gate — a locked handle shows the hint instead of opening the input.</summary>
+            /// <summary>Cooldown gate · a locked handle shows the hint instead of opening the input.</summary>
             public bool HandleLocked { get; set; }
             /// <summary>Muted hint under the handle (rules / next rename date).</summary>
             public string? HandleHint { get; set; }
@@ -90,9 +90,9 @@ public static partial class SpheneUI
             /// <summary>Color for <see cref="Feedback"/>.</summary>
             public Vector4 FeedbackColor { get; set; } = Colors.TextMuted;
 
-            /// <summary>Server-side display name — commits that match it are ignored.</summary>
+            /// <summary>Server-side display name · commits that match it are ignored.</summary>
             public string? DisplayNameCurrent { get; set; }
-            /// <summary>Server-side handle without the "@" — commits that match it are ignored.</summary>
+            /// <summary>Server-side handle without the "@" · commits that match it are ignored.</summary>
             public string? HandleCurrent { get; set; }
             /// <summary>Pending display-name value shown in the confirmation modal.</summary>
             public string? PendingDisplayName { get; set; }
@@ -122,8 +122,8 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Own-name chain for identity surfaces: the display name when set,
-        /// else the bare alias. Never the game character name — that is not
-        /// the Sphene-facing identity — and never the raw UID either: the
+        /// else the bare alias. Never the game character name · that is not
+        /// the Sphene-facing identity · and never the raw UID either: the
         /// handle is the identity. The "@" belongs to the handle meta line,
         /// not the name slot.
         /// </summary>
@@ -158,7 +158,7 @@ public static partial class SpheneUI
         private const float IdentityScrimAlpha = 0.55f;
 
         /// <summary>
-        /// Dark scrim behind <see cref="Identity"/> — the same dim the hub
+        /// Dark scrim behind <see cref="Identity"/> · the same dim the hub
         /// header card applies. Deliberately translucent: a caller's banner
         /// or row backdrop underneath still reads through.
         /// </summary>
@@ -169,7 +169,7 @@ public static partial class SpheneUI
                 rounding, corners);
 
         /// <summary>
-        /// Self-contained own-identity card — <see cref="IdentityScrim"/>,
+        /// Self-contained own-identity card · <see cref="IdentityScrim"/>,
         /// hover sheen, hairline and the <see cref="Identity"/> strip as one
         /// darker container floating on the caller's backdrop. The caller
         /// owns click handling and hover detection (bar variants must not
@@ -177,7 +177,7 @@ public static partial class SpheneUI
         /// </summary>
         public static void IdentityCard(ImDrawListPtr drawList, Vector2 min, Vector2 max,
             float padX, IdentityContent content, bool hovered, float rounding,
-            ImDrawFlags corners, string tooltipHint)
+            ImDrawFlags corners, string tooltipHint, float trailingReserve = 0f)
         {
             IdentityScrim(drawList, min, max, rounding, corners);
             if (hovered)
@@ -190,17 +190,18 @@ public static partial class SpheneUI
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.10f)),
                 rounding, corners);
             Identity(drawList, min, max.Y - min.Y, max.X - min.X, padX, content, hovered,
-                tooltipHint);
+                tooltipHint, trailingReserve);
         }
 
         /// <summary>
         /// Own-identity strip shared by the hub header card and the CompactUI
         /// profile bar: accent-haloed avatar with presence dot, name and
-        /// status line. Draws no background — the caller's backdrop (row
+        /// status line. Draws no background · the caller's backdrop (row
         /// image, <see cref="IdentityScrim"/>) stays visible behind it.
         /// </summary>
         public static void Identity(ImDrawListPtr drawList, Vector2 min, float height, float width,
-            float padX, IdentityContent content, bool hovered, string tooltipHint)
+            float padX, IdentityContent content, bool hovered, string tooltipHint,
+            float trailingReserve = 0f)
         {
             var scale = Scale;
             var avatarSize = MathF.Min(34f * scale, height - 10f * scale);
@@ -214,7 +215,7 @@ public static partial class SpheneUI
             Media.PresenceDot(drawList, avatarPos, avatarSize, content.PresenceColor);
 
             var textX = avatarPos.X + avatarSize + 9f * scale;
-            var textMaxW = MathF.Max(30f * scale, min.X + width - textX - 8f * scale);
+            var textMaxW = MathF.Max(30f * scale, min.X + width - textX - 8f * scale - trailingReserve);
             var lineH = ImGui.GetTextLineHeight();
             var lineGap = 2f * scale;
             var nameY = min.Y + (height - lineH * 2f - lineGap) * 0.5f;
@@ -229,7 +230,7 @@ public static partial class SpheneUI
             {
                 var tip = string.IsNullOrEmpty(content.Handle)
                     ? content.PresenceLabel
-                    : $"{content.PresenceLabel} — @{content.Handle}";
+                    : $"{content.PresenceLabel} · @{content.Handle}";
                 if (!string.Equals(statusText, content.StatusLine, StringComparison.Ordinal))
                 {
                     tip = $"{content.StatusLine}\n{tip}";
@@ -322,11 +323,21 @@ public static partial class SpheneUI
                 ColorUtils.ToU32(bottomRight), ColorUtils.ToU32(bottomLeft));
         }
 
-        /// <summary>Banner strip height in unscaled pixels, shared across hero renderers.</summary>
-        public const float HeroBannerHeight = 92f;
+        /// <summary>Banner strip height in unscaled pixels, shared across hero renderers · density-aware.</summary>
+        public static float HeroBannerHeight => Density.Current switch
+        {
+            DensityProfile.Compact => 74f,
+            DensityProfile.Comfortable => 104f,
+            _ => 92f,
+        };
 
-        /// <summary>Avatar size in unscaled pixels, shared across hero renderers.</summary>
-        public const float HeroAvatarSize = 68f;
+        /// <summary>Avatar size in unscaled pixels, shared across hero renderers · density-aware.</summary>
+        public static float HeroAvatarSize => Density.Current switch
+        {
+            DensityProfile.Compact => 56f,
+            DensityProfile.Comfortable => 76f,
+            _ => 68f,
+        };
 
         /// <summary>Fraction of the banner height that dissolves into the
         /// card body via a fade of the card's own accent tint.</summary>
@@ -336,14 +347,14 @@ public static partial class SpheneUI
         /// The profile hero surface: a full-bleed banner dissolving into the
         /// host surface, avatar half-overlapping the banner edge with a
         /// surface-colored cut-out ring, name + meta + status + tags +
-        /// optional stats row and actions. No card chrome — the region is
+        /// optional stats row and actions. No card chrome · the region is
         /// anchored by a hairline when it opens a page.
         /// </summary>
         /// <param name="displayName">Primary name shown in the big font.</param>
-        /// <param name="metaLine">Secondary line under the name — "@handle" renders white, anything else muted. In edit mode a "@" line becomes the handle-rename entry point.</param>
+        /// <param name="metaLine">Secondary line under the name · "@handle" renders white, anything else muted. In edit mode a "@" line becomes the handle-rename entry point.</param>
         /// <param name="profile">Profile data for status/tags; may be a placeholder.</param>
         /// <param name="avatar">Avatar texture (caller caches per user).</param>
-        /// <param name="banner">Optional banner texture — falls back to theme gradient.</param>
+        /// <param name="banner">Optional banner texture · falls back to theme gradient.</param>
         /// <param name="theme">The user's profile theme.</param>
         /// <param name="fallbackAccentA">Gradient/ring fallback color A.</param>
         /// <param name="fallbackAccentB">Gradient fallback color B.</param>
@@ -352,7 +363,7 @@ public static partial class SpheneUI
         /// <param name="actions">Buttons at the banner's bottom-right edge.</param>
         /// <param name="drawStats">Optional full-width content under the identity block (e.g. stat tiles).</param>
         /// <param name="edit">Own-profile edit mode: click overlays on banner/avatar + inline status/description inputs.</param>
-        /// <param name="host">Surface the banner bleeds into — a panel rect for
+        /// <param name="host">Surface the banner bleeds into · a panel rect for
         /// embedded hosts like the CompactUI popout; omit on full pages to bleed
         /// to the enclosing scroll child's edges.</param>
         /// <param name="presence">Optional presence dot on the avatar's bottom-right edge (community-style online marker).</param>
@@ -376,7 +387,7 @@ public static partial class SpheneUI
                 out var bannerMin, out var bannerMax,
                 out var bannerRounding, out var bannerCorners);
 
-            // Full-bleed banner straight onto the host surface — no card
+            // Full-bleed banner straight onto the host surface · no card
             // chrome; the bottom edge dissolves into the window surface.
             drawList.PushClipRect(bannerMin, bannerMax, true);
             Banner(drawList, bannerMin, bannerMax, banner, theme,
@@ -384,16 +395,16 @@ public static partial class SpheneUI
                 rounding: bannerRounding, corners: bannerCorners);
             drawList.PopClipRect();
             var fadeH = bannerHeight * HeroBannerBodyFade;
-            drawList.AddRectFilledMultiColor(
+            Media.FillRoundedGradient(drawList,
                 new Vector2(bannerMin.X, bannerMax.Y - fadeH), bannerMax,
-                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
-                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
-                ColorUtils.ToU32(surface), ColorUtils.ToU32(surface));
+                ColorUtils.WithAlpha(surface, 0f), ColorUtils.WithAlpha(surface, 0f),
+                surface, surface,
+                bannerRounding, bannerCorners & ImDrawFlags.RoundCornersBottom);
 
             ImGui.Dummy(new Vector2(contentWidth, bannerMax.Y - cursor.Y));
             var editing = edit?.Enabled == true;
 
-            // The avatar punches out of the banner — a surface-colored ring
+            // The avatar punches out of the banner · a surface-colored ring
             // reads as a cut-out, the thin rim keeps the silhouette crisp.
             var avatarPos = cursor + new Vector2(10f * scale,
                 bannerMax.Y - cursor.Y - avatarSize * 0.45f);
@@ -450,77 +461,140 @@ public static partial class SpheneUI
             var hasDesc = !string.IsNullOrWhiteSpace(profile.Description)
                 && !string.Equals(profile.Description,
                     SpheneProfileManager.NoDescriptionPlaceholder, StringComparison.Ordinal);
-            var textHeight = avatarSize * 0.55f + lineH * 1.2f + 6f * scale
-                + (metaLine.Length > 0 ? lineH + 2f * scale : 0f)
-                + ((editing || hasStatus) ? lineH + 6f * scale : 0f)
-                + ((editing || hasTags) ? lineH + 12f * scale : 0f)
-                + (editing ? lineH * 3f + 14f * scale : (hasDesc ? lineH * 2f : 0f))
-                + (!string.IsNullOrEmpty(edit?.Feedback) ? lineH * 1.5f : 0f);
-
-            ImGui.SetCursorScreenPos(textMin);
-            using (var textChild = ImRaii.Child("##profile-hero-text",
-                       new Vector2(MathF.Max(120f, textMaxX - textMin.X), textHeight),
-                       false, ImGuiWindowFlags.NoScrollbar))
+            // Thought bubble · a comic trail of three growing dots rises on
+            // a curved arc from the avatar's upper-right rim into the status
+            // bubble, which sits above-right of the avatar inside the cover
+            // - never at the header's far-right edge. Falls back to the
+            // inline status line when the bubble cannot fit.
+            var heroTextPad = ImGui.GetStyle().WindowPadding;
+            var bubblePad = new Vector2(12f * scale, 9f * scale);
+            var rim = avatarPos + new Vector2(avatarSize * 0.82f, avatarSize * 0.10f);
+            // Bubble left edge sits ~34·scale right of the rim point: with
+            // the ~40·scale climb that makes the curved trail ≈55px long,
+            // so the dot trail ends within a few px of the bubble edge.
+            var trailY = 40f * scale;
+            var bubbleMin = new Vector2(rim.X + 34f * scale, 0f);
+            var bubbleInnerW = 0f;
+            var bubbleH = 0f;
+            var statusTruncated = false;
+            var thoughtBubble = false;
+            if (!editing && hasStatus)
             {
-                if (textChild)
+                var naturalW = ImGui.CalcTextSize(profile.StatusMessage).X;
+                bubbleInnerW = MathF.Min(240f * scale,
+                    MathF.Max(120f * scale, naturalW));
+                bubbleInnerW = MathF.Min(bubbleInnerW,
+                    textMaxX - 8f * scale - bubbleMin.X - bubblePad.X * 2f);
+                if (bubbleInnerW >= 96f * scale)
                 {
-                    var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
-                    DrawHeroName(displayName, metaLine, accent, editing ? edit : null,
-                        inputWidth, scale);
-                    var onNsfw = edit?.OnNsfwToggled;
-                    var nsfwClickable = editing && onNsfw != null;
-                    if (isNsfw || nsfwClickable)
-                    {
-                        DrawNsfwChip(isNsfw, nsfwClickable, scale,
-                            () => onNsfw?.Invoke(!isNsfw));
-                    }
-                    if (editing)
-                    {
-                        var statusBuf = edit!.StatusBuffer;
-                        var statusCommit = Controls.InputTextWithHint("##hero-status",
-                                "Set a status message…", ref statusBuf, 100,
-                                ImGuiInputTextFlags.EnterReturnsTrue,
-                                preferredWidth: inputWidth)
-                            || ImGui.IsItemDeactivatedAfterEdit();
-                        edit.StatusBuffer = statusBuf;
-                        if (statusCommit)
-                        {
-                            edit.OnStatusCommitted?.Invoke(statusBuf.Trim());
-                        }
-                    }
-                    else if (hasStatus)
-                    {
-                        Text.ColoredWrapped(profile.StatusMessage, Colors.TextSecondary);
-                    }
-                    if (editing || hasTags)
-                    {
-                        DrawHeroTags(profile.Tags, editing ? edit : null, accent, scale);
-                    }
-                    if (editing)
-                    {
-                        var descBuf = edit!.DescriptionBuffer;
-                        var descCommit = Controls.InputTextMultiline("##hero-desc",
-                                ref descBuf, 2000,
-                                new Vector2(inputWidth, lineH * 3f + 8f * scale))
-                            || ImGui.IsItemDeactivatedAfterEdit();
-                        edit.DescriptionBuffer = descBuf;
-                        if (descCommit)
-                        {
-                            edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
-                        }
-                    }
-                    else if (hasDesc)
-                    {
-                        var preview = profile.Description;
-                        if (preview.Length > 140) preview = preview[..140] + "…";
-                        Text.MutedWrapped(preview);
-                    }
+                    var maxTextH = lineH * 3f;
+                    var textSize = ImGui.CalcTextSize(profile.StatusMessage,
+                        false, bubbleInnerW);
+                    statusTruncated = textSize.Y > maxTextH + 1f;
+                    bubbleH = MathF.Min(textSize.Y, maxTextH) + bubblePad.Y * 2f;
+                    bubbleMin.Y = MathF.Max(bannerMin.Y + 6f * scale,
+                        rim.Y - trailY - bubbleH * 0.78f);
+                    thoughtBubble = true;
                 }
             }
+            // Bio panel on the right · the description leaves the identity
+            // column for a bounded About-me card whenever the header is
+            // wide enough to host it; narrow headers keep the inline preview.
+            var bioGap = 16f * scale;
+            var bioW = MathF.Min(300f * scale,
+                MathF.Max(180f * scale, (textMaxX - textMin.X) * 0.36f));
+            var bioPanel = !editing && hasDesc
+                && textMaxX - textMin.X - bioW - bioGap >= 190f * scale;
+            var columnMaxX = bioPanel ? textMaxX - bioW - bioGap : textMaxX;
+            // No child window here on purpose: a fixed-size frame keeps
+            // claiming the mouse over its empty tail and shadows whatever
+            // follows the hero (the tab bar's top half died under it).
+            // Direct flow keeps the reserve exactly content-high - but the
+            // flow's line origin must be re-anchored: SetCursorScreenPos
+            // alone leaves wrapped lines snapping back to the window's own
+            // origin (which sits under the nav rail in the fixed zone).
+            ContentBounds.Push(new Vector2(textMin.X, columnMaxX));
+            ImGui.SetCursorScreenPos(textMin + heroTextPad);
+            var textIndent = Layout.FlowIndentTo(textMin.X + heroTextPad.X);
+            var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
+            var nameWidth = MathF.Max(140f, columnMaxX - textMin.X);
+            DrawHeroName(displayName, metaLine, accent, editing ? edit : null,
+                nameWidth, scale);
+            var onNsfw = edit?.OnNsfwToggled;
+            var nsfwClickable = editing && onNsfw != null;
+            if (isNsfw || nsfwClickable)
+            {
+                DrawNsfwChip(isNsfw, nsfwClickable, scale,
+                    () => onNsfw?.Invoke(!isNsfw));
+            }
+            if (editing)
+            {
+                var statusBuf = edit!.StatusBuffer;
+                var statusCommit = Controls.InputTextWithHint("##hero-status",
+                        "Set a status message…", ref statusBuf, 100,
+                        ImGuiInputTextFlags.EnterReturnsTrue,
+                        preferredWidth: inputWidth)
+                    || ImGui.IsItemDeactivatedAfterEdit();
+                edit.StatusBuffer = statusBuf;
+                if (statusCommit)
+                {
+                    edit.OnStatusCommitted?.Invoke(statusBuf.Trim());
+                }
+            }
+            else if (hasStatus && !thoughtBubble)
+            {
+                Text.ColoredWrapped(profile.StatusMessage, Colors.TextSecondary);
+            }
+            if (editing || hasTags)
+            {
+                DrawHeroTags(profile.Tags, editing ? edit : null, accent, scale);
+            }
+            if (editing)
+            {
+                var descBuf = edit!.DescriptionBuffer;
+                var descCommit = Controls.InputTextMultiline("##hero-desc",
+                        ref descBuf, 2000,
+                        new Vector2(inputWidth, lineH * 3f + 8f * scale))
+                    || ImGui.IsItemDeactivatedAfterEdit();
+                edit.DescriptionBuffer = descBuf;
+                if (descCommit)
+                {
+                    edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
+                }
+            }
+            else if (hasDesc && !bioPanel)
+            {
+                var preview = profile.Description;
+                if (preview.Length > 140) preview = preview[..140] + "…";
+                Text.MutedWrapped(preview,
+                    columnMaxX - ImGui.GetWindowPos().X);
+            }
+            var textActualBottom = ImGui.GetCursorScreenPos().Y;
+            Layout.FlowUnindent(textIndent);
+            ContentBounds.Pop();
 
-            // Action buttons along the banner's bottom-right edge. Their
+            // Thought bubble - drawn after the identity flow so its dots
+            // and text sit above the avatar edge and banner art.
+            if (thoughtBubble)
+            {
+                DrawThoughtBubble(drawList, profile.StatusMessage, rim,
+                    bubbleMin, bubbleInnerW + bubblePad.X * 2f, bubbleH,
+                    bubblePad, accent, scale, statusTruncated);
+            }
+            // Right-side About-me panel + its anchored full-bio flyout.
+            var bioPanelBottom = 0f;
+            var bioFlyoutId = $"profile-bio-{displayName}";
+            if (bioPanel)
+            {
+                bioPanelBottom = DrawBioPanel(drawList, profile.Description,
+                    new Vector2(textMaxX - bioW, textMin.Y + heroTextPad.Y),
+                    bioW, accent, scale, bioFlyoutId);
+            }
+
+            // Action buttons - docked under the bio panel when it exists,
+            // otherwise along the banner's bottom-right edge. Their
             // bounding box is remembered so the banner edit zone can
-            // exclude it geometrically — HoveredId arbitration alone still
+            // exclude it geometrically · HoveredId arbitration alone still
             // lets the banner overlay bleed through under the buttons.
             var hasActionsZone = false;
             var actionsZoneMin = Vector2.Zero;
@@ -528,7 +602,9 @@ public static partial class SpheneUI
             if (actions != null && actions.Count > 0)
             {
                 var x = textMaxX;
-                var actionTop = bannerMax.Y - ImGui.GetFrameHeight() - 6f * scale;
+                var actionTop = bioPanel
+                    ? bioPanelBottom + 6f * scale
+                    : bannerMax.Y - ImGui.GetFrameHeight() - 6f * scale;
                 foreach (var action in actions)
                 {
                     var w = Icons.TextButtonWidth(action.Icon, action.Label) + 4f * scale;
@@ -586,16 +662,42 @@ public static partial class SpheneUI
                 }
             }
 
+            // The text child reserves a worst-case estimate · the page must
+            // advance from what was actually drawn or empty optional lines
+            // leave a dead band between hero and the tab menu.
             var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
-                textMin.Y + textHeight + 4f * scale);
+                MathF.Max(textActualBottom, MathF.Max(bioPanelBottom,
+                    hasActionsZone ? actionsZoneMax.Y : 0f)) + 4f * scale);
+            // Anchored full-bio flyout · opens from the panel's "More…"
+            // trigger without moving the header.
+            if (bioPanel && Popups.BeginFlyout(bioFlyoutId))
+            {
+                var flyW = MathF.Min(380f * scale,
+                    ImGui.GetIO().DisplaySize.X * 0.4f);
+                var flyH = Math.Clamp(
+                    ImGui.CalcTextSize(profile.Description, false,
+                        flyW - 8f * scale).Y + 8f * scale,
+                    lineH * 2f, 280f * scale);
+                if (Layout.BeginScrollArea("bio-text",
+                        new Vector2(flyW, flyH)))
+                {
+                    Text.ColoredWrapped(profile.Description,
+                        Colors.TextSecondary,
+                        ImGui.GetCursorPosX() + flyW - 8f * scale);
+                }
+                Layout.EndScrollArea();
+                Popups.EndFlyout();
+            }
             if (drawStats != null)
             {
-                // Stats/meta align to the avatar's left edge — one continuous
+                // Stats/meta align to the avatar's left edge · one continuous
                 // margin for the hero column; hosts may indent further inside
                 // their callback.
                 ImGui.SetCursorScreenPos(new Vector2(cursor.X + 10f * scale,
                     contentBottom));
+                var statsIndent = Layout.FlowIndentTo(cursor.X + 10f * scale);
                 drawStats(contentWidth - 14f * scale);
+                Layout.FlowUnindent(statsIndent);
                 contentBottom = ImGui.GetCursorScreenPos().Y;
             }
             if (!host.HasValue)
@@ -615,7 +717,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Resolves the banner's bleed rect: an explicit <paramref name="host"/>
         /// when embedded in a drawn panel, otherwise the enclosing window's
-        /// client bounds — and the pane's top edge when the hero opens the page,
+        /// client bounds · and the pane's top edge when the hero opens the page,
         /// so the banner lands flush under the title area.
         /// </summary>
         private static void ResolveHeroHost(HeroHost? host, Vector2 cursor,
@@ -646,12 +748,12 @@ public static partial class SpheneUI
         /// Loading twin of <see cref="Hero"/>: same silhouette (banner bleed,
         /// half-overlapping avatar, name/meta/status bars) drawn as pulsing
         /// blocks with a traveling sheen. Hosts call this while the profile
-        /// fetch is in flight — when the real hero swaps in, geometry lines
+        /// fetch is in flight · when the real hero swaps in, geometry lines
         /// up so the transition does not jump.
         /// </summary>
         /// <param name="accent">Tint for the banner placeholder.</param>
         /// <param name="statsRows">Skeleton bars appended under the identity block, mirroring a caller's stats/meta lines.</param>
-        /// <param name="host">Same bleed host as <see cref="Hero"/> — pass the panel rect when embedded.</param>
+        /// <param name="host">Same bleed host as <see cref="Hero"/> · pass the panel rect when embedded.</param>
         public static void HeroSkeleton(Vector4 accent, int statsRows = 0, HeroHost? host = null)
         {
             var scale = Scale;
@@ -675,11 +777,11 @@ public static partial class SpheneUI
             SkeletonSheen(drawList, bannerMin, bannerMax, phase);
             drawList.PopClipRect();
             var fadeH = bannerHeight * HeroBannerBodyFade;
-            drawList.AddRectFilledMultiColor(
+            Media.FillRoundedGradient(drawList,
                 new Vector2(bannerMin.X, bannerMax.Y - fadeH), bannerMax,
-                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
-                ColorUtils.ToU32(ColorUtils.WithAlpha(surface, 0f)),
-                ColorUtils.ToU32(surface), ColorUtils.ToU32(surface));
+                ColorUtils.WithAlpha(surface, 0f), ColorUtils.WithAlpha(surface, 0f),
+                surface, surface,
+                bannerRounding, bannerCorners & ImDrawFlags.RoundCornersBottom);
 
             ImGui.Dummy(new Vector2(contentWidth, bannerMax.Y - cursor.Y));
 
@@ -752,7 +854,7 @@ public static partial class SpheneUI
             drawList.PopClipRect();
         }
 
-        /// <summary>Measured size of the NSFW chip — grows by a check glyph when <paramref name="active"/>.</summary>
+        /// <summary>Measured size of the NSFW chip · grows by a check glyph when <paramref name="active"/>.</summary>
         public static Vector2 NsfwChipSize(bool active, float scale)
         {
             var size = ImGui.CalcTextSize("NSFW") + new Vector2(10f, 3f) * scale;
@@ -835,9 +937,161 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// The hero status as a comic thought bubble · three progressively
+        /// larger dots climb a curved (quadratic-bezier) trail from the
+        /// avatar's upper-right rim into a rounded bubble anchored
+        /// above-right of the avatar inside the cover. Dot centers are placed
+        /// by walking the curve's arc length so the edge-to-edge gaps stay at
+        /// the design spec (~3-6px) at any UI scale. Pure decoration: the
+        /// caller's flow cursor and line origin are restored untouched.
+        /// </summary>
+        private static void DrawThoughtBubble(ImDrawListPtr drawList,
+            string status, Vector2 rim, Vector2 bubbleMin, float bubbleW,
+            float bubbleH, Vector2 pad, Vector4 accent, float scale,
+            bool truncated)
+        {
+            var fillU32 = ColorUtils.ToU32(
+                ColorUtils.WithAlpha(Colors.Surface, 0.96f));
+            var borderU32 = ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.45f));
+            var entry = new Vector2(bubbleMin.X,
+                bubbleMin.Y + bubbleH * 0.75f);
+            // Control point high above the rim · the trail rises steeply off
+            // the avatar's head first, then flattens toward the bubble edge.
+            var ctrl = new Vector2(
+                rim.X + (entry.X - rim.X) * 0.15f,
+                rim.Y - (rim.Y - entry.Y) * 0.80f);
+            var radius = new[] { 4f * scale, 6f * scale, 9f * scale };
+            var targets = new[]
+            {
+                radius[0] + 3f * scale,
+                radius[0] * 2f + radius[1] + 7.5f * scale,
+                radius[0] * 2f + radius[1] * 2f + radius[2] + 12.5f * scale,
+            };
+            var prev = rim;
+            var arc = 0f;
+            var dot = 0;
+            const int steps = 64;
+            for (var i = 1; i <= steps && dot < radius.Length; i++)
+            {
+                var t = i / (float)steps;
+                var mt = 1f - t;
+                var p = new Vector2(
+                    mt * mt * rim.X + 2f * mt * t * ctrl.X + t * t * entry.X,
+                    mt * mt * rim.Y + 2f * mt * t * ctrl.Y + t * t * entry.Y);
+                arc += Vector2.Distance(prev, p);
+                if (arc >= targets[dot])
+                {
+                    drawList.AddCircleFilled(p, radius[dot], fillU32);
+                    drawList.AddCircle(p, radius[dot], borderU32);
+                    dot++;
+                }
+                prev = p;
+            }
+            // Short-trail fallback · any unplaced dot merges into the entry
+            // so the trail never dies mid-air on clamped geometry.
+            for (; dot < radius.Length; dot++)
+            {
+                drawList.AddCircleFilled(entry, radius[dot], fillU32);
+                drawList.AddCircle(entry, radius[dot], borderU32);
+            }
+
+            var bubbleMax = bubbleMin + new Vector2(bubbleW, bubbleH);
+            var rounding = MathF.Min(14f * scale, bubbleH * 0.3f);
+            drawList.AddRectFilled(bubbleMin, bubbleMax, fillU32, rounding);
+            drawList.AddRect(bubbleMin, bubbleMax, borderU32, rounding,
+                ImDrawFlags.RoundCornersAll, MathF.Max(1f, scale));
+            // Wrapped text rides the window flow (AddText cannot wrap): park
+            // the cursor inside the padding, re-anchor the line origin so
+            // wrapped lines stay in the bubble, clip to the bubble, then
+            // restore everything.
+            var textMin = bubbleMin + pad;
+            var restore = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(textMin);
+            var indent = Layout.FlowIndentTo(textMin.X);
+            drawList.PushClipRect(textMin,
+                new Vector2(bubbleMax.X - pad.X, bubbleMax.Y - pad.Y), true);
+            Text.ColoredWrapped(status, Colors.TextPrimary,
+                bubbleMax.X - pad.X - ImGui.GetWindowPos().X);
+            drawList.PopClipRect();
+            Layout.FlowUnindent(indent);
+            ImGui.SetCursorScreenPos(restore);
+            if (truncated)
+            {
+                ImGui.SetCursorScreenPos(bubbleMin);
+                ImGui.InvisibleButton("##hero-status-full",
+                    bubbleMax - bubbleMin);
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip(status);
+                }
+                ImGui.SetCursorScreenPos(restore);
+            }
+        }
+
+        /// <summary>
+        /// Right-side "About me" preview panel · a restrained tonal card with
+        /// a muted label, a clipped three-line bio preview and, only when the
+        /// text overflows, a "More…" trigger that opens the anchored flyout
+        /// (<paramref name="flyoutId"/>) instead of growing the header.
+        /// Returns the panel's bottom screen Y.
+        /// </summary>
+        private static float DrawBioPanel(ImDrawListPtr drawList, string bio,
+            Vector2 min, float width, Vector4 accent, float scale,
+            string flyoutId)
+        {
+            var pad = 10f * scale;
+            var innerW = width - pad * 2f;
+            var lineH = ImGui.GetTextLineHeight();
+            var gap = 6f * scale;
+            var maxPreviewH = lineH * 3f;
+            var textSize = ImGui.CalcTextSize(bio, false, innerW);
+            var truncated = textSize.Y > maxPreviewH + 1f;
+            var previewH = MathF.Min(textSize.Y, maxPreviewH);
+            var panelH = pad * 2f + lineH + gap + previewH
+                + (truncated ? gap + lineH : 0f);
+            var max = new Vector2(min.X + width, min.Y + panelH);
+            var rounding = 10f * scale;
+            drawList.AddRectFilled(min, max,
+                ColorUtils.ToU32(Layout.NavRailBandColor()), rounding);
+            drawList.AddRect(min, max,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.30f)),
+                rounding);
+            drawList.AddText(min + new Vector2(pad, pad),
+                ColorUtils.ToU32(Colors.TextMuted), "About me");
+            var textMin = min + new Vector2(pad, pad + lineH + gap);
+            var restore = ImGui.GetCursorScreenPos();
+            ImGui.SetCursorScreenPos(textMin);
+            var indent = Layout.FlowIndentTo(textMin.X);
+            drawList.PushClipRect(textMin,
+                new Vector2(textMin.X + innerW, textMin.Y + previewH), true);
+            Text.ColoredWrapped(bio, Colors.TextSecondary,
+                textMin.X + innerW - ImGui.GetWindowPos().X);
+            drawList.PopClipRect();
+            Layout.FlowUnindent(indent);
+            ImGui.SetCursorScreenPos(restore);
+            if (truncated)
+            {
+                const string moreLabel = "More…";
+                var morePos = new Vector2(min.X + pad,
+                    textMin.Y + previewH + gap);
+                ImGui.SetCursorScreenPos(morePos);
+                if (ImGui.InvisibleButton($"##{flyoutId}-trigger",
+                        ImGui.CalcTextSize(moreLabel)))
+                {
+                    Popups.ToggleFlyout(flyoutId);
+                }
+                drawList.AddText(morePos, ColorUtils.ToU32(
+                    ImGui.IsItemHovered() ? accent : Colors.TextSecondary),
+                    moreLabel);
+                ImGui.SetCursorScreenPos(restore);
+            }
+            return max.Y;
+        }
+
+        /// <summary>
         /// Non-edit name line: the big font when it fits the column, the
         /// display font (~26px) when it does not, ellipsized with a tooltip
-        /// as the last resort — long names never bleed past the card edge.
+        /// as the last resort · long names never bleed past the card edge.
         /// </summary>
         private static void DrawFittedHeroName(string displayName, Vector4 accent, float availW)
         {
@@ -898,10 +1152,10 @@ public static partial class SpheneUI
                     edit.NameFocusPending = false;
                 }
                 // bare in-place edit: the input inherits the big name font and
-                // drops the frame chrome, so the line keeps its size — an
+                // drops the frame chrome, so the line keeps its size · an
                 // accent underline marks it as the active edit
                 var committed = DrawInPlaceInput("##hero-displayname",
-                    "Display name — Enter applies, empty removes it", edit.DisplayNameBuffer,
+                    "Display name · Enter applies, empty removes it", edit.DisplayNameBuffer,
                     edit.DisplayNameMaxLength, ImGuiInputTextFlags.EnterReturnsTrue,
                     inputWidth, accent, scale, out var nameBuf, out var nameCancelled, font: UidFont);
                 edit.DisplayNameBuffer = nameBuf;
@@ -952,7 +1206,7 @@ public static partial class SpheneUI
             {
                 Text.Colored("@", Palette.CrystalWhite);
                 ImGui.SameLine(0f, 1f * scale);
-                // focus request must sit directly before the input — the "@"
+                // focus request must sit directly before the input · the "@"
                 // prefix item would otherwise consume it and the field never
                 // becomes active, leaving the edit stuck open
                 if (edit.HandleFocusPending)
@@ -1022,7 +1276,7 @@ public static partial class SpheneUI
                 }
                 else if (handleLine)
                 {
-                    AttachTooltip("Handle — used for pair requests and profile lookup");
+                    AttachTooltip("Handle · used for pair requests and profile lookup");
                 }
             }
 
@@ -1039,13 +1293,13 @@ public static partial class SpheneUI
             {
                 edit.DisplayNameConfirm.Draw("hero-name", "Change display name?",
                     string.IsNullOrWhiteSpace(edit.PendingDisplayName)
-                        ? "Remove your display name — you will be shown under your handle."
+                        ? "Remove your display name · you will be shown under your handle."
                         : $"Your display name will change to \"{edit.PendingDisplayName}\".",
                     confirmLabel: "Apply", icon: FontAwesomeIcon.Pen,
                     confirmIcon: FontAwesomeIcon.Check,
                     detail: edit.DisplayNameConfirmDetail);
                 edit.HandleConfirm.Draw("hero-handle", "Rename handle?",
-                    $"Your handle will change to \"@{edit.PendingHandle}\" — others pair and find you by it.",
+                    $"Your handle will change to \"@{edit.PendingHandle}\" · others pair and find you by it.",
                     confirmLabel: "Rename", icon: FontAwesomeIcon.At,
                     confirmIcon: FontAwesomeIcon.At,
                     detail: edit.HandleConfirmDetail);
@@ -1054,11 +1308,11 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Small pen glyph right of the last item marking the line as
-        /// click-to-edit — vertically centered against the line's height,
+        /// click-to-edit · vertically centered against the line's height,
         /// accent on hover, muted otherwise. Returns the pen's own hover/click
         /// so callers can merge it with the text item's input state.
         /// </summary>
-        private static (bool Hovered, bool Clicked) DrawEditPen(float lineHeight,
+        internal static (bool Hovered, bool Clicked) DrawEditPen(float lineHeight,
             Vector4 accent, float scale)
         {
             ImGui.SameLine(0f, 5f * scale);
@@ -1078,14 +1332,14 @@ public static partial class SpheneUI
 
         /// <summary>
         /// InputText that looks like the text it replaces: transparent frame,
-        /// zero padding and an accent caret-line — so click-to-edit keeps the
+        /// zero padding and an accent caret-line · so click-to-edit keeps the
         /// exact visual size of the line instead of swapping in a boxed field.
         /// Returns true on Enter or a click-away that kept edits (caller routes
         /// through the confirm dialog); <paramref name="cancelled"/> is set on
-        /// Escape or a click-away without changes — the caller then discards
+        /// Escape or a click-away without changes · the caller then discards
         /// the edit instead of saving it.
         /// </summary>
-        private static bool DrawInPlaceInput(string id, string? hint, string value,
+        internal static bool DrawInPlaceInput(string id, string? hint, string value,
             int maxLength, ImGuiInputTextFlags flags, float width, Vector4 accent,
             float scale, out string outValue, out bool cancelled, IFontHandle? font = null)
         {
@@ -1110,7 +1364,7 @@ public static partial class SpheneUI
                     else cancelled = true;
                 }
                 // a field that never gained focus (e.g. a focus request eaten by
-                // a sibling item) cannot deactivate — still let a click elsewhere
+                // a sibling item) cannot deactivate · still let a click elsewhere
                 // drop the edit instead of leaving it stuck open
                 if (!committed && !cancelled
                     && ImGui.IsMouseClicked(ImGuiMouseButton.Left)
@@ -1287,7 +1541,7 @@ public static partial class SpheneUI
         /// <see cref="Controls.ColorSwatch"/> leading on the LEFT, then label
         /// + slide toggle. The swatch is always rendered (dimmed while
         /// disabled) so every toggle's label column and switch track stay
-        /// vertically aligned with the rows around it — optional controls
+        /// vertically aligned with the rows around it · optional controls
         /// must never push the switch. Design-system rule for all future
         /// settings rows that combine a toggle with extra controls.
         /// </summary>
@@ -1306,7 +1560,7 @@ public static partial class SpheneUI
             if (enabled && swatchClicked)
             {
                 // inside a dropdown the native OpenPopup/BeginPopup pair loses
-                // its first frame against the menu's own Popup layer — the
+                // its first frame against the menu's own Popup layer · the
                 // flyout is a plain pinned window that opens on the first click
                 if (Popups.InsideDropdown)
                 {
@@ -1342,13 +1596,13 @@ public static partial class SpheneUI
 
             ImGui.SetCursorScreenPos(rowPos + new Vector2(swatch + gap, 0f));
             Controls.Toggle(label, ref enabled, trailingWidth: 0f);
-            // restore the cursor below the row — swatch and toggle were both
+            // restore the cursor below the row · swatch and toggle were both
             // drawn inside the same frame-high band
             ImGui.SetCursorScreenPos(rowPos + new Vector2(0f,
                 frameH + ImGui.GetStyle().ItemSpacing.Y));
         }
 
-        /// <summary>Aspect of the stored row-image strip — exactly the displayed
+        /// <summary>Aspect of the stored row-image strip · exactly the displayed
         /// area (max 512×128), so the crop selection never wastes pixels.</summary>
         public const float RowImageAspect = 4f;
 
@@ -1358,7 +1612,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Draws a supporter's animated row image into <paramref name="min"/>..
         /// <paramref name="max"/>: cover-fitted, dimmed for readability, and
-        /// fading to TRUE transparency toward the right edge — the image's own
+        /// fading to TRUE transparency toward the right edge · the image's own
         /// vertex alpha dissolves so the row background shows through instead
         /// of blending into a solid color. Tessellated as a textured perimeter
         /// fan so corner rounding, atlas UVs and per-vertex alpha are all
@@ -1456,7 +1710,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// The complete list-row backdrop exactly as viewers see it — the
+        /// The complete list-row backdrop exactly as viewers see it · the
         /// owner's animated row image (true alpha fade) under their combinable
         /// idle + hover effect layers. Shared by the friends list and the
         /// settings preview so the two can never drift apart.
@@ -1469,7 +1723,7 @@ public static partial class SpheneUI
                 theme.RowHover, theme.RowIdle, rowImage, radius, corners);
 
         /// <summary>
-        /// Flag-composed variant of the shared row backdrop — same render
+        /// Flag-composed variant of the shared row backdrop · same render
         /// layers and draw order as the friends list, driven by explicit
         /// effect flags instead of a theme.
         /// </summary>
@@ -1485,17 +1739,27 @@ public static partial class SpheneUI
                 RowImageStrip(drawList, rowImage, min,
                     min + new Vector2(stripW, max.Y - min.Y), radius, corners);
             }
-            RowFx(drawList, min, max, accent, hovered, hoverT, hover, idle, radius, corners);
+            RowFx(drawList, min, max, accent, hovered, hoverT,
+                hover | SpheneProfileTheme.RequiredRowFx,
+                idle | SpheneProfileTheme.RequiredRowFx, radius, corners);
         }
 
-        /// <summary>The data a friends-list row displays — avatar, name,
+        /// <summary>The data a friends-list row displays · avatar, name,
         /// presence line, optional status message and NSFW flag.</summary>
+        /// <param name="PresenceIcon">Single icon glyph leading the presence line.</param>
+        /// <param name="PresenceIcons">Multi-icon presence line (role badges,
+        /// each in its own color) - wins over <paramref name="PresenceIcon"/>.</param>
+        /// <param name="AvatarBadges">Badge pips riding the avatar's bottom
+        /// edge, right-anchored - staff/role markers.</param>
         public readonly record struct FriendRowContent(
             IDalamudTextureWrap? Avatar, string Name, string Presence,
-            Vector4 PresenceColor, string? StatusMessage, bool IsNsfw);
+            Vector4 PresenceColor, string? StatusMessage, bool IsNsfw,
+            FontAwesomeIcon? PresenceIcon = null,
+            IReadOnlyList<(FontAwesomeIcon Icon, Vector4 Color)>? PresenceIcons = null,
+            IReadOnlyList<(FontAwesomeIcon Icon, Vector4 Color)>? AvatarBadges = null);
 
         /// <summary>
-        /// The complete friends-list row exactly as viewers see it — shared
+        /// The complete friends-list row exactly as viewers see it · shared
         /// render path for the hub's friends list AND the style preview so
         /// the two can never drift apart: row backdrop (animated image under
         /// the owner's effect layers), avatar with accent ring, name, presence
@@ -1504,10 +1768,15 @@ public static partial class SpheneUI
         /// <paramref name="hoverT"/> in; drawing restores the cursor below
         /// the row.
         /// </summary>
+        /// <param name="rightInset">Extra width reserved at the right edge for
+        /// caller-drawn chrome (action buttons, pills) · text ellipsizes left
+        /// of it so nothing slides underneath.</param>
+        /// <param name="showChevron">Set false when the caller paints its own
+        /// right-edge affordance - otherwise the chevron overlaps it.</param>
         public static void FriendRow(ImDrawListPtr drawList, Vector2 pos, float width,
             float height, FriendRowContent content, Vector4 accent, bool hovered,
             float hoverT, SpheneProfileTheme theme, Media.AnimatedImage? rowImage,
-            float radius)
+            float radius, float rightInset = 0f, bool showChevron = true)
         {
             var scale = Scale;
             var rowMax = pos + new Vector2(width, height);
@@ -1523,45 +1792,129 @@ public static partial class SpheneUI
                 avatarSize * 0.5f, ImDrawFlags.RoundCornersAll,
                 MathF.Max(1f, 1.25f * scale));
 
+            // Badge pips straddle the avatar's bottom edge, anchored at the
+            // right corner - the highest-priority badge sits rightmost.
+            if (content.AvatarBadges is { Count: > 0 } avatarBadges)
+            {
+                // Dense rows shrink faster than the avatar does - clamp the
+                // pips inside the row rect so they can never clip outside.
+                var badgeR = MathF.Min(7f * scale, avatarSize * 0.22f);
+                var badgeY = MathF.Min(avatarPos.Y + avatarSize - badgeR * 0.35f,
+                    rowMax.Y - badgeR - 0.5f * scale);
+                var badgeX = avatarPos.X + avatarSize - badgeR * 0.65f;
+                for (var i = avatarBadges.Count - 1; i >= 0; i--)
+                {
+                    var (bIcon, bColor) = avatarBadges[i];
+                    badgeX = MathF.Max(badgeX, pos.X + badgeR + 1f * scale);
+                    var center = new Vector2(badgeX, badgeY);
+                    drawList.AddCircleFilled(center, badgeR,
+                        ColorUtils.ToU32(ColorUtils.WithAlpha(
+                            ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg], 0.92f)));
+                    drawList.AddCircle(center, badgeR,
+                        ColorUtils.ToU32(ColorUtils.WithAlpha(bColor, 0.85f)), 0,
+                        MathF.Max(1f, 1.1f * scale));
+                    var bGlyph = bIcon.ToIconString();
+                    using (Icons.PushFont())
+                    {
+                        var bsize = ImGui.CalcTextSize(bGlyph);
+                        drawList.AddText(center - bsize * 0.5f,
+                            ColorUtils.ToU32(bColor), bGlyph);
+                    }
+                    badgeX -= badgeR * 2f + 1f * scale;
+                }
+            }
+
             var lineH = ImGui.GetTextLineHeight();
             var textX = avatarPos.X + avatarSize + 9f * scale;
 
             // right edge: NSFW chip (when tagged) + chevron sliding in on hover
             var chevron = "›";
             var chevW = ImGui.CalcTextSize(chevron).X;
-            var rightX = pos.X + width - 10f * scale;
+            var rightX = pos.X + width - 10f * scale - rightInset;
             var chipW = 0f;
             if (content.IsNsfw)
             {
                 var chipSize = NsfwChipSize(true, scale);
                 chipW = chipSize.X + 8f * scale;
                 NsfwChipAt(drawList,
-                    new Vector2(rightX - chevW - 6f * scale - chipSize.X,
+                    new Vector2(rightX - (showChevron ? chevW : 0f) - 6f * scale - chipSize.X,
                         pos.Y + (height - chipSize.Y) * 0.5f),
                     true, scale);
             }
-            drawList.AddText(
-                new Vector2(rightX - chevW - (1f - hoverT) * 5f * scale,
-                    pos.Y + (height - lineH) * 0.5f),
-                ColorUtils.ToU32(
-                    ColorUtils.WithAlpha(Colors.TextMuted, 0.45f + 0.55f * hoverT)),
-                chevron);
+            if (showChevron)
+            {
+                drawList.AddText(
+                    new Vector2(rightX - chevW - (1f - hoverT) * 5f * scale,
+                        pos.Y + (height - lineH) * 0.5f),
+                    ColorUtils.ToU32(
+                        ColorUtils.WithAlpha(Colors.TextMuted, 0.45f + 0.55f * hoverT)),
+                    chevron);
+            }
 
-            var textMaxX = rightX - chevW - chipW - 8f * scale;
-            drawList.AddText(new Vector2(textX, pos.Y + 6f * scale),
-                ColorUtils.ToU32(Colors.TextPrimary),
-                Text.Ellipsize(content.Name, textMaxX - textX));
+            var textMaxX = rightX - (showChevron ? chevW : 0f) - chipW - 8f * scale;
 
-            var secondY = pos.Y + 6f * scale + lineH + 1f * scale;
-            drawList.AddText(new Vector2(textX, secondY),
+            // Compact rows can drop below the height two lines need · shrink
+            // the text block proportionally (downscale only - never upscale)
+            // and center it, so the second line never spills out the bottom.
+            var lineGap = 1f * scale;
+            var contentH = lineH * 2f + lineGap;
+            var fitScale = MathF.Min(1f, (height - 2f * scale) / contentH);
+            var textTop = pos.Y + (height - contentH * fitScale) * 0.5f;
+            if (fitScale < 0.999f)
+            {
+                ImGui.SetWindowFontScale(fitScale);
+            }
+            var scaledGap = (lineH + lineGap) * fitScale;
+            var nameText = Text.Ellipsize(content.Name, textMaxX - textX);
+            var statusEllipsize = string.IsNullOrWhiteSpace(content.StatusMessage)
+                ? null : $"· {content.StatusMessage.Trim()}";
+            if (fitScale < 0.999f)
+            {
+                ImGui.SetWindowFontScale(fitScale);
+            }
+            drawList.AddText(new Vector2(textX, textTop),
+                ColorUtils.ToU32(Colors.TextPrimary), nameText);
+
+            var secondY = textTop + scaledGap;
+            var presenceX = textX;
+            if (content.PresenceIcons is { Count: > 0 } presenceIcons)
+            {
+                using (Icons.PushFont())
+                {
+                    foreach (var (icon, color) in presenceIcons)
+                    {
+                        var badgeGlyph = icon.ToIconString();
+                        drawList.AddText(new Vector2(presenceX, secondY),
+                            ColorUtils.ToU32(color), badgeGlyph);
+                        presenceX += ImGui.CalcTextSize(badgeGlyph).X + 4f * scale * fitScale;
+                    }
+                }
+            }
+            else if (content.PresenceIcon is { } presenceIcon)
+            {
+                var glyph = presenceIcon.ToIconString();
+                float glyphW;
+                using (Icons.PushFont())
+                {
+                    drawList.AddText(new Vector2(presenceX, secondY),
+                        ColorUtils.ToU32(content.PresenceColor), glyph);
+                    glyphW = ImGui.CalcTextSize(glyph).X;
+                }
+                presenceX += glyphW + 5f * scale * fitScale;
+            }
+            drawList.AddText(new Vector2(presenceX, secondY),
                 ColorUtils.ToU32(content.PresenceColor), content.Presence);
-            if (!string.IsNullOrWhiteSpace(content.StatusMessage))
+            if (statusEllipsize != null)
             {
                 var presenceW = ImGui.CalcTextSize(content.Presence).X;
-                drawList.AddText(new Vector2(textX + presenceW + 6f * scale, secondY),
+                drawList.AddText(new Vector2(presenceX + presenceW + 6f * scale * fitScale, secondY),
                     ColorUtils.ToU32(Colors.TextSecondary),
-                    Text.Ellipsize($"· {content.StatusMessage.Trim()}",
-                        textMaxX - textX - presenceW - 6f * scale));
+                    Text.Ellipsize(statusEllipsize,
+                        textMaxX - presenceX - presenceW - 6f * scale * fitScale));
+            }
+            if (fitScale < 0.999f)
+            {
+                ImGui.SetWindowFontScale(1f);
             }
 
             ImGui.SetCursorScreenPos(pos + new Vector2(0f, height));
@@ -1571,7 +1924,7 @@ public static partial class SpheneUI
         /// Renders the row owner's chosen list effects behind row content:
         /// the theme's idle layer (always visible, even unhovered) plus the
         /// hover layer driven by the eased <paramref name="hoverT"/>. Pass the
-        /// *row owner's* theme — never the viewer's — and draw any animated
+        /// *row owner's* theme · never the viewer's · and draw any animated
         /// row image beneath this call.
         /// </summary>
         public static void RowFx(ImDrawListPtr drawList, Vector2 min, Vector2 max, Vector4 accent,
@@ -1584,7 +1937,7 @@ public static partial class SpheneUI
         /// Flag-composed variant of <see cref="RowFx(ImDrawListPtr, Vector2, Vector2, Vector4, bool, float, SpheneProfileTheme, float)"/>:
         /// every set bit in <paramref name="hover"/>/<paramref name="idle"/>
         /// draws its own layer, so owners can stack effects. Draw order is
-        /// deterministic — base wash, idle layers, then hover layers on top.
+        /// deterministic · base wash, idle layers, then hover layers on top.
         /// </summary>
         public static void RowFx(ImDrawListPtr drawList, Vector2 min, Vector2 max, Vector4 accent,
             bool hovered, float hoverT, ProfileRowFx hover, ProfileRowFx idle, float radius,
@@ -1603,7 +1956,7 @@ public static partial class SpheneUI
 
             if (idle.HasFlag(ProfileRowFx.Tint))
             {
-                // AddRectFilledMultiColor can't round — FillGradient emits a
+                // AddRectFilledMultiColor can't round · FillGradient emits a
                 // vertex-colored fan so the tint respects the corner mask
                 FillGradient(drawList, min, max,
                     ColorUtils.WithAlpha(accent, 0.07f),
@@ -1626,6 +1979,12 @@ public static partial class SpheneUI
                 drawList.AddRect(min, max,
                     ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.06f + 0.10f * breathe)),
                     radius, corners);
+            }
+            if (idle.HasFlag(ProfileRowFx.Glow))
+            {
+                // ambient baseline glow · the same HoverRow treatment the
+                // hover layer boosts, held at a constant resting intensity
+                Fx.HoverRow(drawList, min, max, accent, 0.30f, radius, corners);
             }
 
             if (hover.HasFlag(ProfileRowFx.Lift) && hoverT > 0.001f)
@@ -1664,7 +2023,7 @@ public static partial class SpheneUI
             }
         }
 
-        /// <summary>Twinkling accent sparks at fixed relative spots — deterministic, no state.</summary>
+        /// <summary>Twinkling accent sparks at fixed relative spots · deterministic, no state.</summary>
         private static void FxSparkle(ImDrawListPtr drawList, Vector2 min, Vector2 max,
             Vector4 accent, float time, float scale)
         {
@@ -1688,7 +2047,7 @@ public static partial class SpheneUI
             }
         }
 
-        /// <summary>Accent comet travelling the row's border — a fading dot trail.</summary>
+        /// <summary>Accent comet travelling the row's border · a fading dot trail.</summary>
         private static void FxBorderSweep(ImDrawListPtr drawList, Vector2 min, Vector2 max,
             Vector4 accent, float t, float time, float scale, float radius, ImDrawFlags corners)
         {
@@ -1831,8 +2190,8 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Dashboard-style stat tile: rounded tile with an accent-tinted icon
-        /// plate, big value and muted label. Clickable when
+        /// Dashboard-style stat tile: rounded tile with a bare accent icon
+        /// glyph, big value and muted label. Clickable when
         /// <paramref name="onClick"/> is provided.
         /// </summary>
         public static void StatTile(string label, FontAwesomeIcon icon, int value,
@@ -1868,14 +2227,7 @@ public static partial class SpheneUI
 
             var plate = 34f * scale;
             var plateMin = tileMin + new Vector2(pad, (height - plate) * 0.5f);
-            drawList.AddRectFilled(plateMin, plateMin + new Vector2(plate),
-                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.16f)), plate * 0.3f);
-            var iconSize = Icons.Size(icon);
-            using (Icons.PushFont())
-            {
-                drawList.AddText(plateMin + (new Vector2(plate) - iconSize) * 0.5f,
-                    ColorUtils.ToU32(accent), icon.ToIconString());
-            }
+            Layout.SlotIcon(drawList, plateMin, plate, icon, accent);
 
             var lineH = ImGui.GetTextLineHeight();
             var valueText = value;

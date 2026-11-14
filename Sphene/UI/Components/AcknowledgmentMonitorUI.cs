@@ -56,6 +56,11 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
     // Draws the acknowledgment monitor UI
     protected override void DrawInternal()
     {
+        SpheneUI.Layout.PageHeader("Acknowledgment Monitor", "ackmonitor", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Watch which of your actions the server confirmed - a debug surface.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
+
         // Refresh metrics
         _metrics = _acknowledgmentManager.GetMetrics();
 
@@ -69,286 +74,286 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
 
     private void DrawMonitorContent()
     {
-        if (SpheneUI.Controls.CollapsibleSection("Acknowledgment System Monitor"))
+        SpheneUI.Text.MutedWrapped("Monitor and configure acknowledgment batching, retries, and sessions.");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        DrawMetricsOverview();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        DrawSessionInformation();
+
+        // Only show configuration to admin users
+        if (_apiController.IsAdmin)
         {
-            SpheneUI.Text.Wrapped("Monitor and configure acknowledgment batching, retries, and sessions.");
-            DrawMetricsOverview();
-            SpheneUI.Layout.Separator();
-            DrawSessionInformation();
-            SpheneUI.Layout.Separator();
-            
-            // Only show configuration to admin users
-            if (_apiController.IsAdmin)
-            {
-                DrawConfiguration();
-            }
-            
-            if (_showMetricsDetails)
-            {
-                SpheneUI.Layout.Separator();
-                DrawDetailedMetrics();
-            }
-            
-            if (_showSessionDetails)
-            {
-                SpheneUI.Layout.Separator();
-                DrawSessionDetails();
-            }
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            DrawConfiguration();
+        }
+
+        if (_showMetricsDetails)
+        {
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            DrawDetailedMetrics();
+        }
+
+        if (_showSessionDetails)
+        {
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            DrawSessionDetails();
         }
     }
-    
+
     // Draws the metrics overview section
     private void DrawMetricsOverview()
     {
-        SpheneUI.Text.SectionHeader("System Status");
-        
-        // Success rate with color coding
-        var successRate = _metrics.SuccessRate;
-        var successColor = successRate >= 95 ? ImGuiColors.ParsedGreen : 
-                          successRate >= 80 ? ImGuiColors.DalamudYellow : 
-                          ImGuiColors.DalamudRed;
-        
-        SpheneUI.Text.Colored($"Success Rate: {successRate:F1}%", successColor);
-        SpheneUI.AttachTooltip($"Successful acknowledgments: {_metrics.TotalSuccessful}/{_metrics.TotalReceived}");
-        
-        ImGui.SameLine();
-        SpheneUI.Text.Plain($"| Avg Response: {_metrics.AverageResponseTimeMs:F0}ms");
-        
-        // Statistics in columns
-        if (ImGui.BeginTable("AckStats", 4, ImGuiTableFlags.Borders))
+        SpheneUI.Layout.SectionCard(() =>
         {
-            ImGui.TableSetupColumn("Sent");
-            ImGui.TableSetupColumn("Received");
-            ImGui.TableSetupColumn("Failed");
-            ImGui.TableSetupColumn("Retries");
-            ImGui.TableHeadersRow();
-            
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            SpheneUI.Text.Plain(_metrics.TotalSent.ToString());
-            ImGui.TableNextColumn();
-            SpheneUI.Text.Plain(_metrics.TotalReceived.ToString());
-            ImGui.TableNextColumn();
-            SpheneUI.Text.Colored(_metrics.TotalFailed.ToString(), _metrics.TotalFailed > 0 ? ImGuiColors.DalamudRed : ImGuiColors.DalamudWhite);
-            ImGui.TableNextColumn();
-            SpheneUI.Text.Colored(_metrics.TotalRetries.ToString(), _metrics.TotalRetries > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudWhite);
-            
-            ImGui.EndTable();
-        }
-        
-        // Show/hide detailed metrics button
-        if (SpheneUI.Controls.Button(_showMetricsDetails ? "Hide Details" : "Show Details"))
-        {
-            _showMetricsDetails = !_showMetricsDetails;
-        }
+            // Success rate with color coding
+            var successRate = _metrics.SuccessRate;
+            var successColor = successRate >= 95 ? ImGuiColors.ParsedGreen :
+                              successRate >= 80 ? ImGuiColors.DalamudYellow :
+                              ImGuiColors.DalamudRed;
+
+            SpheneUI.Text.Colored($"Success Rate: {successRate:F1}%", successColor);
+            SpheneUI.AttachTooltip($"Successful acknowledgments: {_metrics.TotalSuccessful}/{_metrics.TotalReceived}");
+
+            ImGui.SameLine();
+            SpheneUI.Text.Plain($"| Avg Response: {_metrics.AverageResponseTimeMs:F0}ms");
+
+            // Statistics in columns
+            using (var statsTable = SpheneUI.Tables.Begin("AckStats", 4, ImGuiTableFlags.Borders))
+            {
+                if (statsTable.Success)
+                {
+                    SpheneUI.Tables.Column("Sent");
+                    SpheneUI.Tables.Column("Received");
+                    SpheneUI.Tables.Column("Failed");
+                    SpheneUI.Tables.Column("Retries");
+                    SpheneUI.Tables.HeaderRow();
+
+                    SpheneUI.Tables.BeginRow();
+                    SpheneUI.Text.Plain(_metrics.TotalSent.ToString());
+                    SpheneUI.Tables.NextColumn();
+                    SpheneUI.Text.Plain(_metrics.TotalReceived.ToString());
+                    SpheneUI.Tables.NextColumn();
+                    SpheneUI.Text.Colored(_metrics.TotalFailed.ToString(), _metrics.TotalFailed > 0 ? ImGuiColors.DalamudRed : ImGuiColors.DalamudWhite);
+                    SpheneUI.Tables.NextColumn();
+                    SpheneUI.Text.Colored(_metrics.TotalRetries.ToString(), _metrics.TotalRetries > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.DalamudWhite);
+                }
+            }
+
+            // Show/hide detailed metrics button
+            if (SpheneUI.Controls.Button(_showMetricsDetails ? "Hide Details" : "Show Details"))
+            {
+                _showMetricsDetails = !_showMetricsDetails;
+            }
+        }, "System Status", SpheneUI.Palette.NetworkActive);
     }
-    
+
     // Draws session information section
     private void DrawSessionInformation()
     {
-        SpheneUI.Text.SectionHeader("Session Information");
-        
-        // Current session ID
-        SpheneUI.Text.Plain($"Current Session: {_sessionAcknowledgmentManager.CurrentSessionId}");
-        
-        // Pending acknowledgments count
-        var pendingCount = _sessionAcknowledgmentManager.GetPendingAcknowledgmentCount();
-        var pendingColor = pendingCount > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
-        SpheneUI.Text.Colored($"Pending Acknowledgments: {pendingCount}", pendingColor);
-        
-        // Show/hide session details button
-        ImGui.SameLine();
-        if (SpheneUI.Controls.Button(_showSessionDetails ? "Hide Session Details" : "Show Session Details"))
+        SpheneUI.Layout.SectionCard(() =>
         {
-            _showSessionDetails = !_showSessionDetails;
-        }
+            // Current session ID
+            SpheneUI.Text.Plain($"Current Session: {_sessionAcknowledgmentManager.CurrentSessionId}");
+
+            // Pending acknowledgments count
+            var pendingCount = _sessionAcknowledgmentManager.GetPendingAcknowledgmentCount();
+            var pendingColor = pendingCount > 0 ? ImGuiColors.DalamudYellow : ImGuiColors.ParsedGreen;
+            SpheneUI.Text.Colored($"Pending Acknowledgments: {pendingCount}", pendingColor);
+
+            // Show/hide session details button
+            ImGui.SameLine();
+            if (SpheneUI.Controls.Button(_showSessionDetails ? "Hide Session Details" : "Show Session Details"))
+            {
+                _showSessionDetails = !_showSessionDetails;
+            }
+        }, "Session Information", SpheneUI.Palette.NetworkActive);
     }
-    
+
     // Draws detailed session information
     private void DrawSessionDetails()
     {
-        SpheneUI.Text.SectionHeader("Session Details");
-        
-        var acknowledgmentStatuses = _sessionAcknowledgmentManager.GetAcknowledgmentStatuses();
-        var pendingAcks = _sessionAcknowledgmentManager.GetPendingAcknowledgments();
-        
-        if (acknowledgmentStatuses.Any())
+        SpheneUI.Layout.SectionCard(() =>
         {
-            if (ImGui.BeginTable("SessionAcks", 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-            {
-                ImGui.TableSetupColumn("Acknowledgment Status");
-                ImGui.TableHeadersRow();
-                
-                foreach (var status in acknowledgmentStatuses)
-                {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Plain(status);
-                }
-                
-                ImGui.EndTable();
-            }
-        }
-        else
-        {
-            SpheneUI.Text.Colored("No pending acknowledgments in current session.", ImGuiColors.ParsedGreen);
-        }
+            var acknowledgmentStatuses = _sessionAcknowledgmentManager.GetAcknowledgmentStatuses();
+            var pendingAcks = _sessionAcknowledgmentManager.GetPendingAcknowledgments();
 
-        SpheneUI.Layout.Separator();
-        SpheneUI.Text.SectionHeader("Pending Acknowledgments");
-        if (pendingAcks.Count == 0)
-        {
-            SpheneUI.Text.Colored("None pending", ImGuiColors.ParsedGreen);
-        }
-        else
-        {
-            if (ImGui.BeginTable("PendingAckTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+            if (acknowledgmentStatuses.Any())
             {
-                ImGui.TableSetupColumn("User", ImGuiTableColumnFlags.WidthFixed, 160);
-                ImGui.TableSetupColumn("Ack ID", ImGuiTableColumnFlags.WidthFixed, 220);
-                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
-                ImGui.TableHeadersRow();
-                
-                foreach (var kvp in pendingAcks)
+                using (var sessionTable = SpheneUI.Tables.Begin("SessionAcks", 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                 {
-                    var userKey = kvp.Key;
-                    var ackId = kvp.Value;
-                    
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Plain(userKey);
-                    
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Plain(ackId.Length > 16 ? $"{ackId[..16]}..." : ackId);
-                    
-                    ImGui.TableNextColumn();
-                    
-                    ImGui.PushID($"ack_clear_{userKey}");
-                    if (SpheneUI.Controls.Button("Clear"))
+                    if (sessionTable.Success)
                     {
-                        var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(new Sphene.API.Data.UserData(userKey), ackId);
-                        if (removed)
+                        SpheneUI.Tables.Column("Acknowledgment Status");
+                        SpheneUI.Tables.HeaderRow();
+
+                        foreach (var status in acknowledgmentStatuses)
                         {
-                            SpheneUI.AttachTooltip("Cleared");
+                            SpheneUI.Tables.Row();
+                            SpheneUI.Tables.Cell(status);
                         }
                     }
-                    ImGui.PopID();
-                    
-                    ImGui.SameLine();
-                    ImGui.PushID($"ack_timeout_{userKey}");
-                    if (SpheneUI.Controls.Button("Mark Timeout"))
-                    {
-                        _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
-                    }
-                    ImGui.PopID();
                 }
-                
-                ImGui.EndTable();
             }
-        }
+            else
+            {
+                SpheneUI.Text.Colored("No pending acknowledgments in current session.", ImGuiColors.ParsedGreen);
+            }
+
+            SpheneUI.Layout.Separator();
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Text.SectionHeader("Pending Acknowledgments");
+            if (pendingAcks.Count == 0)
+            {
+                SpheneUI.Text.Colored("None pending", ImGuiColors.ParsedGreen);
+            }
+            else
+            {
+                using var pendingTable = SpheneUI.Tables.Begin("PendingAckTable", 3,
+                    ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable);
+                if (pendingTable.Success)
+                {
+                    SpheneUI.Tables.Column("User", ImGuiTableColumnFlags.WidthFixed, 160);
+                    SpheneUI.Tables.Column("Ack ID", ImGuiTableColumnFlags.WidthFixed, 220);
+                    SpheneUI.Tables.Column("Actions", ImGuiTableColumnFlags.WidthStretch);
+                    SpheneUI.Tables.HeaderRow();
+
+                    foreach (var kvp in pendingAcks)
+                    {
+                        var userKey = kvp.Key;
+                        var ackId = kvp.Value;
+
+                        SpheneUI.Tables.Row();
+                        SpheneUI.Tables.Cell(userKey);
+                        SpheneUI.Tables.Cell(ackId);
+
+                        SpheneUI.Tables.NextColumn();
+
+                        ImGui.PushID($"ack_clear_{userKey}");
+                        if (SpheneUI.Controls.Button("Clear"))
+                        {
+                            var removed = _sessionAcknowledgmentManager.RemovePendingAcknowledgment(new Sphene.API.Data.UserData(userKey), ackId);
+                            if (removed)
+                            {
+                                SpheneUI.AttachTooltip("Cleared");
+                            }
+                        }
+                        ImGui.PopID();
+
+                        ImGui.SameLine();
+                        ImGui.PushID($"ack_timeout_{userKey}");
+                        if (SpheneUI.Controls.Button("Mark Timeout"))
+                        {
+                            _sessionAcknowledgmentManager.ProcessTimeoutAcknowledgment(ackId);
+                        }
+                        ImGui.PopID();
+                    }
+                }
+            }
+        }, "Session Details", SpheneUI.Palette.NetworkActive);
     }
-    
+
     // Draws the detailed metrics section
     private void DrawDetailedMetrics()
     {
-        SpheneUI.Text.SectionHeader("Detailed Metrics");
-        
-        // Error breakdown
-        if (_metrics.ErrorCounts.Any())
+        SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.Plain("Error Breakdown:");
-            foreach (var error in _metrics.ErrorCounts.OrderByDescending(kvp => kvp.Value))
+            // Error breakdown
+            if (_metrics.ErrorCounts.Any())
             {
-                SpheneUI.Text.Bullet($"{error.Key}: {error.Value}");
-            }
-        }
-        
-        SpheneUI.Layout.VerticalSpace();
-        
-        // Priority breakdown
-        if (_metrics.PriorityCounts.Any())
-        {
-            SpheneUI.Text.Plain("Priority Distribution:");
-            foreach (var priority in _metrics.PriorityCounts.OrderByDescending(kvp => kvp.Value))
-            {
-                var color = priority.Key switch
+                SpheneUI.Text.Plain("Error Breakdown:");
+                foreach (var error in _metrics.ErrorCounts.OrderByDescending(kvp => kvp.Value))
                 {
-                    AcknowledgmentPriority.High => ImGuiColors.DalamudRed,
-                    AcknowledgmentPriority.Medium => ImGuiColors.DalamudYellow,
-                    AcknowledgmentPriority.Low => ImGuiColors.ParsedGreen,
-                    _ => ImGuiColors.DalamudWhite
-                };
-                
-                SpheneUI.Text.Colored($"● {priority.Key}: {priority.Value}", color);
+                    SpheneUI.Text.Bullet($"{error.Key}: {error.Value}");
+                }
             }
-        }
-        
-        SpheneUI.Text.Plain($"Last Updated: {_metrics.LastUpdated:HH:mm:ss}");
+
+            SpheneUI.Layout.VerticalSpace();
+
+            // Priority breakdown
+            if (_metrics.PriorityCounts.Any())
+            {
+                SpheneUI.Text.Plain("Priority Distribution:");
+                foreach (var priority in _metrics.PriorityCounts.OrderByDescending(kvp => kvp.Value))
+                {
+                    var color = priority.Key switch
+                    {
+                        AcknowledgmentPriority.High => ImGuiColors.DalamudRed,
+                        AcknowledgmentPriority.Medium => ImGuiColors.DalamudYellow,
+                        AcknowledgmentPriority.Low => ImGuiColors.ParsedGreen,
+                        _ => ImGuiColors.DalamudWhite
+                    };
+
+                    SpheneUI.Text.Colored($"● {priority.Key}: {priority.Value}", color);
+                }
+            }
+
+            SpheneUI.Text.Plain($"Last Updated: {_metrics.LastUpdated:HH:mm:ss}");
+        }, "Detailed Metrics", SpheneUI.Palette.NetworkActive);
     }
-    
+
     // Draws the configuration section
     private void DrawConfiguration()
     {
-        SpheneUI.Text.SectionHeader("Configuration");
-        
-        // Basic settings
-        var enableBatching = _config.EnableBatching;
-        if (SpheneUI.Controls.ToggleChip("Enable Batching", ref enableBatching))
+        SpheneUI.Layout.SectionCard(() =>
         {
-            _config.EnableBatching = enableBatching;
-        }
-        SpheneUI.AttachTooltip("Group multiple acknowledgments together for better performance");
-        
-        ImGui.SameLine();
-        var enableAutoRetry = _config.EnableAutoRetry;
-        if (SpheneUI.Controls.ToggleChip("Auto Retry", ref enableAutoRetry))
-        {
-            _config.EnableAutoRetry = enableAutoRetry;
-        }
-        SpheneUI.AttachTooltip("Automatically retry failed acknowledgments");
-        
+            // Basic settings
+            var enableBatching = _config.EnableBatching;
+            if (SpheneUI.Controls.ToggleChip("Enable Batching", ref enableBatching))
+            {
+                _config.EnableBatching = enableBatching;
+            }
+            SpheneUI.AttachTooltip("Group multiple acknowledgments together for better performance");
 
-        
-        // Timeout settings
-        var defaultTimeout = _config.DefaultTimeoutSeconds;
-        if (SpheneUI.Controls.SliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
-        {
-            _config.DefaultTimeoutSeconds = defaultTimeout;
-        }
-        
-        if (_config.EnableBatching)
-        {
-            var maxBatchSize = _config.MaxBatchSize;
-            if (SpheneUI.Controls.SliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
+            ImGui.SameLine();
+            var enableAutoRetry = _config.EnableAutoRetry;
+            if (SpheneUI.Controls.ToggleChip("Auto Retry", ref enableAutoRetry))
             {
-                _config.MaxBatchSize = maxBatchSize;
+                _config.EnableAutoRetry = enableAutoRetry;
             }
-            
-            var batchTimeoutMs = _config.BatchTimeoutMs;
-            if (SpheneUI.Controls.SliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
+            SpheneUI.AttachTooltip("Automatically retry failed acknowledgments");
+
+            // Timeout settings
+            var defaultTimeout = _config.DefaultTimeoutSeconds;
+            if (SpheneUI.Controls.SliderInt("Default Timeout (s)", ref defaultTimeout, 5, 120))
             {
-                _config.BatchTimeoutMs = batchTimeoutMs;
+                _config.DefaultTimeoutSeconds = defaultTimeout;
             }
-        }
-        
-        // Advanced settings toggle
-        if (SpheneUI.Controls.Button(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
-        {
-            _showAdvancedSettings = !_showAdvancedSettings;
-        }
-        
-        if (_showAdvancedSettings)
-        {
-            DrawAdvancedSettings();
-        }
+
+            if (_config.EnableBatching)
+            {
+                var maxBatchSize = _config.MaxBatchSize;
+                if (SpheneUI.Controls.SliderInt("Max Batch Size", ref maxBatchSize, 1, 50))
+                {
+                    _config.MaxBatchSize = maxBatchSize;
+                }
+
+                var batchTimeoutMs = _config.BatchTimeoutMs;
+                if (SpheneUI.Controls.SliderInt("Batch Timeout (ms)", ref batchTimeoutMs, 1000, 30000))
+                {
+                    _config.BatchTimeoutMs = batchTimeoutMs;
+                }
+            }
+
+            // Advanced settings toggle
+            if (SpheneUI.Controls.Button(_showAdvancedSettings ? "Hide Advanced" : "Show Advanced"))
+            {
+                _showAdvancedSettings = !_showAdvancedSettings;
+            }
+
+            if (_showAdvancedSettings)
+            {
+                DrawAdvancedSettings();
+            }
+        }, "Configuration", SpheneUI.Palette.EtherealPurple);
     }
-    
+
     // Draws the advanced settings section
     private void DrawAdvancedSettings()
     {
         SpheneUI.Layout.Separator();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         SpheneUI.Text.SectionHeader("Advanced Settings");
-        
+
         // Priority system
         var enablePriority = _config.EnablePrioritySystem;
         if (SpheneUI.Controls.ToggleChip("Enable Priority System", ref enablePriority))

@@ -57,7 +57,10 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         var syncshell = _currentRequest.Syncshell;
 
         // Header
-        SpheneUI.Text.PageHeader("Join Area-Bound Syncshell");
+        SpheneUI.Layout.PageHeader("Join Area-Bound Syncshell", "areaconsent", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Join the syncshell bound to this location - it pairs you with everyone inside it.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
         // Display syncshell information
         SpheneUI.Layout.SectionCard(() =>
@@ -104,7 +107,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
 
             if (SpheneUI.Layout.BeginScrollArea("RulesText", new Vector2(0, rulesHeight), border: true))
             {
-                SpheneUI.Text.Wrapped(syncshell.Settings.JoinRules);
+                MarkdownRenderer.RenderMarkdown(syncshell.Settings.JoinRules);
             }
             SpheneUI.Layout.EndScrollArea();
         }
@@ -147,16 +150,14 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         bool canAccept = (!syncshell.IsLocked) && (!_currentRequest.RequiresRulesAcceptance || _rulesAccepted);
         var buttonSize = new Vector2(
             (SpheneUI.Controls.BoundedAvailX() - ImGui.GetStyle().ItemSpacing.X) * 0.5f, 0f);
-        using (ImRaii.Disabled(!canAccept))
+        if (SpheneUI.Controls.PrimaryButton("Accept and Join",
+                Dalamud.Interface.FontAwesomeIcon.Check, size: buttonSize, enabled: canAccept))
         {
-            if (SpheneUI.Controls.Button("Accept and Join", buttonSize))
+            _ = Task.Run(async () =>
             {
-                _ = Task.Run(async () =>
-                {
-                    try { await HandleAccept().ConfigureAwait(false); }
-                    catch (Exception ex) { _logger.LogError(ex, "Background error during area-bound consent accept"); }
-                });
-            }
+                try { await HandleAccept().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Background error during area-bound consent accept"); }
+            });
         }
 
         if (!canAccept)

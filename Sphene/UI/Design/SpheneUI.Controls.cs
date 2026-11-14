@@ -14,13 +14,13 @@ namespace Sphene.UI.Design;
 public static partial class SpheneUI
 {
     /// <summary>
-    /// All value controls of the design system — labeled rows (label left in
+    /// All value controls of the design system · labeled rows (label left in
     /// the muted column tone, control docked to the shared right bound), slide
     /// toggles, sliders, drags, inputs, combos, color edits, buttons, swatches,
     /// chips, selectables, progress bars and status dots. Raw ImGui widgets
     /// stay private to this module; callers always go through these members.
     /// </summary>
-    public static class Controls
+    public static partial class Controls
     {
         /// <summary>Standard compact width for numeric/small value controls.</summary>
         public static float CompactWidth => 140f * SpheneUI.Scale;
@@ -28,7 +28,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Content width remaining up to the real bound (card edge inside card
         /// regions, window content edge otherwise). <c>GetContentRegionAvail</c>
-        /// measures past card bounds inside card tables — use this instead.
+        /// measures past card bounds inside card tables · use this instead.
         /// </summary>
         public static float BoundedAvailX()
         {
@@ -66,7 +66,7 @@ public static partial class SpheneUI
         /// flush at the card-aligned edge: inside cards the pushed content
         /// bound (the card's inner content edge), at page level the shared
         /// card edge (<see cref="Layout.CardAlignedAvailX"/>). The tighter of
-        /// the two wins — the scroll area pushes its own wider bound, so the
+        /// the two wins · the scroll area pushes its own wider bound, so the
         /// min is required on both sides. Unlike <see cref="DockToRightEdge"/>
         /// no trailing icon column is reserved, so docked clusters close on
         /// the same edge help icons use.
@@ -95,7 +95,7 @@ public static partial class SpheneUI
             var bound = Layout.ContentRightBound;
             var rightBound = bound > 0f ? bound : cursor.X + ImGui.GetContentRegionAvail().X;
             // SameLine continues at the previous item's right edge, not at the
-            // line start — measuring from the cursor would always claim a full
+            // line start · measuring from the cursor would always claim a full
             // line of room and let items render past the bound.
             var itemStartX = MathF.Max(cursor.X, ImGui.GetItemRectMax().X);
             if (itemStartX + ImGui.GetStyle().ItemSpacing.X + nextItemWidth > rightBound)
@@ -104,6 +104,27 @@ public static partial class SpheneUI
             }
             ImGui.SameLine();
             return true;
+        }
+
+        /// <summary>
+        /// Settings-style field row: a label aligned to the control's frame
+        /// text, then a fill-width control that stops
+        /// <paramref name="trailingWidth"/> short of the bound so SameLine
+        /// followers (buttons, icons) share the row. Use for
+        /// label + input + action-button rows instead of hand-computing
+        /// <c>GetContentRegionAvail</c> · that measures to the window edge
+        /// and overshoots the card bound.
+        /// </summary>
+        public static void FieldRow(string label, float trailingWidth, Action drawControl)
+        {
+            ImGui.AlignTextToFramePadding();
+            Text.Plain(label);
+            ImGui.SameLine();
+            var gap = trailingWidth > 0f ? ImGui.GetStyle().ItemSpacing.X : 0f;
+            var minWidth = Metrics.ControlHeight * 4f;
+            ImGui.SetNextItemWidth(MathF.Max(minWidth,
+                BoundedAvailX() - trailingWidth - gap));
+            drawControl();
         }
 
         /// <summary>
@@ -122,7 +143,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Same as the other overload but also reports the width applied via
-        /// SetNextItemWidth — composite controls (input + attached button)
+        /// SetNextItemWidth · composite controls (input + attached button)
         /// need it to subdivide their frame.
         /// </summary>
         internal static string PrepareLabeledControl(string label, float trailingWidth,
@@ -172,8 +193,27 @@ public static partial class SpheneUI
 
             var scale = SpheneUI.Scale;
             var cursor = ImGui.GetCursorScreenPos();
-            var rightBound = Layout.ContentRightBound;
             var leftBound = Layout.ContentLeftBound;
+            if (leftBound <= 0f)
+            {
+                leftBound = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMin().X;
+            }
+
+            // Line start also covers indented sub-rows: when the previous item
+            // sits on a line above the cursor nothing was drawn on this row yet.
+            var isLineStart = cursor.X <= leftBound + 1f
+                || ImGui.GetItemRectMin().Y < cursor.Y - 1f;
+            // Inside a RowGroup a labeled control at line start owns a row:
+            // the ambient group centers it on the shared row height and
+            // hairline-separates it from the previous row. Pending rows
+            // auto-complete so no tail hook is needed here.
+            var grouped = isLineStart && GroupState.RowStart();
+            if (grouped)
+            {
+                cursor = ImGui.GetCursorScreenPos();
+            }
+
+            var rightBound = grouped ? GroupState.CurrentRightBound : Layout.ContentRightBound;
             if (rightBound <= 0f)
             {
                 rightBound = cursor.X + ImGui.GetContentRegionAvail().X;
@@ -181,10 +221,6 @@ public static partial class SpheneUI
             // Reserve the same help-icon column the toggles use so every value
             // control ends flush with the switch edge instead of overshooting it.
             rightBound -= MathF.Max(trailingWidth, Metrics.TrailingIconReserve);
-            if (leftBound <= 0f)
-            {
-                leftBound = ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMin().X;
-            }
             var avail = MathF.Max(0f, rightBound - cursor.X);
             var labelWidth = ImGui.CalcTextSize(text).X;
             // Standard tier never exceeds half the row so labels stay readable
@@ -195,10 +231,6 @@ public static partial class SpheneUI
             controlWidth = MathF.Max(60f * scale,
                 MathF.Min(desiredWidth, avail - labelWidth - ImGui.GetStyle().ItemInnerSpacing.X));
 
-            // Line start also covers indented sub-rows: when the previous item
-            // sits on a line above the cursor nothing was drawn on this row yet.
-            var isLineStart = cursor.X <= leftBound + 1f
-                || ImGui.GetItemRectMin().Y < cursor.Y - 1f;
             if (isLineStart)
             {
                 ImGui.AlignTextToFramePadding();
@@ -212,7 +244,11 @@ public static partial class SpheneUI
                     : cursor.X + labelWidth + ImGui.GetStyle().ItemInnerSpacing.X * 2f;
                 ImGui.SetCursorScreenPos(new Vector2(controlX, lineY));
                 ImGui.SetNextItemWidth(controlWidth);
-                return labelSplit < 0 ? "##" + label : label[labelSplit..];
+                // Keep the full label inside the widget id ("##Text##id"): the
+                // leading "##" hides it from the widget while the visible text
+                // still distinguishes ids. Returning only the "##id" suffix
+                // would collapse every "Label##" + blockId control onto one id.
+                return "##" + label;
             }
 
             // Mid-line: keep the original label so its trailing text still
@@ -282,7 +318,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Pushes the shared push-button styling: the header-button corner
-        /// radius and frame border so every button — menus, pages, settings —
+        /// radius and frame border so every button · menus, pages, settings  · 
         /// matches the title-bar look. Colors stay ambient (the active
         /// theme's Button* slots), matching the header buttons.
         /// </summary>
@@ -316,10 +352,19 @@ public static partial class SpheneUI
             var trackHeight = trackMax.Y - trackMin.Y;
             var trackWidth = trackMax.X - trackMin.X;
             var offTrack = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.FrameBg));
-            var trackColor = Vector4.Lerp(offTrack, Colors.Accent, animT);
-            trackColor.W *= alpha;
-            drawList.AddRectFilled(trackMin, trackMax, ColorUtils.ToU32(trackColor),
+            offTrack.W *= alpha;
+            drawList.AddRectFilled(trackMin, trackMax, ColorUtils.ToU32(offTrack),
                 trackHeight * 0.5f, ImDrawFlags.RoundCornersAll);
+            if (animT > 0.001f)
+            {
+                // On-state rides the accent gradient ramp, faded in by the
+                // slide animation instead of cross-blending a flat color.
+                var (gDeep, gHi) = Colors.AccentRamp(Colors.Accent);
+                gDeep.W *= animT * alpha;
+                gHi.W *= animT * alpha;
+                Chrome.RoundedHorizontalGradient(drawList, trackMin, trackMax,
+                    trackHeight * 0.5f, gDeep, gHi);
+            }
             var knobRadius = trackHeight * 0.5f - 2f * SpheneUI.Scale;
             var knobX = trackMin.X + trackHeight * 0.5f + animT * (trackWidth - trackHeight);
             drawList.AddCircleFilled(new Vector2(knobX, trackMin.Y + trackHeight * 0.5f), knobRadius,
@@ -339,11 +384,12 @@ public static partial class SpheneUI
             float trailingWidth = 0f, string? menuPopupId = null,
             FontAwesomeIcon? icon = null, Vector4? labelColor = null)
         {
+            var grouped = GroupState.RowStart();
             var idSplit = label.IndexOf("##", StringComparison.Ordinal);
             var text = idSplit < 0 ? label : label[..idSplit];
             var scale = SpheneUI.Scale;
             var cursor = ImGui.GetCursorScreenPos();
-            var rightBound = Layout.ContentRightBound;
+            var rightBound = grouped ? GroupState.CurrentRightBound : Layout.ContentRightBound;
             if (rightBound <= 0f)
             {
                 rightBound = cursor.X + ImGui.GetContentRegionAvail().X;
@@ -436,6 +482,37 @@ public static partial class SpheneUI
 
             Lint.CheckBounds(label);
             return toggled;
+        }
+
+        /// <summary>
+        /// Bare slide switch without the label row · the same animated track
+        /// <see cref="Toggle"/> docks to the bound, sized to the control frame.
+        /// Use inside composite rows (trailing icon columns, table cells,
+        /// custom list rows) that place the switch themselves; for the
+        /// standard label-left/switch-right settings row use
+        /// <see cref="Toggle"/>.
+        /// </summary>
+        /// <returns>True when the switch was clicked.</returns>
+        public static bool Switch(string id, ref bool value)
+        {
+            var height = ImGui.GetFrameHeight();
+            var width = height * 1.8f;
+            var position = ImGui.GetCursorScreenPos();
+            var clicked = ImGui.InvisibleButton(id, new Vector2(width, height));
+            if (clicked)
+            {
+                value = !value;
+            }
+            // Same proportions as Toggle: the track is drawn at 70% of the
+            // frame height, centered inside the full-height hit box.
+            var trackHeight = MathF.Round(height * 0.7f);
+            var trackMin = new Vector2(position.X + (width - trackHeight * 1.8f) * 0.5f,
+                position.Y + (height - trackHeight) * 0.5f);
+            var animT = ToggleAnimValue(ImGui.GetID(id), value);
+            SwitchVisual(ImGui.GetWindowDrawList(), trackMin,
+                trackMin + new Vector2(trackHeight * 1.8f, trackHeight), animT, ImGui.GetStyle().Alpha);
+            Lint.CheckBounds(id);
+            return clicked;
         }
 
         /// <summary>SliderInt with the settings-row convention (label left, control sized to the bound).</summary>
@@ -533,7 +610,29 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// One action cap fused to the right edge of an input — an icon glyph,
+        /// Callback-capable <see cref="InputTextMultiline"/> · the context is
+        /// handed to <paramref name="callback"/> every time ImGui invokes it
+        /// (with <see cref="ImGuiInputTextFlags.CallbackAlways"/> this is each
+        /// frame while the widget is active). Callback positions are UTF-8
+        /// byte offsets into the buffer - editors use them to splice markup
+        /// at the caret or around the selection via
+        /// <c>InsertChars</c>/<c>DeleteChars</c> on the callback data.
+        /// </summary>
+        public static bool InputTextMultiline<TContext>(string label, ref string value,
+            int maxLength, Vector2 size, ImGuiInputTextFlags flags,
+            ImGui.ImGuiInputTextCallbackRefContextDelegate<TContext> callback,
+            ref TContext context,
+            float trailingWidth = 0f, float preferredWidth = -1f)
+        {
+            using var style = PushValueControlStyle();
+            var changed = ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth),
+                ref value, maxLength, size, flags, callback, ref context);
+            Lint.CheckBounds(label);
+            return changed;
+        }
+
+        /// <summary>
+        /// One action cap fused to the right edge of an input · an icon glyph,
         /// or <paramref name="Label"/> for labeled caps (e.g. "Browse").
         /// </summary>
         public readonly record struct InputButtonSpec(FontAwesomeIcon Icon = FontAwesomeIcon.None,
@@ -756,6 +855,47 @@ public static partial class SpheneUI
             return (T?)_selectedComboItems[comboName];
         }
 
+        private static readonly Stack<IDisposable> _comboStyleStack = new();
+
+        /// <summary>
+        /// <see cref="ImGui.BeginCombo"/> wrapped in the value-control style, so
+        /// pickers whose items don't fit <see cref="Combo{T}"/> (icons,
+        /// mixed types, custom rows) still get the themed frame and popup
+        /// chrome. Call <see cref="EndComboBox"/> only when this returns true;
+        /// populate with <see cref="Selectable"/> items.
+        /// </summary>
+        /// <param name="width">Item width in pixels; ≤ 0 keeps ImGui's default
+        /// width. Pass <see cref="FillRowWidth"/> results for fill rows.</param>
+        /// <param name="flags">Combo flags, e.g. <see cref="ImGuiComboFlags.NoPreview"/>
+        /// for arrow-only dropdown buttons.</param>
+        public static bool BeginComboBox(string id, string previewLabel, float width = -1f,
+            ImGuiComboFlags flags = ImGuiComboFlags.None)
+        {
+            if (width > 0f)
+            {
+                ImGui.SetNextItemWidth(width);
+            }
+            var style = PushValueControlStyle();
+            if (!ImGui.BeginCombo(id, previewLabel, flags))
+            {
+                style.Dispose();
+                return false;
+            }
+            _comboStyleStack.Push(style);
+            Lint.CheckBounds(id);
+            return true;
+        }
+
+        /// <summary>Ends a combo opened via <see cref="BeginComboBox"/>.</summary>
+        public static void EndComboBox()
+        {
+            ImGui.EndCombo();
+            if (_comboStyleStack.Count > 0)
+            {
+                _comboStyleStack.Pop().Dispose();
+            }
+        }
+
         /// <summary>
         /// Renders a comma-separated tag list as rounded accent chips, wrapping
         /// to the next line when they exceed the available width. Empty input
@@ -809,20 +949,28 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Draws a ? help marker in the reserved right column of the current
-        /// row (same line as the previous item when it fits, right-aligned on
-        /// the next line otherwise) so all help icons share one flush column.
+        /// row (same line as the previous item when it shares the line,
+        /// right-aligned on the next line otherwise) so all help icons share
+        /// one flush column. Never climbs back onto a finished line.
         /// </summary>
         public static void HelpText(string helpText)
         {
             var iconW = Icons.Size(FontAwesomeIcon.QuestionCircle).X;
+            var cursor = ImGui.GetCursorScreenPos();
             var bound = Layout.ContentRightBound;
             if (bound <= 0f)
             {
-                bound = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
+                bound = cursor.X + ImGui.GetContentRegionAvail().X;
             }
             var targetX = bound - iconW;
+            var lastMin = ImGui.GetItemRectMin();
             var lastMax = ImGui.GetItemRectMax();
-            if (targetX > lastMax.X + 1f)
+            // Join the previous line only when the last item is real content  · 
+            // zero-width spacers (VerticalSpace, ScaledDummy, trailing chip
+            // gaps) must not pull the marker back up next to titles or rows
+            // that already ended.
+            var joinable = lastMax.X - lastMin.X > 2f;
+            if (joinable && targetX > lastMax.X + 1f)
             {
                 // Pin to the reserved right column so every help icon sits
                 // flush behind the row's control or switch.
@@ -830,20 +978,27 @@ public static partial class SpheneUI
             }
             else
             {
-                SameLineIfFits(iconW);
+                // Spacer above or no room left: dock to the reserved column
+                // on its own line instead of climbing back or overlapping.
+                ImGui.SetCursorScreenPos(new Vector2(
+                    MathF.Max(cursor.X, targetX), cursor.Y));
+                if (GroupState.InGroup)
+                {
+                    Lint.RecordDetachedHelp(helpText);
+                }
             }
             // The glyph is painted through the draw list, centered inside the
-            // row's frame box — IconText would render at the line's text base
+            // row's frame box · IconText would render at the line's text base
             // offset, which differs per row type. A Dummy registers the frame
             // box as the item so hover and the tooltip cover exactly the glyph.
-            var cursor = ImGui.GetCursorScreenPos();
+            var markerPos = ImGui.GetCursorScreenPos();
             var frameH = Metrics.ControlHeight;
             var glyph = FontAwesomeIcon.QuestionCircle.ToIconString();
             using (PushIconFont())
             {
                 var glyphSize = ImGui.CalcTextSize(glyph);
-                ImGui.GetWindowDrawList().AddText(new Vector2(cursor.X,
-                    cursor.Y + (frameH - glyphSize.Y) * 0.5f),
+                ImGui.GetWindowDrawList().AddText(new Vector2(markerPos.X,
+                    markerPos.Y + (frameH - glyphSize.Y) * 0.5f),
                     ImGui.GetColorU32(ImGuiCol.TextDisabled), glyph);
             }
             ImGui.Dummy(new Vector2(iconW, frameH));
@@ -877,20 +1032,58 @@ public static partial class SpheneUI
             return changed;
         }
 
+        /// <summary>
+        /// ImGui's ColorPicker4 (alpha bar, no label) meant to be hosted inside
+        /// a caller-managed <see cref="Popups.BeginStyled"/> popup or styled
+        /// child · the raw widget behind <see cref="ColorEdit"/> for custom
+        /// picker popups that need more than a swatch row.
+        /// </summary>
+        public static bool ColorPicker(string id, ref Vector4 color)
+        {
+            var changed = ImGui.ColorPicker4(id, ref color,
+                ImGuiColorEditFlags.AlphaBar | ImGuiColorEditFlags.NoLabel);
+            Lint.CheckBounds(id);
+            return changed;
+        }
+
+        /// <summary>
+        /// Label-less swatch that opens a <see cref="Popups.BeginStyled"/>
+        /// ColorPicker popup on click · the toolbar counterpart of
+        /// <see cref="ColorEdit"/> for inline/icon rows. Use
+        /// <paramref name="selected"/> to mark the swatch as the active state.
+        /// </summary>
+        /// <returns>True while the picker reports a change.</returns>
+        public static bool ColorPickerSwatch(string id, ref Vector4 color, bool selected = false)
+        {
+            var pickerPopupId = id + "_picker";
+            if (ColorSwatch(id, color, selected: selected))
+            {
+                ImGui.OpenPopup(pickerPopupId);
+            }
+            var changed = false;
+            if (Popups.BeginStyled(pickerPopupId))
+            {
+                changed = ColorPicker("##picker" + id, ref color);
+                Popups.EndStyled();
+            }
+            Lint.CheckBounds(id);
+            return changed;
+        }
+
         /// <summary>Gap between the icon zone's seam and the label.</summary>
         private const float SegTextPadX = 10f;
 
         /// <summary>Trailing padding after the label.</summary>
         private const float SegTrailPadX = 12f;
 
-        /// <summary>Idle pill fill (white alpha) — deliberately brighter than
+        /// <summary>Idle pill fill (white alpha) · deliberately brighter than
         /// the surrounding band so push buttons read as clickable.</summary>
         private const float SegPillIdle = 0.075f;
         private const float SegPillHover = 0.13f;
         private const float SegPillHeld = 0.17f;
         private const float SegPillActive = 0.18f;
 
-        /// <summary>Icon zone fill — always a step brighter than the pill.</summary>
+        /// <summary>Icon zone fill · always a step brighter than the pill.</summary>
         private const float SegZoneIdle = 0.13f;
         private const float SegZoneHover = 0.27f;
         private const float SegZoneHeld = 0.38f;
@@ -901,22 +1094,22 @@ public static partial class SpheneUI
         private const float SegSeamActive = 0.55f;
 
         /// <summary>Opaque theme base drawn under the tint layers so busy
-        /// backdrops (banner art, images) cannot bleed through — the frosted
+        /// backdrops (banner art, images) cannot bleed through · the frosted
         /// look without paying for a per-rect blur pass.</summary>
         private const float SegScrimAlpha = 0.66f;
 
-        /// <summary>How far the scrim is pulled toward near-black — keeps
+        /// <summary>How far the scrim is pulled toward near-black · keeps
         /// button bodies clearly darker than the band they sit on.</summary>
         private const float SegScrimDarken = 0.5f;
 
-        /// <summary>Hairline around the pill — idle keeps it quiet, states
+        /// <summary>Hairline around the pill · idle keeps it quiet, states
         /// brighten it for definition without an outlined-box look.</summary>
         private const float SegBorderIdle = 0.30f;
         private const float SegBorderHover = 0.50f;
         private const float SegBorderHeld = 0.58f;
         private const float SegBorderActive = 0.55f;
 
-        /// <summary>Max corner radius relative to button height — keeps
+        /// <summary>Max corner radius relative to button height · keeps
         /// short buttons reading as buttons instead of full pills.</summary>
         private const float SegRadiusFactor = 0.25f;
 
@@ -950,7 +1143,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Shared renderer for the segmented button family — the same visual
+        /// Shared renderer for the segmented button family · the same visual
         /// language as <c>Layout.NavRailSegmentItem</c>: a tonal pill with a
         /// square icon zone on the left separated by a hairline seam.
         /// Modes: icon + label → segmented button, icon only → square zone
@@ -968,7 +1161,7 @@ public static partial class SpheneUI
             var scale = SpheneUI.Scale;
             var display = StripLabelId(label);
             var hasLabel = !string.IsNullOrEmpty(display);
-            // Every labeled button carries a zone — the semantic icon when
+            // Every labeled button carries a zone · the semantic icon when
             // given, otherwise a subdued default chevron marking it as an
             // actionable button. zoneContent swaps the glyph for caller-drawn
             // content (e.g. a brand texture glyph).
@@ -978,7 +1171,7 @@ public static partial class SpheneUI
             var isDefaultGlyph = !icon.HasValue && hasLabel;
             var h = size?.Y is > 0f ? size.Value.Y : ImGui.GetFrameHeight();
             var w = size?.X is > 0f or < 0f ? size.Value.X : SegAutoWidth(display, icon, h);
-            // Fixed FrameRounding turns short buttons into pills — cap it
+            // Fixed FrameRounding turns short buttons into pills · cap it
             // relative to the height so proportions stay button-like at
             // any control size.
             var radius = MathF.Min(Metrics.ButtonRadius, h * SegRadiusFactor);
@@ -1001,16 +1194,52 @@ public static partial class SpheneUI
                 new Vector4(0.02f, 0.02f, 0.035f, 1f), SegScrimDarken);
             scrim.W = MathF.Max(scrim.W, SegScrimAlpha) * dim;
             drawList.AddRectFilled(min, max, ColorUtils.ToU32(scrim), radius);
-            // solidFill: the whole pill carries the accent (brand buttons) —
-            // hover/held only brighten it instead of tinting a neutral fill.
-            var pillFill = solidFill
-                ? ColorUtils.WithAlpha(accent, held ? 1f : hovered ? 0.95f : 0.85f)
-                : active ? ColorUtils.WithAlpha(accent, SegPillActive)
-                : held ? ColorUtils.WithAlpha(accent, SegPillHeld)
-                : hovered ? ColorUtils.WithAlpha(accent, SegPillHover)
-                : ColorUtils.WithAlpha(Vector4.One, SegPillIdle);
-            pillFill.W *= dim;
-            drawList.AddRectFilled(min, max, ColorUtils.ToU32(pillFill), radius);
+            // solidFill: the whole pill carries the accent as a two-stop
+            // gradient ramp plus a top sheen and a soft ambient glow (the
+            // primary-action look) · hover/held only brighten the ramp
+            // instead of tinting a neutral fill.
+            if (solidFill)
+            {
+                var (gDeep, gHi) = Colors.AccentRamp(accent);
+                var fillAlpha = (held ? 1f : hovered ? 0.97f : 0.90f) * dim;
+                gDeep.W = fillAlpha;
+                gHi.W = fillAlpha;
+                Fx.AmbientGlow(drawList, min, max, radius, accent,
+                    (hovered ? 1.4f : 0.8f) * dim);
+                Chrome.RoundedHorizontalGradient(drawList, min, max, radius, gDeep, gHi);
+                var sheen = ColorUtils.ToU32(ColorUtils.WithAlpha(gHi, 0.30f * fillAlpha));
+                // Fade in from the left cap tangent - a hard edge inside the
+                // corner arc would nick the pill silhouette.
+                var sheenIn = MathF.Min(10f * scale, (w - radius * 1.2f) * 0.35f);
+                drawList.AddRectFilledMultiColor(
+                    new Vector2(min.X + radius * 0.6f, min.Y + 1f * scale),
+                    new Vector2(min.X + radius * 0.6f + sheenIn, min.Y + h * 0.34f),
+                    0u, sheen, 0u, 0u);
+                drawList.AddRectFilledMultiColor(
+                    new Vector2(min.X + radius * 0.6f + sheenIn, min.Y + 1f * scale),
+                    new Vector2(max.X - radius * 0.6f, min.Y + h * 0.34f),
+                    sheen, sheen, 0u, 0u);
+            }
+            else
+            {
+                var pillFill = active ? ColorUtils.WithAlpha(accent, SegPillActive)
+                    : held ? ColorUtils.WithAlpha(accent, SegPillHeld)
+                    : hovered ? ColorUtils.WithAlpha(accent, SegPillHover)
+                    : ColorUtils.WithAlpha(Vector4.One, SegPillIdle);
+                pillFill.W *= dim;
+                drawList.AddRectFilled(min, max, ColorUtils.ToU32(pillFill), radius);
+            }
+
+            // Press feedback: held buttons dip their contents by a pixel and
+            // pick up a faint top inner shadow · reads as a physical push
+            // rather than a flat tint swap.
+            var pressShift = held ? scale : 0f;
+            if (held)
+            {
+                drawList.AddRectFilled(min, new Vector2(max.X, min.Y + 1.5f * scale),
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.Zero, 0.18f)),
+                    radius, ImDrawFlags.RoundCornersTop);
+            }
 
             var zoneW = hasZone && hasLabel ? h : 0f;
             if (hasZone)
@@ -1041,7 +1270,9 @@ public static partial class SpheneUI
                 }
                 else
                 {
-                    var glyphColor = active ? ColorUtils.ContrastTextColor(accent)
+                    // solidFill pills are fully accent · zone glyph and label
+                    // both need contrast text to stay readable on the fill.
+                    var glyphColor = solidFill || active ? ColorUtils.ContrastTextColor(accent)
                         : hovered ? ColorUtils.LerpColor(accent, Vector4.One, 0.3f)
                         : ColorUtils.LerpColor(accent, Vector4.One, 0.1f);
                     // The default chevron stays quieter than a semantic icon so
@@ -1057,7 +1288,8 @@ public static partial class SpheneUI
                         var zoneCenter = hasLabel
                             ? new Vector2(min.X + zoneW * 0.5f, (min.Y + max.Y) * 0.5f)
                             : (min + max) * 0.5f;
-                        drawList.AddText(zoneCenter - glyphSize * 0.5f,
+                        drawList.AddText(zoneCenter - glyphSize * 0.5f
+                                + new Vector2(0f, pressShift),
                             ColorUtils.ToU32(glyphColor), glyph);
                         if (MathF.Abs(iconScale - 1f) > 0.0001f)
                         {
@@ -1089,7 +1321,7 @@ public static partial class SpheneUI
                 ImGui.PushClipRect(new Vector2(textX, min.Y),
                     new Vector2(max.X - textPadX * 0.5f, max.Y), true);
                 drawList.AddText(new Vector2(textX,
-                        min.Y + (max.Y - min.Y - labelSize.Y) * 0.5f),
+                        min.Y + (max.Y - min.Y - labelSize.Y) * 0.5f + pressShift),
                     ColorUtils.ToU32(textBase), display!);
                 ImGui.PopClipRect();
             }
@@ -1100,13 +1332,120 @@ public static partial class SpheneUI
         /// <summary>
         /// Segmented push button in the nav-menu language: optional square
         /// icon zone + seam + label on a tonal pill. The single helper for
-        /// action buttons across the app — use it instead of raw ImGui
+        /// action buttons across the app · use it instead of raw ImGui
         /// buttons. <paramref name="active"/> is an optional toggled state;
         /// <paramref name="accent"/> overrides the theme accent per button.
         /// </summary>
         public static bool SegmentButton(string label, FontAwesomeIcon? icon = null,
             Vector2? size = null, Vector4? accent = null, bool active = false, bool enabled = true)
             => SegCore(label, label, icon, size, accent ?? Colors.Accent, active, enabled);
+
+        /// <summary>
+        /// Primary call-to-action in the same segmented pill language · the
+        /// whole pill carries the accent and the label renders in contrast
+        /// text, so it reads as the one action that matters on a page
+        /// (capture, confirm, apply). Everything else should stay a
+        /// <see cref="SegmentButton"/>, <see cref="Button"/> or icon button.
+        /// Width matches <see cref="Icons.TextButtonWidth"/>.
+        /// </summary>
+        public static bool PrimaryButton(string label, FontAwesomeIcon? icon = null,
+            Vector2? size = null, Vector4? accent = null, bool enabled = true)
+            => SegCore(label, label, icon, size, accent ?? Colors.Accent,
+                enabled: enabled, solidFill: true);
+
+        /// <summary>Natural width of a <see cref="Segmented"/> bar for the given items.</summary>
+        public static float SegmentedWidth(string[] items)
+        {
+            var scale = SpheneUI.Scale;
+            var pad = 10f * scale;
+            var maxText = 0f;
+            foreach (var item in items)
+            {
+                maxText = MathF.Max(maxText, ImGui.CalcTextSize(item).X);
+            }
+            return (maxText + pad * 2f) * items.Length + 2f * scale;
+        }
+
+        /// <summary>
+        /// Connected segment bar · the modern replacement for a dropdown when
+        /// only a handful of options exist: one tonal track, N equal segments,
+        /// the active one filled with the accent, dividers between them.
+        /// </summary>
+        public static bool Segmented(string id, ref int index, string[] items,
+            float? width = null)
+        {
+            var scale = SpheneUI.Scale;
+            var frameH = ImGui.GetFrameHeight();
+            var radius = Metrics.ControlRadius;
+            var total = width ?? SegmentedWidth(items);
+            var segW = total / items.Length;
+            var drawList = ImGui.GetWindowDrawList();
+            var min = ImGui.GetCursorScreenPos();
+            var changed = false;
+
+            var theme = SpheneTheme.Current;
+            drawList.AddRectFilled(min, min + new Vector2(total, frameH),
+                ColorUtils.ToU32(theme.FrameBg), radius);
+
+            for (var i = 0; i < items.Length; i++)
+            {
+                var segMin = new Vector2(min.X + i * segW, min.Y);
+                var segMax = segMin + new Vector2(segW, frameH);
+                ImGui.SetCursorScreenPos(segMin);
+                if (ImGui.InvisibleButton($"{items[i]}##{id}-{i}", new Vector2(segW, frameH)))
+                {
+                    index = i;
+                    changed = true;
+                }
+                var hovered = ImGui.IsItemHovered();
+                var active = i == index;
+                if (active || hovered)
+                {
+                    var flags = ImDrawFlags.None;
+                    if (i == 0)
+                    {
+                        flags = ImDrawFlags.RoundCornersLeft;
+                    }
+                    else if (i == items.Length - 1)
+                    {
+                        flags = ImDrawFlags.RoundCornersRight;
+                    }
+                    if (active)
+                    {
+                        // Selected segment rides the accent ramp so the bar
+                        // matches the nav/primary gradient language.
+                        var (gDeep, gHi) = Colors.AccentRamp(Colors.Accent);
+                        gDeep.W = 0.34f * ImGui.GetStyle().Alpha;
+                        gHi.W = 0.34f * ImGui.GetStyle().Alpha;
+                        Chrome.RoundedHorizontalGradient(drawList, segMin, segMax,
+                            radius, gDeep, gHi, flags);
+                    }
+                    else
+                    {
+                        var fill = ColorUtils.WithAlpha(Colors.Accent,
+                            0.10f * ImGui.GetStyle().Alpha);
+                        drawList.AddRectFilled(segMin, segMax, ColorUtils.ToU32(fill), radius, flags);
+                    }
+                }
+                if (i > 0)
+                {
+                    var x = MathF.Round(segMin.X) + 0.5f;
+                    drawList.AddLine(new Vector2(x, segMin.Y + 3f * scale),
+                        new Vector2(x, segMax.Y - 3f * scale),
+                        ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.09f)));
+                }
+                var text = items[i];
+                var textW = ImGui.CalcTextSize(text).X;
+                drawList.AddText(new Vector2(segMin.X + (segW - textW) * 0.5f,
+                        segMin.Y + (frameH - ImGui.GetTextLineHeight()) * 0.5f),
+                    ImGui.GetColorU32(active || hovered ? ImGuiCol.Text : ImGuiCol.TextDisabled),
+                    text);
+            }
+            ImGui.SetCursorScreenPos(min);
+            ImGui.Dummy(new Vector2(total, frameH));
+            Lint.CheckBounds(id);
+            return changed;
+        }
 
         /// <summary>
         /// Design-system push button: segmented pill in the shared button
@@ -1118,13 +1457,13 @@ public static partial class SpheneUI
                 danger ? Colors.Danger : Colors.Accent);
 
         /// <summary>
-        /// Compact text button for dense rows and inline actions — same
+        /// Compact text button for dense rows and inline actions · same
         /// segmented fill language as <see cref="Button"/>.
         /// </summary>
         public static bool SmallButton(string label)
             => SegCore(label, label, null, null, Colors.Accent);
 
-        /// <summary>Rendered width of a <see cref="SmallButton"/> — zone plus
+        /// <summary>Rendered width of a <see cref="SmallButton"/> · zone plus
         /// label padding, for callers that dock the button to a bound.</summary>
         public static float SmallButtonWidth(string label)
             => SegAutoWidth(label, null, ImGui.GetFrameHeight());
@@ -1153,17 +1492,26 @@ public static partial class SpheneUI
             var hovered = ImGui.IsItemHovered();
             var active = ImGui.IsItemActive();
 
-            var col = enabled
-                ? (active ? baseCol * 0.9f : hovered ? baseCol * 1.1f : baseCol)
-                : Colors.FrameBg;
-            drawList.AddRectFilled(start, end, ImGui.ColorConvertFloat4ToU32(col),
+            var hovT = Fx.HoverT(ImGui.GetID($"##hero-btn-{id}"), hovered && enabled);
+            var lift = enabled ? 1f + 0.10f * hovT - (active ? 0.10f : 0f) : 0f;
+            var fill = enabled ? baseCol * lift : Colors.FrameBg;
+            drawList.AddRectFilled(start, end, ImGui.ColorConvertFloat4ToU32(fill),
                 Metrics.ButtonRadius);
 
-            if (!enabled)
+            if (enabled)
             {
-                drawList.AddRect(start, end, ImGui.ColorConvertFloat4ToU32(Colors.Border),
-                    Metrics.ButtonRadius);
+                // soft top sheen · inset by the radius so its square corners
+                // never reach the rounded edge
+                var sheenMin = new Vector2(start.X + Metrics.ButtonRadius, start.Y + scale);
+                var sheenMax = new Vector2(end.X - Metrics.ButtonRadius, start.Y + buttonSize.Y * 0.55f);
+                var sheenCol = ImGui.ColorConvertFloat4ToU32(
+                    ColorUtils.WithAlpha(Colors.TextPrimary, 0.10f + 0.06f * hovT));
+                drawList.AddRectFilledMultiColor(sheenMin, sheenMax, sheenCol, sheenCol, 0u, 0u);
             }
+
+            drawList.AddRect(start, end, ImGui.ColorConvertFloat4ToU32(
+                enabled ? ColorUtils.WithAlpha(Colors.TextPrimary, 0.12f + 0.12f * hovT) : Colors.Border),
+                Metrics.ButtonRadius);
 
             var textCol = enabled ? ColorUtils.ContrastTextColor(baseCol) : Colors.TextMuted;
             var spacing = icon.HasValue ? 3f * scale : 0f;
@@ -1173,6 +1521,7 @@ public static partial class SpheneUI
                 using (SpheneUI.IconFont.Push())
                     iconSize = ImGui.CalcTextSize(icon.Value.ToIconString());
             }
+            var drawScale = textScale ?? 1f;
             Vector2 textSize;
             using (SpheneUI.UidFont.Push())
             {
@@ -1181,20 +1530,30 @@ public static partial class SpheneUI
                 if (textScale.HasValue) ImGui.SetWindowFontScale(1f);
             }
 
+            // shrink the label instead of clipping it when the button is too narrow
+            var textAvail = buttonSize.X - iconSize.X - spacing - 12f * scale;
+            if (textSize.X > textAvail && textSize.X > 1f)
+            {
+                var fit = MathF.Max(0.55f, textAvail / textSize.X);
+                drawScale *= fit;
+                textSize *= fit;
+            }
+
             var totalWidth = iconSize.X + spacing + textSize.X;
-            var totalHeight = MathF.Max(iconSize.Y, textSize.Y);
-            var contentPos = start + (buttonSize - new Vector2(totalWidth, totalHeight)) * 0.5f;
+            var contentX = start.X + (buttonSize.X - totalWidth) * 0.5f;
+            var iconY = start.Y + (buttonSize.Y - iconSize.Y) * 0.5f;
+            var textY = start.Y + (buttonSize.Y - textSize.Y) * 0.5f;
             var textU32 = ImGui.ColorConvertFloat4ToU32(textCol);
             if (icon.HasValue)
             {
                 using (SpheneUI.IconFont.Push())
-                    drawList.AddText(contentPos, textU32, icon.Value.ToIconString());
+                    drawList.AddText(new Vector2(contentX, iconY), textU32, icon.Value.ToIconString());
             }
             using (SpheneUI.UidFont.Push())
             {
-                if (textScale.HasValue) ImGui.SetWindowFontScale(textScale.Value);
-                drawList.AddText(contentPos + new Vector2(iconSize.X + spacing, 0), textU32, label);
-                if (textScale.HasValue) ImGui.SetWindowFontScale(1f);
+                if (drawScale < 0.999f) ImGui.SetWindowFontScale(drawScale);
+                drawList.AddText(new Vector2(contentX + iconSize.X + spacing, textY), textU32, label);
+                if (drawScale < 0.999f) ImGui.SetWindowFontScale(1f);
             }
 
             Lint.CheckBounds(label);
@@ -1202,7 +1561,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Compact checkbox for dense rows and table cells — keeps the classic
+        /// Compact checkbox for dense rows and table cells · keeps the classic
         /// box footprint where a row-spanning <see cref="Toggle"/> would not fit.
         /// </summary>
         public static bool Checkbox(string label, ref bool value)
@@ -1214,7 +1573,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Square icon-only button in the swatch language — frame fill, border,
+        /// Square icon-only button in the swatch language · frame fill, border,
         /// centered FontAwesome glyph in the segmented zone language. Use for
         /// compact actions next to value controls; pair with
         /// <see cref="SpheneUI.AttachTooltip"/>.
@@ -1228,7 +1587,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Confirm/cancel pair split across the bounded content width — the
+        /// Confirm/cancel pair split across the bounded content width · the
         /// modal dialog pattern. Returns which button was clicked (0/1/2).
         /// </summary>
         public static int DialogButtons(string id, string confirmLabel, string cancelLabel,
@@ -1238,7 +1597,8 @@ public static partial class SpheneUI
             var buttonWidth = (BoundedAvailX() - spacing) * 0.5f;
             var size = new Vector2(buttonWidth, 0f);
             var clicked = 0;
-            if (Button(confirmLabel + "##" + id, size, confirmDanger))
+            if (PrimaryButton(confirmLabel + "##" + id, size: size,
+                    accent: confirmDanger ? Colors.Danger : null))
             {
                 clicked = 1;
             }
@@ -1295,7 +1655,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Selectable list row in the value-control language — use instead of
+        /// Selectable list row in the value-control language · use instead of
         /// raw ImGui.Selectable inside settings content.
         /// </summary>
         public static bool Selectable(string label, bool selected,
@@ -1310,7 +1670,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Collapsible sub-section header: chevron + label, accent text while
         /// hovered, hover row tint, open state persisted in the window storage.
-        /// Replaces ImGui.CollapsingHeader — returns whether the section is
+        /// Replaces ImGui.CollapsingHeader · returns whether the section is
         /// open; draw the content inside the if-block.
         /// </summary>
         public static bool CollapsibleSection(string label, bool defaultOpen = false)
@@ -1353,7 +1713,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Rounded color swatch button: filled with the color, subtle border
         /// that brightens on hover and turns accent when
-        /// <paramref name="selected"/>. Never opens a picker — the caller owns
+        /// <paramref name="selected"/>. Never opens a picker · the caller owns
         /// the click.
         /// </summary>
         public static bool ColorSwatch(string id, Vector4 color, float size = -1f, bool selected = false)
@@ -1390,7 +1750,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Same swatch button as <see cref="ColorSwatch"/> but renders a short
-        /// glyph (symbol, letter) centered instead of a color fill — used for
+        /// glyph (symbol, letter) centered instead of a color fill · used for
         /// palette pickers whose entries are characters rather than colors.
         /// </summary>
         public static bool GlyphSwatch(string id, string glyph, float size = -1f, bool selected = false)
@@ -1431,7 +1791,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Same swatch button as <see cref="GlyphSwatch"/> but renders a thick
-        /// colored frame instead of a glyph — the interior keeps the neutral
+        /// colored frame instead of a glyph · the interior keeps the neutral
         /// control background. Used for pickers where the color acts as an
         /// outline or edge rather than the glyph fill.
         /// </summary>
@@ -1474,7 +1834,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Swatch button rendered as a transparency checkerboard — the
+        /// Swatch button rendered as a transparency checkerboard · the
         /// "no color / none" entry in palette pickers.
         /// </summary>
         public static bool TransparentSwatch(string id, float size = -1f, bool selected = false)
@@ -1521,7 +1881,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Status dot + label in the semantic status colors — the shared
+        /// Status dot + label in the semantic status colors · the shared
         /// connected/warning/error indicator.
         /// </summary>
         public static void StatusDot(string label, bool isActive, bool hasWarning = false,
@@ -1599,6 +1959,55 @@ public static partial class SpheneUI
                     var progressColorStart = color ?? theme.CompactProgressBarForeground;
                     drawList.AddRectFilled(pos, progressEnd, ColorUtils.ToU32(progressColorStart), borderRadius);
                 }
+            }
+
+            drawList.AddRect(pos, endPos, ColorUtils.ToU32(theme.CompactProgressBarBorder),
+                borderRadius, ImDrawFlags.RoundCornersAll, theme.FrameBorderSize);
+
+            if (!string.IsNullOrEmpty(overlay))
+            {
+                var textSize = ImGui.CalcTextSize(overlay);
+                var textPos = new Vector2(
+                    pos.X + (barSize.X - textSize.X) * 0.5f,
+                    pos.Y + (barSize.Y - textSize.Y) * 0.5f);
+                drawList.AddText(textPos, ColorUtils.ToU32(theme.TextPrimary), overlay);
+            }
+
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + barSize.Y + ImGui.GetStyle().ItemSpacing.Y);
+        }
+
+        /// <summary>
+        /// Indeterminate variant of <see cref="ProgressBar"/> - a rounded gradient
+        /// segment ping-pongs across the track for work of unknown length.
+        /// </summary>
+        public static void ProgressBarIndeterminate(Vector2? size = null, string? overlay = null)
+        {
+            var theme = Theme.Current;
+            var barSize = size ?? new Vector2(theme.CompactProgressBarWidth, theme.CompactProgressBarHeight);
+            var drawList = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetCursorScreenPos();
+            var endPos = pos + barSize;
+            var borderRadius = theme.ProgressBarRounding;
+
+            drawList.AddRectFilled(pos, endPos, ColorUtils.ToU32(theme.CompactProgressBarBackground), borderRadius);
+
+            // ping-pong travel - the segment never leaves the track, so its
+            // rounded caps are always visible and match the bar's rounding
+            var segW = barSize.X * 0.30f;
+            var t = (float)(ImGui.GetTime() % 2.2) / 2.2f;
+            var s = t < 0.5f ? t * 2f : 2f - t * 2f;
+            var ease = s * s * (3f - 2f * s);
+            var segMin = new Vector2(pos.X + (barSize.X - segW) * ease, pos.Y);
+            var segMax = segMin + new Vector2(segW, barSize.Y);
+
+            if (theme.ProgressBarUseGradient)
+            {
+                Chrome.RoundedHorizontalGradient(drawList, segMin, segMax, borderRadius,
+                    theme.ProgressBarGradientStart, theme.ProgressBarGradientEnd);
+            }
+            else
+            {
+                drawList.AddRectFilled(segMin, segMax, ColorUtils.ToU32(theme.CompactProgressBarForeground), borderRadius);
             }
 
             drawList.AddRect(pos, endPos, ColorUtils.ToU32(theme.CompactProgressBarBorder),
@@ -1713,6 +2122,246 @@ public static partial class SpheneUI
             }
 
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + size.Y + ImGui.GetStyle().ItemSpacing.Y);
+        }
+
+        /// <summary>One entry of a <see cref="TabBar"/> · icon, label, dim state, tooltip.</summary>
+        public readonly record struct TabItem(FontAwesomeIcon? Icon, string Label,
+            bool Dimmed = false, string? Tooltip = null);
+
+        // Eased marker position in tab-index units, per tab-bar instance.
+        private static readonly ConcurrentDictionary<uint, float> _tabTracePos = new();
+
+        /// <summary>
+        /// Horizontal tab strip with the aether-trace indicator: a tapered
+        /// accent line on the baseline plus a diamond node at the tab's
+        /// center. The marker eases in tab-index space · never in screen
+        /// space · so it cannot trail behind when the window is dragged.
+        /// Content (icon + label) is measured and centered per tab.
+        /// Returns the clicked index or -1; the caller owns the selection.
+        /// </summary>
+        public static int TabBar(string id, IReadOnlyList<TabItem> tabs, int selected,
+            Vector4 accent)
+        {
+            var scale = Scale;
+            var drawList = ImGui.GetWindowDrawList();
+            var rowH = ImGui.GetFrameHeight() + 8f * scale;
+            var barMin = ImGui.GetCursorScreenPos();
+            var rowRight = barMin.X + ImGui.GetContentRegionAvail().X;
+            var clicked = -1;
+            var hovered = -1;
+            var rects = new (float Center, float ContentHalf)[tabs.Count];
+
+            using (ImRaii.PushId(id))
+            {
+                for (var i = 0; i < tabs.Count; i++)
+                {
+                    var tab = tabs[i];
+                    var icon = tab.Icon?.ToIconString();
+                    var labelW = ImGui.CalcTextSize(tab.Label).X;
+                    float iconW;
+                    using (Icons.PushFont())
+                    {
+                        iconW = icon != null ? ImGui.CalcTextSize(icon).X : 0f;
+                    }
+                    var gap = icon != null ? 5f * scale : 0f;
+                    var contentW = iconW + gap + labelW;
+                    var tabW = contentW + 20f * scale;
+
+                    var tabMin = ImGui.GetCursorScreenPos();
+                    if (ImGui.InvisibleButton($"##{i}", new Vector2(tabW, rowH)))
+                    {
+                        clicked = i;
+                    }
+                    var isHovered = ImGui.IsItemHovered();
+                    if (isHovered)
+                    {
+                        hovered = i;
+                        if (tab.Tooltip != null)
+                        {
+                            AttachTooltip(tab.Tooltip);
+                        }
+                    }
+
+                    var active = i == selected;
+                    var col = active ? accent
+                        : tab.Dimmed ? ColorUtils.WithAlpha(Colors.TextMuted, 0.45f)
+                        : isHovered ? Colors.TextPrimary
+                        : Colors.TextMuted;
+                    var textY = tabMin.Y + (rowH - ImGui.GetTextLineHeight()) * 0.5f;
+                    var x = tabMin.X + (tabW - contentW) * 0.5f;
+                    if (icon != null)
+                    {
+                        using (Icons.PushFont())
+                        {
+                            drawList.AddText(new Vector2(x, textY), ColorUtils.ToU32(col), icon);
+                        }
+                        x += iconW + gap;
+                    }
+                    drawList.AddText(new Vector2(x, textY), ColorUtils.ToU32(col), tab.Label);
+
+                    rects[i] = (tabMin.X + tabW * 0.5f, contentW * 0.5f);
+                    ImGui.SameLine(0f, 2f * scale);
+                }
+                ImGui.NewLine();
+            }
+
+            var baseY = barMin.Y + rowH;
+            drawList.AddLine(new Vector2(barMin.X, baseY + 1f),
+                new Vector2(rowRight, baseY + 1f),
+                ColorUtils.ToU32(Colors.Border with { W = 0.25f }));
+
+            if (hovered >= 0 && hovered != selected)
+            {
+                var (hcx, hch) = rects[hovered];
+                TraceLine(drawList, hcx, baseY, hch + 6f * scale,
+                    ColorUtils.WithAlpha(accent, 0.30f), scale);
+            }
+
+            if (selected >= 0 && selected < tabs.Count)
+            {
+                var animKey = ImGui.GetID(id);
+                if (!_tabTracePos.TryGetValue(animKey, out var anim) || anim < -0.5f)
+                {
+                    anim = selected;
+                }
+                var delta = selected - anim;
+                anim += delta * MathF.Min(1f, ImGui.GetIO().DeltaTime * 14f);
+                if (MathF.Abs(delta) < 0.03f)
+                {
+                    anim = selected;
+                }
+                _tabTracePos[animKey] = anim;
+
+                var lo = Math.Clamp((int)MathF.Floor(anim), 0, tabs.Count - 1);
+                var hi = Math.Min(lo + 1, tabs.Count - 1);
+                var frac = anim - lo;
+                var cx = rects[lo].Center + (rects[hi].Center - rects[lo].Center) * frac;
+                var ch = rects[lo].ContentHalf
+                    + (rects[hi].ContentHalf - rects[lo].ContentHalf) * frac;
+
+                TraceLine(drawList, cx, baseY, ch + 8f * scale,
+                    Colors.AccentRamp(accent).Hi, scale);
+                TraceNode(drawList, cx, baseY + 1f,
+                    MathF.Abs(delta) > 0.02f, accent, scale);
+            }
+
+            return clicked;
+        }
+
+        /// <summary>Tapered glow line · transparent ends fading into a solid core.</summary>
+        private static void TraceLine(ImDrawListPtr drawList, float centerX, float baseY,
+            float halfWidth, Vector4 color, float scale)
+        {
+            var h = MathF.Max(1.25f, 1.5f * scale);
+            var y0 = baseY + 1f - h * 0.5f;
+            var y1 = baseY + 1f + h * 0.5f;
+            var col = ColorUtils.ToU32(color);
+            drawList.AddRectFilledMultiColor(
+                new Vector2(centerX - halfWidth, y0), new Vector2(centerX, y1),
+                0u, col, col, 0u);
+            drawList.AddRectFilledMultiColor(
+                new Vector2(centerX, y0), new Vector2(centerX + halfWidth, y1),
+                col, 0u, 0u, col);
+        }
+
+        /// <summary>
+        /// The diamond node at the trace center · outer accent diamond, bright
+        /// core, soft halo. Swells slightly while the marker is in transit.
+        /// </summary>
+        /// <summary>Joined two-half call-to-action - both halves read as one
+        /// pill with a center divider (same family as the Ko-fi|perks split).
+        /// Returns which half was activated.</summary>
+        public static (bool left, bool right) SplitButton(string id,
+            FontAwesomeIcon leftIcon, string leftLabel, Vector4 leftTint,
+            FontAwesomeIcon rightIcon, string rightLabel, Vector4 rightTint,
+            float width, float height, bool enabled = true)
+        {
+            var scale = SpheneUI.Scale;
+            var drawList = ImGui.GetWindowDrawList();
+            var min = ImGui.GetCursorScreenPos();
+            var max = min + new Vector2(width, height);
+            var radius = MathF.Min(Metrics.ButtonRadius, height * 0.3f);
+            var half = new Vector2(width * 0.5f, height);
+
+            ImGui.PushID(id);
+            using (ImRaii.Disabled(!enabled))
+            {
+                ImGui.SetCursorScreenPos(min);
+                var leftHit = ImGui.InvisibleButton("##left", half);
+                var leftHov = ImGui.IsItemHovered();
+                ImGui.SetCursorScreenPos(new Vector2(min.X + half.X, min.Y));
+                var rightHit = ImGui.InvisibleButton("##right", half);
+                var rightHov = ImGui.IsItemHovered();
+                ImGui.PopID();
+                ImGui.SetCursorScreenPos(new Vector2(min.X, max.Y));
+
+                var t = (float)(ImGui.GetTime() % 2.0);
+                var pulse = enabled ? 0.5f + 0.5f * MathF.Sin(t * MathF.PI * 2f) : 0f;
+                var midX = min.X + half.X;
+
+                var leftCol = ColorUtils.LerpColor(leftTint, Vector4.One,
+                    (leftHov ? 0.30f : 0f) + pulse * 0.10f);
+                var rightCol = ColorUtils.LerpColor(rightTint, Vector4.One,
+                    (rightHov ? 0.30f : 0f) + pulse * 0.10f);
+                drawList.AddRectFilled(min, new Vector2(midX, max.Y),
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(leftCol, 0.95f)),
+                    radius, ImDrawFlags.RoundCornersLeft);
+                drawList.AddRectFilled(new Vector2(midX, min.Y), max,
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(rightCol, 0.95f)),
+                    radius, ImDrawFlags.RoundCornersRight);
+                drawList.AddRect(min, max, ColorUtils.ToU32(ColorUtils.WithAlpha(
+                    ColorUtils.LerpColor(rightTint, Vector4.One, pulse * 0.5f),
+                    0.55f + 0.45f * pulse)), radius, ImDrawFlags.RoundCornersAll,
+                    MathF.Max(1.5f, 1.5f * scale));
+                drawList.AddLine(new Vector2(midX, min.Y + 7f * scale),
+                    new Vector2(midX, max.Y - 7f * scale),
+                    ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.30f)));
+
+                var iconS = height * 0.45f;
+                void Half(Vector2 halfMin, FontAwesomeIcon glyph, string label,
+                    Vector4 content)
+                {
+                    var contentU32 = ColorUtils.ToU32(content);
+                    var labelW = ImGui.CalcTextSize(label).X;
+                    var groupW = iconS + 6f * scale + labelW;
+                    var x = halfMin.X + (half.X - groupW) * 0.5f;
+                    var iconMin = new Vector2(x, halfMin.Y + (height - iconS) * 0.5f);
+                    using (SpheneUI.IconFont.Push())
+                    {
+                        drawList.AddText(iconMin, contentU32, glyph.ToIconString());
+                    }
+                    drawList.AddText(new Vector2(x + iconS + 6f * scale,
+                        halfMin.Y + (height - ImGui.GetTextLineHeight()) * 0.5f),
+                        contentU32, label);
+                }
+
+                var dark = new Vector4(0.10f, 0.10f, 0.14f, 1f);
+                var light = new Vector4(1f, 1f, 1f, 0.96f);
+                static float Luma(Vector4 c) => c.X * 0.299f + c.Y * 0.587f + c.Z * 0.114f;
+                Half(min, leftIcon, leftLabel, Luma(leftTint) > 0.55f ? dark : light);
+                Half(new Vector2(midX, min.Y), rightIcon, rightLabel,
+                    Luma(rightTint) > 0.55f ? dark : light);
+                return (leftHit && enabled, rightHit && enabled);
+            }
+        }
+
+        private static void TraceNode(ImDrawListPtr drawList, float centerX, float centerY,
+            bool traveling, Vector4 accent, float scale)
+        {
+            var r = 3.5f * scale * (traveling ? 1.3f : 1f);
+            var c = new Vector2(centerX, centerY);
+            drawList.AddCircleFilled(c, r * 2.7f,
+                ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.14f)));
+            var col = ColorUtils.ToU32(accent);
+            drawList.AddQuadFilled(
+                new Vector2(c.X, c.Y - r), new Vector2(c.X + r, c.Y),
+                new Vector2(c.X, c.Y + r), new Vector2(c.X - r, c.Y), col);
+            var core = ColorUtils.LerpColor(accent, new Vector4(1f, 1f, 1f, 1f), 0.55f);
+            var coreR = r * 0.5f;
+            drawList.AddQuadFilled(
+                new Vector2(c.X, c.Y - coreR), new Vector2(c.X + coreR, c.Y),
+                new Vector2(c.X, c.Y + coreR), new Vector2(c.X - coreR, c.Y),
+                ColorUtils.ToU32(core));
         }
     }
 }

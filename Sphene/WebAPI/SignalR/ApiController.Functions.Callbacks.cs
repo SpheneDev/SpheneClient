@@ -1,6 +1,7 @@
 using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
+using Sphene.API.Dto.Announcement;
 using Sphene.API.Dto.CharaData;
 using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
@@ -201,6 +202,13 @@ public partial class ApiController
     {
         Logger.LogDebug("Client_UserUpdateDefaultPermissions: {dto}", dto);
         _connectionDto!.DefaultPreferredPermissions = dto;
+        return Task.CompletedTask;
+    }
+
+    public Task Client_UserReceiveChatMessage(ChatMessageDto message)
+    {
+        Logger.LogDebug("Client_UserReceiveChatMessage: {dto}", message);
+        ExecuteSafely(() => Mediator.Publish(new ChatMessageReceivedMessage(message)));
         return Task.CompletedTask;
     }
 
@@ -460,6 +468,12 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_UserSendOffline), act);
     }
 
+    public void OnUserReceiveChatMessage(Action<ChatMessageDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserReceiveChatMessage), act);
+    }
+
     public void OnUserSendOnline(Action<OnlineUserIdentDto> act)
     {
         if (_initialized) return;
@@ -589,6 +603,60 @@ public partial class ApiController
             }
         });
         return Task.CompletedTask;
+    }
+
+    /// <summary>A non-draft announcement went live · toast + cache refresh.</summary>
+    public Task Client_AnnouncementPublished(AnnouncementDto dto)
+    {
+        Logger.LogDebug("Announcement published: {title}", dto.Title);
+        ExecuteSafely(() => Mediator.Publish(new AnnouncementPublishedMessage(dto)));
+        return Task.CompletedTask;
+    }
+
+    /// <summary>An announcement was edited or deleted · caches invalidate.</summary>
+    public Task Client_AnnouncementsChanged()
+    {
+        Logger.LogDebug("Announcements changed");
+        ExecuteSafely(() => Mediator.Publish(new AnnouncementsChangedMessage()));
+        return Task.CompletedTask;
+    }
+
+    public void OnAnnouncementPublished(Action<AnnouncementDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_AnnouncementPublished), act);
+    }
+
+    public void OnAnnouncementsChanged(Action act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_AnnouncementsChanged), act);
+    }
+
+    /// <summary>A syncshell's community content changed · the hub invalidates that shell's cache.</summary>
+    public Task Client_CommunityChanged(CommunityChangedDto dto)
+    {
+        ExecuteSafely(() => Mediator.Publish(new CommunityChangedMessage(dto)));
+        return Task.CompletedTask;
+    }
+
+    public void OnCommunityChanged(Action<CommunityChangedDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_CommunityChanged), act);
+    }
+
+    /// <summary>A durable user notification arrived · feed the inbox.</summary>
+    public Task Client_UserNotification(UserNotificationDto dto)
+    {
+        ExecuteSafely(() => Mediator.Publish(new UserNotificationReceivedMessage(dto)));
+        return Task.CompletedTask;
+    }
+
+    public void OnUserNotification(Action<UserNotificationDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserNotification), act);
     }
 
     private void ExecuteSafely(Action act)

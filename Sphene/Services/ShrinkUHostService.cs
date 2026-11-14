@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Interface.Windowing;
+using Dalamud.Plugin.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using System.IO;
@@ -38,6 +39,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
     private readonly BackupFolderWatcherService _backupFolderWatcher;
     private CancellationTokenSource? _refreshCts;
     private readonly PenumbraIpc _penumbraIpc;
+    private readonly IFramework _framework;
     private PenumbraExtensionService? _penumbraExtension;
     private int _deferredStartupReconcileRunning;
 
@@ -57,7 +59,8 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         BackupFolderWatcherService backupFolderWatcher,
         ShrinkU.UI.StartupProgressUI startupProgressUi,
         Sphene.Interop.Ipc.IpcManager ipcManager,
-        PenumbraIpc penumbraIpc)
+        PenumbraIpc penumbraIpc,
+        IFramework framework)
     {
         _logger = logger;
         _windowSystem = windowSystem;
@@ -75,6 +78,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
         _backupFolderWatcher = backupFolderWatcher;
         _ = ipcManager;
         _penumbraIpc = penumbraIpc;
+        _framework = framework;
 
         try { _configService.ConfigSave += OnConfigSaved; }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed to subscribe to ConfigSave event"); }
@@ -504,34 +508,46 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
 
     private void RegisterWindows()
     {
+        if (_registered)
+            return;
         _logger.LogDebug("Registering ShrinkU windows in Sphene WindowSystem");
-        try { _windowSystem.AddWindow(_conversionUi); } catch (Exception ex) { _logger.LogDebug(ex, "ConversionUI already registered or failed to add"); }
-        try { _windowSystem.AddWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI already registered or failed to add"); }
-        try { _windowSystem.AddWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI already registered or failed to add"); }
-        try { _windowSystem.AddWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI already registered or failed to add"); }
-        try { _windowSystem.AddWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI already registered or failed to add"); }
-        try { _windowSystem.AddWindow(_startupProgressUi); } catch (Exception ex) { _logger.LogDebug(ex, "StartupProgressUI already registered or failed to add"); }
-        _registered = true;
+        // WindowSystem.Draw() iterates its window lists on the draw thread, so
+        // all mutations must run on the framework thread to stay serialized.
+        _ = _framework.RunOnFrameworkThread(() =>
+        {
+            try { _windowSystem.AddWindow(_conversionUi); } catch (Exception ex) { _logger.LogDebug(ex, "ConversionUI already registered or failed to add"); }
+            try { _windowSystem.AddWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI already registered or failed to add"); }
+            try { _windowSystem.AddWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI already registered or failed to add"); }
+            try { _windowSystem.AddWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI already registered or failed to add"); }
+            try { _windowSystem.AddWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI already registered or failed to add"); }
+            try { _windowSystem.AddWindow(_startupProgressUi); } catch (Exception ex) { _logger.LogDebug(ex, "StartupProgressUI already registered or failed to add"); }
+            _registered = true;
+        });
     }
 
     private void UnregisterWindows()
     {
+        if (!_registered && _penumbraExtension == null)
+            return;
         _logger.LogDebug("Removing ShrinkU windows from Sphene WindowSystem");
-        try { _windowSystem.RemoveWindow(_conversionUi); } catch (Exception ex) { _logger.LogDebug(ex, "ConversionUI not registered or failed to remove"); }
-        try { _windowSystem.RemoveWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI not registered or failed to remove"); }
-        try { _windowSystem.RemoveWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI not registered or failed to remove"); }
-        try { _windowSystem.RemoveWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI not registered or failed to remove"); }
+        _ = _framework.RunOnFrameworkThread(() =>
+        {
+            try { _windowSystem.RemoveWindow(_conversionUi); } catch (Exception ex) { _logger.LogDebug(ex, "ConversionUI not registered or failed to remove"); }
+            try { _windowSystem.RemoveWindow(_settingsUi); } catch (Exception ex) { _logger.LogDebug(ex, "SettingsUI not registered or failed to remove"); }
+            try { _windowSystem.RemoveWindow(_firstRunUi); } catch (Exception ex) { _logger.LogDebug(ex, "FirstRunSetupUI not registered or failed to remove"); }
+            try { _windowSystem.RemoveWindow(_releaseChangelogUi); } catch (Exception ex) { _logger.LogDebug(ex, "ReleaseChangelogUI not registered or failed to remove"); }
             try { _windowSystem.RemoveWindow(_debugUi); } catch (Exception ex) { _logger.LogDebug(ex, "DebugUI not registered or failed to remove"); }
             _registered = false;
-            // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
-            try
-            {
-                _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
-                _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
-                _shrinkuConfigService.Save();
-                _logger.LogDebug("Cleared ShrinkU AutomaticControllerName on integration stop");
-            }
-            catch (Exception ex) { _logger.LogDebug(ex, "Failed clearing ShrinkU automatic controller settings"); }
+        });
+        // Clear integration marker so ShrinkU exposes generic Automatic mode when not hosted
+        try
+        {
+            _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
+            _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
+            _shrinkuConfigService.Save();
+            _logger.LogDebug("Cleared ShrinkU AutomaticControllerName on integration stop");
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Failed clearing ShrinkU automatic controller settings"); }
     }
 
     // Open ShrinkU release notes window from Sphene settings
@@ -650,10 +666,15 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                 SetPenumbraIntegration(true);
                 try
                 {
-                    _shrinkuConfigService.Current.AutomaticControllerName = "Sphene";
-                    _shrinkuConfigService.Current.AutomaticHandledBySphene = true;
-                    _shrinkuConfigService.Save();
-                    _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on config save");
+                    var cfg = _shrinkuConfigService.Current;
+                    if (!string.Equals(cfg.AutomaticControllerName, "Sphene", StringComparison.Ordinal)
+                        || !cfg.AutomaticHandledBySphene)
+                    {
+                        cfg.AutomaticControllerName = "Sphene";
+                        cfg.AutomaticHandledBySphene = true;
+                        _shrinkuConfigService.Save();
+                        _logger.LogDebug("Set ShrinkU AutomaticControllerName to Sphene on config save");
+                    }
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed setting ShrinkU automatic controller settings on enable"); }
                 CleanupDuplicateShrinkUConfig();
@@ -664,9 +685,14 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                 SetPenumbraIntegration(false);
                 try
                 {
-                    _shrinkuConfigService.Current.AutomaticHandledBySphene = false;
-                    _shrinkuConfigService.Current.AutomaticControllerName = string.Empty;
-                    _shrinkuConfigService.Save();
+                    var cfg = _shrinkuConfigService.Current;
+                    if (cfg.AutomaticHandledBySphene
+                        || !string.IsNullOrEmpty(cfg.AutomaticControllerName))
+                    {
+                        cfg.AutomaticHandledBySphene = false;
+                        cfg.AutomaticControllerName = string.Empty;
+                        _shrinkuConfigService.Save();
+                    }
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed clearing ShrinkU automatic controller settings on disable"); }
             }
@@ -712,9 +738,11 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
                 return;
             var spheneRootPath = Path.Combine(baseDir, "Sphene.json");
             var spheneSubPath = Path.Combine(baseDir, "Sphene", "Sphene.json");
-            try { if (File.Exists(spheneRootPath)) File.Delete(spheneRootPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed deleting Sphene root config during ShrinkU cleanup"); }
-            try { if (File.Exists(spheneSubPath)) File.Delete(spheneSubPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed deleting Sphene subpath config during ShrinkU cleanup"); }
-            _logger.LogDebug("CleanupDuplicateShrinkUConfig executed");
+            var removed = false;
+            try { if (File.Exists(spheneRootPath)) { File.Delete(spheneRootPath); removed = true; } } catch (Exception ex) { _logger.LogDebug(ex, "Failed deleting Sphene root config during ShrinkU cleanup"); }
+            try { if (File.Exists(spheneSubPath)) { File.Delete(spheneSubPath); removed = true; } } catch (Exception ex) { _logger.LogDebug(ex, "Failed deleting Sphene subpath config during ShrinkU cleanup"); }
+            if (removed)
+                _logger.LogDebug("CleanupDuplicateShrinkUConfig removed stale Sphene config files");
         }
         catch (Exception ex) { _logger.LogDebug(ex, "Failed cleaning up duplicate ShrinkU config"); }
     }

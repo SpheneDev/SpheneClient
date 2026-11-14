@@ -55,7 +55,7 @@ public static class AcknowledgmentOptionBlock
         {
             var notificationLocation = (int)configService.Current.AcknowledgmentNotification;
             var notificationOptions = new[] { "None", "Chat", "Toast", "Both" };
-            if (SpheneUI.Controls.LabeledCombo("Notification Location", ref notificationLocation, notificationOptions, notificationOptions.Length))
+            if (SpheneUI.Rows.Segmented("Notification Location", ref notificationLocation, notificationOptions))
             {
                 configService.Current.AcknowledgmentNotification = (NotificationLocation)notificationLocation;
                 configService.Save();

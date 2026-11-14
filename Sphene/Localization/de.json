@@ -4,7 +4,7 @@
     "description": "Label for language selection"
   },
   "ToS.AgreementLabel": {
-    "message": "     Nutzungsbedingungen",
+    "message": "Nutzungsbedingungen",
     "description": "Terms of Service header"
   },
   "ToS.ReadLabel": {
@@ -42,5 +42,13 @@
   "ToS.Paragraph6": {
     "message": "Durch Fortfahren stimmen Sie diesen Bedingungen zu und bestätigen, dass das Sphene Network ein von der Community betriebenes Projekt ist, das kostenlos bereitgestellt wird. Wir behalten uns das Recht vor, diese Bedingungen zu ändern oder den Service jederzeit einzustellen. Vielen Dank, dass Sie Teil der Sphene Network Community sind!",
     "description": "Sixth paragraph about agreement and community project"
+  },
+  "ToS.Paragraph7": {
+    "message": "Inhalte, die Lalafells oder andere Charaktere, die minderjährig wirken, darstellen oder sexualisieren, sind strengstens verboten und führen zur sofortigen, dauerhaften Entfernung aus dem Network. Belästigung, Hassrede, Doxxing und anderes toxisches Verhalten gegenüber anderen Nutzern werden ebenfalls nicht toleriert - das Sphene Network basiert auf gegenseitigem Respekt zwischen Gefährten.",
+    "description": "Seventh paragraph about prohibited content and community standards"
+  },
+  "ToS.LastUpdated": {
+    "message": "Zuletzt aktualisiert: Oktober 2026",
+    "description": "Terms of Service last-updated stamp"
   }
 }

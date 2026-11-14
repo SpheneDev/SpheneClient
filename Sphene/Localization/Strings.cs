@@ -40,5 +40,13 @@ public static class Strings
             "By continuing, you agree to these terms and acknowledge that the Sphene Network is a community-driven " +
             "project provided free of charge. We reserve the right to modify these terms or discontinue the service " +
             "at any time. Thank you for being part of the Sphene Network community!");
+
+        public static string Paragraph7 => Loc.Localize("ToS.Paragraph7",
+            "Content depicting or sexualizing Lalafell or any character that appears to be underage is " +
+            "strictly prohibited and results in immediate, permanent removal from the Network. Harassment, " +
+            "hate speech, doxxing, and other toxic conduct toward other users is likewise not tolerated - " +
+            "the Sphene Network is built on mutual respect between companions.");
+
+        public static string LastUpdated => Loc.Localize("ToS.LastUpdated", "Last updated: October 2026");
     }
 }

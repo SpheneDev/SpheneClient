@@ -57,11 +57,16 @@ public class SpheneConfig : ISpheneConfiguration
     public NotificationLocation AreaBoundSyncshellNotification { get; set; } = NotificationLocation.Toast;
     public bool ShowAreaBoundSyncshellWelcomeMessages { get; set; } = true;
     public bool AutoShowAreaBoundSyncshellConsent { get; set; } = true;
+    /// <summary>Area-bound syncshells this client paused automatically while
+    /// the user was outside their bounds. Persisted so the pause can be lifted
+    /// again after a restart once the user re-enters the area.</summary>
+    public HashSet<string> AreaBoundAutoPausedSyncshells { get; set; } = [];
     
     // City syncshell settings
     public bool EnableCitySyncshellJoinRequests { get; set; } = true;
     public bool HasSeenCitySyncshellExplanation { get; set; } = false;
     public bool HasSeenSyncshellSettings { get; set; } = false;
+    public bool HasSeenSupporterSection { get; set; } = false;
     
     public bool ShowTransferBars { get; set; } = true;
     public bool ShowTransferWindow { get; set; } = false;
@@ -86,6 +91,19 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ShowSpheneIcon { get; set; } = true;
     public bool HideSpheneIconInGpose { get; set; } = true;
     public bool LockSpheneIcon { get; set; } = false;
+    /// <summary>Show the notification bubble next to the floating icon when
+    /// requests, transfers or updates are pending.</summary>
+    public bool ShowIconNotificationBubble { get; set; } = true;
+
+    /// <summary>Application-wide layout density override · Auto adapts to each
+    /// window's size, the other modes pin Compact/Balanced/Comfortable.</summary>
+    public LayoutDensityMode LayoutDensity { get; set; } = LayoutDensityMode.Auto;
+
+    /// <summary>
+    /// One-shot notification ids the user already saw · server info /
+    /// seasonal notices land in the inbox once, not on every restart.
+    /// </summary>
+    public List<string> SeenInboxNotificationIds { get; set; } = new();
     public int IconEventExpirySeconds { get; set; } = 60;
 
     // Per-event-type durations (seconds, 0 = never expire until clicked)
@@ -221,6 +239,8 @@ public class SpheneConfig : ISpheneConfiguration
     public string LastSeenVersionChangelog { get; set; } = string.Empty;
     public string LastSeenNewOptionsTag { get; set; } = string.Empty;
     public List<string> SeenNewOptionsTags { get; set; } = new();
+    public Dictionary<string, DateTime> ReleaseSeenDates { get; set; } = new(StringComparer.Ordinal);
+    public List<string> BlockedUserUids { get; set; } = new();
     public string ReleaseChangelogUrl { get; set; } = string.Empty;
     public bool ShowTestBuildChangelogs { get; set; } = false;
     public bool ShowTestBuildUpdates { get; set; } = false;
@@ -238,7 +258,8 @@ public class SpheneConfig : ISpheneConfiguration
 
     // Supporter Nameplate Settings
     public bool ShowSupporterNameplate { get; set; } = true;
-    public string SupporterSymbolChar { get; set; } = "✦";
+    public string SupporterSymbolChar { get; set; } = string.Empty;
+    public bool AutoLodestoneAvatarApplied { get; set; } = false;
     public SupporterSymbolPosition SupporterSymbolPosition { get; set; } = SupporterSymbolPosition.Left;
     public bool SupporterTextEnabled { get; set; } = false;
     public string SupporterLabelText { get; set; } = "[Supporter]";
@@ -256,18 +277,58 @@ public class SpheneConfig : ISpheneConfiguration
     public uint SupporterIconLabelColor { get; set; } = 0xFF40BEFFu;
     public bool SupporterIconLabelEdgeEnabled { get; set; } = true;
     public uint SupporterIconLabelEdgeColor { get; set; } = 0xFF000000u;
+    public bool SupporterNameplateDepthOcclusion { get; set; } = false;
+    public bool SupporterNameplateGpuOcclusion { get; set; } = true;
+    public bool SupporterNameplateDebugOverlay { get; set; } = false;
+    public bool SupporterNameplateDebugBands { get; set; } = true;
+    public bool SupporterNameplateDebugQuads { get; set; } = true;
+    public bool SupporterNameplateDebugHudQuads { get; set; } = true;
+    public bool SupporterNameplateDebugBlock { get; set; } = false;
+    public bool SupporterNameplateDebugAnchors { get; set; } = false;
+    public bool SupporterNameplateDebugLabels { get; set; } = false;
+    public bool SupporterNameplateDebugInfoWindow { get; set; } = false;
+    public float SupporterNameplateTuneOffX { get; set; } = -0.7f;
+    public float SupporterNameplateTuneOffY { get; set; } = 1.9f;
+    public float SupporterNameplateTuneNameOffX { get; set; } = 0f;
+    public float SupporterNameplateTuneNameOffY { get; set; } = -0.1f;
+    public float SupporterNameplateTuneNameLineOffX { get; set; } = 0f;
+    public float SupporterNameplateTuneNameLineOffY { get; set; } = 1.9f;
+    public List<SupporterNameplateDistancePreset> SupporterNameplateDistancePresets { get; set; } = new();
+    public float SupporterNameplateTunePitchMul { get; set; } = 1.03f;
+    public float SupporterNameplateTuneAdvanceMul { get; set; } = 0.999f;
+    public float SupporterNameplateTuneGlyphPadX { get; set; } = 0f;
+    public float SupporterNameplateTuneGlyphPadY { get; set; } = 0f;
+    public bool SupporterNameplateTestRect { get; set; } = false;
+    public bool SupporterNameplateTestRectSelfMask { get; set; } = false;
+    public uint SupporterNameplateTestRectColor { get; set; } = 0xCCFF00FFu;
+    public int SupporterNameplateTestRectWidth { get; set; } = 195;
+    public int SupporterNameplateTestRectHeight { get; set; } = 97;
+    public int SupporterNameplateIconMaskScalePercent { get; set; } = 100;
+    public int SupporterNameplateGfdMaskScalePercent { get; set; } = 74;
+    public int SupporterNameplateGfdMaskOffsetX { get; set; } = -2;
+    public int SupporterNameplateGfdMaskOffsetY { get; set; } = 1;
+    public bool SupporterNameplateIconOverlay { get; set; } = true;
+    public float SupporterNameplateAnchorExtrapolate { get; set; } = 0f;
+    // the supporter's chosen nameplate effect - published inside the synced
+    // supporter style; empty disables it
+    public string SupporterNameplateFxId { get; set; } = string.Empty;
+    // gates every recurring nameplate diagnostic log (tick trace, icon node
+    // captures, inline icon outcomes, startup gate signatures)
+    public bool SupporterNameplateDebugLog { get; set; } = false;
+    // writes sampled icon texture pages and per-icon regions as PNGs into the
+    // plugin config dir - off by default, it is a disk-writing diagnostic
+    public bool SupporterNameplateIconDump { get; set; } = false;
+    // captures HUD nodes against the whole screen instead of the element
+    // bound - debug-only view of every emitted window/overlay mask
+    public bool SupporterNameplateHudFullBound { get; set; } = false;
+    // multi-part nine-grid cell mapping candidate - 0 row-major, 1 corners
+    // first, 2 corners then sides, 3 column-major; diagnostic switch
+    public int SupporterNameplateHudNineOrder { get; set; } = 0;
+    // bitmask of HUD depth layers included in the capture - bits 0-12 are the
+    // game's draw layers (each drawn in a different debug-quad color), bit 13
+    // the docked/hosted linked-unit group; all on by default
+    public int SupporterNameplateHudLayerMask { get; set; } = 0x3FFF;
+    public bool SupporterNameplateEdgeMask { get; set; } = false;
+    public int SupporterIconSizePercent { get; set; } = 150;
 
-}
-
-public enum SupporterSymbolPosition
-{
-    Left = 0,
-    Right = 1,
-    Both = 2
-}
-
-public enum SupporterLabelOrder
-{
-    SymbolThenText = 0,
-    TextThenSymbol = 1
 }

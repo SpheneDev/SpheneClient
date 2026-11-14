@@ -6,6 +6,7 @@ using Sphene.API.Data;
 using Sphene.API.Data.Extensions;
 using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Group;
+using Sphene.API.Dto.User;
 using Sphene.PlayerData.Pairs;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration.Models;
@@ -149,14 +150,23 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             {
                 if (_areaBoundSyncshells.TryGetValue(syncshellId, out var syncshell) && !IsLocationInBounds(syncshell, newLocation))
                 {
-                    if (await ShouldLeaveSyncshell(syncshellId).ConfigureAwait(false))
+                    var (decision, group) = await EvaluateAreaLeave(syncshellId).ConfigureAwait(false);
+                    if (decision == AreaLeaveDecision.Leave)
                     {
                         syncshellsToLeave.Add(syncshellId);
                     }
+                    else if (decision == AreaLeaveDecision.RetainAsStaff && group != null)
+                    {
+                        await SuspendAreaSync(group).ConfigureAwait(false);
+                    }
                     else
                     {
-                        _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} - user is the owner", syncshellId);
+                        _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} - exempt membership", syncshellId);
                     }
+                }
+                else
+                {
+                    await ResumeAreaSync(syncshellId).ConfigureAwait(false);
                 }
             }
 
@@ -304,36 +314,127 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
     }
 
-    private async Task<bool> ShouldLeaveSyncshell(string syncshellId)
+    private enum AreaLeaveDecision
     {
-        bool shouldLeave = true;
+        Leave,
+        Retain,
+        RetainAsStaff,
+    }
+
+    private async Task<(AreaLeaveDecision Decision, GroupFullInfoDto? Group)> EvaluateAreaLeave(string syncshellId)
+    {
         try
         {
             var allGroups = await _apiController.GroupsGetAll().ConfigureAwait(false);
             var groupInfo = allGroups.FirstOrDefault(g => string.Equals(g.Group.GID, syncshellId, StringComparison.Ordinal));
             if (groupInfo == null)
             {
-                return true;
+                return (AreaLeaveDecision.Leave, null);
             }
-
-            var isOwner = string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
-            if (isOwner)
-            {
-                return false;
-            }
-
-            var isModerator = groupInfo.GroupUserInfo.IsModerator();
-            var isPinned = groupInfo.GroupUserInfo.IsPinned();
-            if (isModerator || isPinned)
-            {
-                return false;
-            }
+            return (await GetAreaExemption(groupInfo).ConfigureAwait(false), groupInfo);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error checking ownership for syncshell {SyncshellId}", syncshellId);
+            _logger.LogError(ex, "Error checking auto-leave exemption for syncshell {SyncshellId}, not leaving on uncertainty", syncshellId);
+            return (AreaLeaveDecision.Retain, null);
         }
-        return shouldLeave;
+    }
+
+    private async Task<AreaLeaveDecision> GetAreaExemption(GroupFullInfoDto groupInfo)
+    {
+        var isOwner = string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
+        if (isOwner || groupInfo.GroupUserInfo.IsModerator() || groupInfo.GroupUserInfo.IsPinned())
+        {
+            return AreaLeaveDecision.Retain;
+        }
+        return await IsAssignedStaffAsync(groupInfo).ConfigureAwait(false)
+            ? AreaLeaveDecision.RetainAsStaff
+            : AreaLeaveDecision.Leave;
+    }
+
+    /// <summary>Authoritative staff check. The server flags assigned staff on
+    /// the GroupsGetAll payload; the community staff projection is the fallback
+    /// for servers predating that flag (reachable while the pair still exists).</summary>
+    private async Task<bool> IsAssignedStaffAsync(GroupFullInfoDto groupInfo)
+    {
+        if (groupInfo.GroupUserInfo.IsStaff())
+        {
+            return true;
+        }
+        if (groupInfo.GroupPairUserInfos.TryGetValue(_apiController.UID, out var info) && info.IsStaff())
+        {
+            return true;
+        }
+        try
+        {
+            var community = await _apiController.GroupGetCommunity(new GroupDto(groupInfo.Group)).ConfigureAwait(false);
+            return community?.StaffAssignments?.Any(a =>
+                string.Equals(a.UserUID, _apiController.UID, StringComparison.Ordinal)) == true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Staff assignment check failed for syncshell {SyncshellId}", groupInfo.Group.GID);
+            return false;
+        }
+    }
+
+    /// <summary>Suspends appearance sync for a retained staff shell while the
+    /// user is outside its bounds. The pause rides the normal group preferred
+    /// permissions, so it also severs sync for future joiners; it is tracked in
+    /// config so a restart can restore it.</summary>
+    private async Task SuspendAreaSync(GroupFullInfoDto groupInfo)
+    {
+        var syncshellId = groupInfo.Group.GID;
+        try
+        {
+            var autoPaused = _configService.Current.AreaBoundAutoPausedSyncshells;
+            if (autoPaused.Contains(syncshellId)) return;
+            var group = _pairManager.Groups.Values.FirstOrDefault(g =>
+                string.Equals(g.Group.GID, syncshellId, StringComparison.Ordinal));
+            var current = group?.GroupUserPermissions ?? groupInfo.GroupUserPermissions;
+            if (current.IsPaused())
+            {
+                _logger.LogDebug("Not auto-pausing {SyncshellId} - user paused the syncshell themselves", syncshellId);
+                return;
+            }
+            current.SetPaused(true);
+            await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal),
+                new Dictionary<string, GroupUserPreferredPermissions>(StringComparer.Ordinal)
+                { [syncshellId] = current })).ConfigureAwait(false);
+            autoPaused.Add(syncshellId);
+            _configService.Save();
+            _logger.LogDebug("Suspended appearance sync for staff shell {SyncshellId} while outside bounds", syncshellId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to suspend area-bound sync for {SyncshellId}", syncshellId);
+        }
+    }
+
+    /// <summary>Lifts a suspension this service created once the user re-enters
+    /// the bound area or the shell stops being area-bound. User-initiated
+    /// pauses are never touched.</summary>
+    private async Task ResumeAreaSync(string syncshellId)
+    {
+        try
+        {
+            var autoPaused = _configService.Current.AreaBoundAutoPausedSyncshells;
+            if (!autoPaused.Remove(syncshellId)) return;
+            _configService.Save();
+            var group = _pairManager.Groups.Values.FirstOrDefault(g =>
+                string.Equals(g.Group.GID, syncshellId, StringComparison.Ordinal));
+            if (group == null || !group.GroupUserPermissions.IsPaused()) return;
+            var perms = group.GroupUserPermissions;
+            perms.SetPaused(false);
+            await _apiController.SetBulkPermissions(new(new(StringComparer.Ordinal),
+                new Dictionary<string, GroupUserPreferredPermissions>(StringComparer.Ordinal)
+                { [syncshellId] = perms })).ConfigureAwait(false);
+            _logger.LogDebug("Resumed appearance sync for {SyncshellId} after re-entering bounds", syncshellId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resume area-bound sync for {SyncshellId}", syncshellId);
+        }
     }
 
     public async Task JoinAreaBoundSyncshell(string syncshellId, bool acceptRules = false, int rulesVersion = 0)
@@ -374,8 +475,21 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
     }
 
+    /// <summary>Explicit leave (context menu, consent reset): drops the
+    /// staff affiliation first so the user re-joins as a fresh member.
+    /// Auto-leave on area exit goes through <see cref="LeaveSyncshell"/>
+    /// directly and intentionally keeps the assignment.</summary>
     public async Task LeaveAreaSyncshell(string syncshellId)
     {
+        try
+        {
+            await _apiController.GroupRevokeOwnStaffAffiliation(
+                new GroupDto(new GroupData(syncshellId))).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Staff affiliation revoke failed for {SyncshellId} - leaving anyway", syncshellId);
+        }
         await LeaveSyncshell(syncshellId).ConfigureAwait(false);
     }
 
@@ -396,6 +510,12 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             _logger.LogDebug("Leaving area-bound syncshell {SyncshellId}. Currently joined before removal: [{Joined}]", 
                 syncshellId, joinedBefore);
             await _apiController.GroupLeave(new GroupDto(new GroupData(syncshellId))).ConfigureAwait(false);
+
+            // Membership ended - drop any suspension bookkeeping for this shell.
+            if (_configService.Current.AreaBoundAutoPausedSyncshells.Remove(syncshellId))
+            {
+                _configService.Save();
+            }
 
             bool removed;
             _joinedSyncshellsLock.Enter();
@@ -615,14 +735,14 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             }
             _logger.LogDebug("Successfully joined area-bound syncshell {SyncshellId}", message.JoinResponse.Group.GID);
             
-            // Check if there's a welcome page for this group that should be shown on area-bound join
+            // Check if there's a syncshell community page for this group that should be shown on area-bound join
             _ = Task.Run(async () =>
             {
                 try
                 {
-                    var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(message.JoinResponse.Group)).ConfigureAwait(false);
-                     // Check if welcome page should be shown based on user preference
-                if (welcomePage != null && welcomePage.IsEnabled && welcomePage.ShowOnAreaBoundJoin)
+                    var community = await _apiController.GroupGetCommunity(new GroupDto(message.JoinResponse.Group)).ConfigureAwait(false);
+                     // Check whether the community popup should be shown
+                if (community?.Profile is { IsEnabled: true, ShowOnAreaBoundJoin: true })
                 {
                     // Check user preference for showing area-bound welcome messages
                     var config = _configService.Current;
@@ -650,8 +770,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                         
                         if (groupFullInfo != null)
                         {
-                            _logger.LogDebug("Publishing OpenWelcomePageMessage with GroupFullInfo: {GroupAliasOrGID}", groupFullInfo.Group.AliasOrGID);
-                            Mediator.Publish(new OpenWelcomePageMessage(welcomePage, groupFullInfo));
+                            _logger.LogDebug("Publishing OpenSyncshellCommunityMessage with GroupFullInfo: {GroupAliasOrGID}", groupFullInfo.Group.AliasOrGID);
+                            Mediator.Publish(new OpenSyncshellCommunityMessage(community, groupFullInfo, JoinPopup: true));
                         }
                         else
                         {
@@ -665,7 +785,7 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                                 new GroupPairUserInfo(), // Empty user info
                                 new Dictionary<string, GroupPairUserInfo>(StringComparer.Ordinal) // Empty pair user infos
                             );
-                            Mediator.Publish(new OpenWelcomePageMessage(welcomePage, fallbackGroupFullInfo));
+                            Mediator.Publish(new OpenSyncshellCommunityMessage(community, fallbackGroupFullInfo, JoinPopup: true));
                         }
                     }
                     else
@@ -837,7 +957,8 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
                 continue;
             }
 
-            if (await ShouldLeaveSyncshell(syncshellId).ConfigureAwait(false))
+            var (decision, _) = await EvaluateAreaLeave(syncshellId).ConfigureAwait(false);
+            if (decision == AreaLeaveDecision.Leave)
             {
                 await LeaveSyncshell(syncshellId).ConfigureAwait(false);
                 _notifiedSyncshells.Remove(syncshellId);
@@ -845,7 +966,13 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             }
             else
             {
-                _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} because user is owner", syncshellId);
+                // The shell is a permanent shell now - lift a suspension we
+                // placed for area-bound staff retention.
+                if (decision == AreaLeaveDecision.RetainAsStaff)
+                {
+                    await ResumeAreaSync(syncshellId).ConfigureAwait(false);
+                }
+                _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} - exempt membership", syncshellId);
             }
         }
     }
@@ -869,18 +996,31 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
             {
                 foreach (var groupInfo in currentAreaBoundMemberships)
                 {
-                    if (_areaBoundSyncshells.TryGetValue(groupInfo.Group.GID, out var syncshell) && !IsLocationInBounds(syncshell, _lastLocation.Value))
+                    if (!_areaBoundSyncshells.TryGetValue(groupInfo.Group.GID, out var syncshell))
                     {
-                        bool isOwner = string.Equals(groupInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
-                        if (!isOwner)
+                        continue;
+                    }
+
+                    if (!IsLocationInBounds(syncshell, _lastLocation.Value))
+                    {
+                        var decision = await GetAreaExemption(groupInfo).ConfigureAwait(false);
+                        if (decision == AreaLeaveDecision.Leave)
                         {
                             syncshellsToLeave.Add(groupInfo.Group.GID);
                             _logger.LogDebug("User is no longer in valid area for syncshell {SyncshellId}, will leave", groupInfo.Group.GID);
                         }
+                        else if (decision == AreaLeaveDecision.RetainAsStaff)
+                        {
+                            await SuspendAreaSync(groupInfo).ConfigureAwait(false);
+                        }
                         else
                         {
-                            _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} after reconnection - user is the owner", groupInfo.Group.GID);
+                            _logger.LogDebug("Skipping auto-leave for syncshell {SyncshellId} after reconnection - exempt membership", groupInfo.Group.GID);
                         }
+                    }
+                    else
+                    {
+                        await ResumeAreaSync(groupInfo.Group.GID).ConfigureAwait(false);
                     }
                 }
 
@@ -1008,6 +1148,20 @@ public class AreaBoundSyncshellService : DisposableMediatorSubscriberBase, IHost
         }
 
         return false;
+    }
+
+    /// <summary>Area-bound shells joinable right here - not joined yet and
+    /// the current location falls inside their bounds.</summary>
+    public List<AreaBoundSyncshellDto> GetAvailableAreaSyncshells()
+    {
+        if (!_hasRefreshedAreaSyncshells || _lastLocation == null)
+        {
+            return [];
+        }
+        return _areaBoundSyncshells.Values
+            .Where(syncshell => !_currentlyJoinedAreaSyncshells.Contains(syncshell.GID)
+                               && IsLocationInBounds(syncshell, _lastLocation.Value))
+            .ToList();
     }
 
     public void TriggerAreaSyncshellSelection()

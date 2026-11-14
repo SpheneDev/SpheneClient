@@ -82,7 +82,10 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
     private void DrawExplanationContent()
     {
         // Header
-        SpheneUI.Text.PageHeader($"Welcome to {_currentRequest!.CityName} City Syncshell!");
+        SpheneUI.Layout.PageHeader($"Welcome to {_currentRequest!.CityName} City Syncshell!", "cityshell", () =>
+        {
+            SpheneUI.Text.MutedWrapped("This city runs an area-bound syncshell - it pairs automatically while you are inside its bounds.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
         // Explanation text
         SpheneUI.Text.Wrapped("City Syncshells are public communication channels that allow players in the same city to chat and coordinate activities together.");

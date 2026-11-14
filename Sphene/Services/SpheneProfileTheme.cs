@@ -17,6 +17,9 @@ public record SpheneProfileTheme(uint? Accent, uint? BannerTop, uint? BannerBott
     ProfileRowFx CardHover = ProfileRowFx.None, ProfileRowFx CardIdle = ProfileRowFx.None,
     bool CardShimmer = true)
 {
+    /// <summary>List-row effects every row carries - always on, not user-togglable.</summary>
+    public const ProfileRowFx RequiredRowFx = ProfileRowFx.Pulse | ProfileRowFx.Glow;
+
     public static readonly SpheneProfileTheme Default = new(null, null, null);
 
     /// <summary>Parses the stored JSON theme; returns <see cref="Default"/> on any failure.</summary>
@@ -33,9 +36,9 @@ public record SpheneProfileTheme(uint? Accent, uint? BannerTop, uint? BannerBott
                 // prefer the full flag list; older clients only ever see the
                 // first flag's name in the legacy keys
                 ParseEffect(obj["rowHoverFx"]?.Value<string>()
-                    ?? obj["rowHover"]?.Value<string>(), ProfileRowFx.Glow),
+                    ?? obj["rowHover"]?.Value<string>(), ProfileRowFx.Glow) | RequiredRowFx,
                 ParseEffect(obj["rowIdleFx"]?.Value<string>()
-                    ?? obj["rowIdle"]?.Value<string>(), ProfileRowFx.None),
+                    ?? obj["rowIdle"]?.Value<string>(), ProfileRowFx.None) | RequiredRowFx,
                 obj["bannerTopOver"]?.Value<bool>() ?? false,
                 obj["bannerBottomOver"]?.Value<bool>() ?? false,
                 ParseEffect(obj["cardHoverFx"]?.Value<string>()
@@ -56,8 +59,8 @@ public record SpheneProfileTheme(uint? Accent, uint? BannerTop, uint? BannerBott
         if (Accent.HasValue) obj["accent"] = $"#{Accent.Value:X8}";
         if (BannerTop.HasValue) obj["bannerTop"] = $"#{BannerTop.Value:X8}";
         if (BannerBottom.HasValue) obj["bannerBottom"] = $"#{BannerBottom.Value:X8}";
-        var hover = RowHover & ProfileRowFx.HoverMask;
-        var idle = RowIdle & ProfileRowFx.IdleMask;
+        var hover = (RowHover | RequiredRowFx) & ProfileRowFx.HoverMask;
+        var idle = (RowIdle | RequiredRowFx) & ProfileRowFx.IdleMask;
         // legacy keys carry only the first flag's name so older clients render
         // a sensible single effect; the full combination rides in the new keys
         if (hover != ProfileRowFx.Glow) obj["rowHover"] = FirstFlagName(hover);

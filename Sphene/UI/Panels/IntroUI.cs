@@ -33,7 +33,9 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private readonly ServerConfigurationManager _serverConfigurationManager;
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly UiSharedService _uiShared;
+    private readonly PluginInstallerService _pluginInstaller;
     private int _currentLanguage;
+    private readonly string[] _languageItems = ["English", "Deutsch", "Français"];
     private bool _readFirstPage;
 
     private string _secretKey = string.Empty;
@@ -41,12 +43,16 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private Task? _timeoutTask;
     private string[]? _tosParagraphs;
     private bool _useLegacyLogin = false;
-
+    private readonly SupporterNameplateStudioUi _supporterStudio;
     // ShrinkU integration dependencies
     
 
     // Page navigation flag
     private bool _showShrinkUPage = false;
+    private int? _viewPage;
+    private int _lastPage = -1;
+    private bool _resetPageScroll;
+    private bool _resetTosScroll;
     private readonly ConfigBackupService _configBackupService;
     private readonly FileDialogManager _fileDialogManager;
     private readonly ShrinkUConfigService _shrinkUConfigService;
@@ -60,18 +66,18 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private string? _importResultMessage = null;
     private bool _importResultIsError = false;
 
-    private const float BUTTON_HEIGHT = 32.0f;
-    private const float HEADER_HEIGHT = 32.0f;
-    private const float BUTTON_AREA_HEIGHT = 80.0f; // Increased to accommodate info boxes and multiple elements
+    private const float BUTTON_AREA_RESERVE = 64.0f;
 
-    public IntroUi(ILogger<IntroUi> logger, UiSharedService uiShared, SpheneConfigService configService,
+    public IntroUi(ILogger<IntroUi> logger, UiSharedService uiShared, PluginInstallerService pluginInstaller, SpheneConfigService configService,
         CacheMonitor fileCacheManager, ServerConfigurationManager serverConfigurationManager, SpheneMediator spheneMediator,
         PerformanceCollectorService performanceCollectorService, DalamudUtilService dalamudUtilService,
         ShrinkUHostService shrinkuHostService, ShrinkUConfigService shrinkuConfig,
         ConversionUI shrinkuConversion, FirstRunSetupUI shrinkuFirstRun,
-        ConfigBackupService configBackupService, FileDialogManager fileDialogManager) : base(logger, spheneMediator, "Sphene Setup", performanceCollectorService)
+        ConfigBackupService configBackupService, FileDialogManager fileDialogManager,
+        SupporterNameplateStudioUi supporterStudio) : base(logger, spheneMediator, "Sphene Setup", performanceCollectorService)
     {
         _uiShared = uiShared;
+        _pluginInstaller = pluginInstaller;
         _configService = configService;
         _cacheMonitor = fileCacheManager;
         _serverConfigurationManager = serverConfigurationManager;
@@ -83,14 +89,15 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         _configBackupService = configBackupService;
         _fileDialogManager = fileDialogManager;
         _shrinkUConfigService = shrinkuConfig;
+        _supporterStudio = supporterStudio;
         IsOpen = false;
         ShowCloseButton = false;
         RespectCloseHotkey = false;
 
         SizeConstraints = new WindowSizeConstraints()
         {
-            MinimumSize = new Vector2(700, 560),
-            MaximumSize = new Vector2(700, 600),
+            MinimumSize = new Vector2(720, 640),
+            MaximumSize = new Vector2(720, 640),
         };
 
         GetToSLocalization();
@@ -103,58 +110,77 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         });
     }
 
-    private int _prevIdx = -1;
+    /// <summary>Setup back/forward nav lives in the custom title bar.</summary>
+    protected override IReadOnlyList<SpheneUI.Chrome.TitleBarButton>? ChromeRightButtons =>
+    [
+        new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.ChevronLeft, "Previous step", () =>
+        {
+            var page = CurrentIntroPage();
+            if (page > 0) _viewPage = page - 1;
+        }),
+        new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.ChevronRight, "Next step", () =>
+        {
+            var page = CurrentIntroPage();
+            var statePage = StatePage();
+            if (page < statePage) _viewPage = page + 1 < statePage ? page + 1 : null;
+        }),
+    ];
 
     protected override void DrawInternal()
     {
         if (_uiShared.IsInGpose) return;
 
-        SpheneUI.Text.PageHeader("Sphene Network Setup");
+        var page = CurrentIntroPage();
+        if (page != _lastPage)
+        {
+            _lastPage = page;
+            _resetPageScroll = true;
+            _resetTosScroll = true;
+        }
+        SpheneUI.Layout.PageHeader("Sphene Network Setup", "intro", () =>
+        {
+            SpheneUI.Text.MutedWrapped("First-run setup - walks you through the essentials before you start syncing.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
-        // Calculate available content height (window height minus header and button area)
-        var windowHeight = ImGui.GetWindowSize().Y;
-        var headerHeight = HEADER_HEIGHT + 10; // Header + spacing
-        var contentHeight = windowHeight - headerHeight - BUTTON_AREA_HEIGHT - 20; // Extra margin
+        DrawSetupSteps(page);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        SpheneUI.Layout.Separator();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        // Content fills down to the sticky button strip · reserve covers
+        // separator + spacing + the 38-scaled button + bottom padding
+        var contentHeight = SpheneUI.Layout.FillToViewBottomHeight(BUTTON_AREA_RESERVE * SpheneUI.Scale);
 
         var contentBegun = SpheneUI.Layout.BeginScrollArea("ContentArea", new Vector2(0, contentHeight));
         if (contentBegun)
         {
-            if (_showShrinkUPage)
+            if (_resetPageScroll)
             {
-                DrawShrinkUPageContent();
+                ImGui.SetScrollY(0);
+                _resetPageScroll = false;
             }
-            else if (!_configService.Current.AcceptedAgreement && !_readFirstPage)
+            switch (page)
             {
-                DrawWelcomePageContent();
-            }
-            else if (!_configService.Current.AcceptedAgreement && _readFirstPage)
-            {
-                DrawAgreementPageContent();
-            }
-            else if (_configService.Current.AcceptedAgreement
-                     && (string.IsNullOrEmpty(_configService.Current.CacheFolder)
-                         || !_configService.Current.InitialScanComplete
-                         || !Directory.Exists(_configService.Current.CacheFolder)))
-            {
-                DrawCacheSetupPageContent();
-            }
-            else if (_configService.Current.AcceptedAgreement
-                     && !string.IsNullOrEmpty(_configService.Current.CacheFolder)
-                     && _configService.Current.InitialScanComplete
-                     && Directory.Exists(_configService.Current.CacheFolder)
-                     && !_configService.Current.HasSeenSyncshellSettings)
-            {
-                _showShrinkUPage = true;
-                DrawShrinkUPageContent();
-            }
-            else if (!_uiShared.ApiController.ServerAlive)
-            {
-                DrawNetworkAuthenticationPageContent();
-            }
-            else
-            {
-                Mediator.Publish(new SwitchToMainUiMessage());
-                IsOpen = false;
+                case 0:
+                    DrawWelcomePageContent();
+                    break;
+                case 1:
+                    DrawAgreementPageContent();
+                    break;
+                case 2:
+                    DrawCacheSetupPageContent();
+                    break;
+                case 3:
+                    _showShrinkUPage = true;
+                    DrawShrinkUPageContent();
+                    break;
+                case 4:
+                    DrawNetworkAuthenticationPageContent();
+                    break;
+                default:
+                    Mediator.Publish(new SwitchToMainUiMessage());
+                    IsOpen = false;
+                    break;
             }
         }
         SpheneUI.Layout.EndScrollArea();
@@ -162,9 +188,83 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         // Sticky button area at bottom
         SpheneUI.Layout.Separator();
         SpheneUI.Layout.VerticalSpace();
-        DrawStickyButtons();
+        DrawStickyButtons(page);
 
         DrawImportBackupModal();
+        _supporterStudio.DrawUnlockWindow();
+    }
+
+    /// <summary>The displayed page - an explicit back-navigation view wins over the state-driven one.</summary>
+    private int CurrentIntroPage() => _viewPage ?? StatePage();
+
+    /// <summary>Wizard page index derived from config state - the furthest point reached.</summary>
+    private int StatePage()
+    {
+        if (_showShrinkUPage) return 3;
+        if (!_configService.Current.AcceptedAgreement) return _readFirstPage ? 1 : 0;
+        if (string.IsNullOrEmpty(_configService.Current.CacheFolder)
+            || !_configService.Current.InitialScanComplete
+            || !Directory.Exists(_configService.Current.CacheFolder)) return 2;
+        if (!_configService.Current.HasSeenSyncshellSettings) return 3;
+        if (!_uiShared.ApiController.ServerAlive) return 4;
+        return 5;
+    }
+
+    /// <summary>Forward CTA on a viewed page: step the view forward, resume state flow at the frontier.</summary>
+    private void AdvanceOrResume(int page)
+    {
+        _viewPage = page + 1 < StatePage() ? page + 1 : null;
+    }
+
+    /// <summary>Compact progress row: dots connected by a hairline, pulsing ring on the active step.</summary>
+    private static void DrawSetupSteps(int current)
+    {
+        var scale = SpheneUI.Scale;
+        var dl = ImGui.GetWindowDrawList();
+        var labels = new[] { "Welcome", "Agreement", "Archive", "Extras", "Connect" };
+        var pos = ImGui.GetCursorScreenPos();
+        var avail = MathF.Max(1f, ImGui.GetContentRegionAvail().X);
+        var seg = avail / labels.Length;
+        var dotR = 4.5f * scale;
+        var cy = pos.Y + dotR + 2f * scale;
+        var accent = SpheneUI.Palette.SpheneGold;
+        var muted = SpheneUI.Colors.TextMuted;
+        var border = SpheneUI.Colors.Border;
+        var x0 = pos.X + seg * 0.5f;
+        var x1 = pos.X + seg * (labels.Length - 0.5f);
+
+        dl.AddLine(new Vector2(x0, cy), new Vector2(x1, cy),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(muted, 0.30f)), 1.5f * scale);
+        if (current > 0)
+        {
+            dl.AddLine(new Vector2(x0, cy), new Vector2(pos.X + seg * current + seg * 0.5f, cy),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.80f)), 1.5f * scale);
+        }
+
+        var pulse = 0.5f + 0.5f * MathF.Sin((float)ImGui.GetTime() * 3f);
+        for (var i = 0; i < labels.Length; i++)
+        {
+            var cx = pos.X + seg * i + seg * 0.5f;
+            var done = i < current;
+            var cur = i == current;
+            var fill = done || cur ? accent : SpheneUI.Colors.FrameBg;
+            dl.AddCircleFilled(new Vector2(cx, cy), dotR, SpheneUI.ColorUtils.ToU32(fill));
+            if (cur)
+            {
+                dl.AddCircle(new Vector2(cx, cy), dotR + 3f * scale,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.35f + 0.40f * pulse)),
+                    0, 1.5f * scale);
+            }
+            else
+            {
+                dl.AddCircle(new Vector2(cx, cy), dotR,
+                    SpheneUI.ColorUtils.ToU32(done ? accent : border), 0, 1.2f * scale);
+            }
+            var tw = ImGui.CalcTextSize(labels[i]).X;
+            dl.AddText(new Vector2(cx - tw * 0.5f, cy + dotR + 4f * scale),
+                SpheneUI.ColorUtils.ToU32(cur ? accent : muted), labels[i]);
+        }
+        ImGui.Dummy(new Vector2(0f, dotR * 2f + ImGui.GetTextLineHeight() + 10f * scale));
     }
 
     private void DrawWelcomePageContent()
@@ -186,7 +286,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow, "Important");
         });
 
-        _uiShared.DrawOtherPluginState();
+        _pluginInstaller.DrawOtherPluginState();
 
         SpheneUI.Layout.VerticalSpace();
         SpheneUI.Layout.SectionCard(() =>
@@ -194,9 +294,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Text.SectionHeader("Restore from Backup", icon: Dalamud.Interface.FontAwesomeIcon.FileImport);
             SpheneUI.Text.ColoredWrapped("Have a previous Sphene backup? Restore all your settings, pairs, and secret keys instantly.", ImGuiColors.DalamudGrey);
             SpheneUI.Layout.VerticalSpace();
-            if (SpheneUI.Controls.HeroButton("intro-import-backup", "Import Config Backup",
-                    Dalamud.Interface.FontAwesomeIcon.FileImport, new Vector2(200f, BUTTON_HEIGHT),
-                    new Vector4(0.35f, 0.55f, 0.85f, 1.0f)))
+            if (SpheneUI.Controls.PrimaryButton("Import Config Backup",
+                    Dalamud.Interface.FontAwesomeIcon.FileImport))
             {
                 _showImportModal = true;
                 _importPassword = string.Empty;
@@ -232,46 +331,61 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private void DrawAgreementPageContent()
     {
         
-            // Language selector in top right
-            ImGui.SetCursorPosX(ImGui.GetWindowContentRegionMax().X - 120);
-            SpheneUI.Text.Plain(Strings.ToS.LanguageLabel);
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(80);
-            if (ImGui.Combo("##language", ref _currentLanguage, _languages.Keys.ToArray(), _languages.Count))
+            var headerMin = ImGui.GetCursorScreenPos();
+            SpheneUI.Text.SectionHeader(Strings.ToS.AgreementLabel);
+            var afterHeader = ImGui.GetCursorScreenPos();
+
+            // language combo overlaid right into the header's own line - the
+            // control is self-explanatory, no "Language" label needed
+            var comboW = 140f * SpheneUI.Scale;
+            var rightX = afterHeader.X + ImGui.GetContentRegionAvail().X;
+            var comboY = MathF.Max(headerMin.Y, headerMin.Y + (ImGui.GetTextLineHeight() - ImGui.GetFrameHeight()) * 0.5f);
+            ImGui.SetCursorScreenPos(new Vector2(rightX - comboW, comboY));
+            ImGui.SetNextItemWidth(comboW);
+            if (SpheneUI.Controls.LabeledCombo("##intro-lang",
+                    ref _currentLanguage, _languageItems, _languageItems.Length))
             {
                 GetToSLocalization(_currentLanguage);
             }
-            
-            ImGui.SetCursorPosX(0);
-            SpheneUI.Text.SectionHeader(Strings.ToS.AgreementLabel);
-            
+            ImGui.SetCursorScreenPos(afterHeader);
+
             // Prominent warning
             SpheneUI.Layout.VerticalSpace();
-            var warningText = Strings.ToS.ReadLabel;
-            var warningSize = ImGui.CalcTextSize(warningText);
-            ImGui.SetCursorPosX((ImGui.GetWindowSize().X - warningSize.X) * 0.5f);
-            using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudRed))
-            {
-                ImGui.SetWindowFontScale(1.3f);
-                SpheneUI.Text.Plain(warningText);
-                ImGui.SetWindowFontScale(1.0f);
-            }
-            
+            SpheneUI.Layout.Callout(Strings.ToS.ReadLabel,
+                Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle,
+                ImGuiColors.DalamudRed);
+
             SpheneUI.Layout.Separator();
             SpheneUI.Layout.VerticalSpace();
             
-            // Terms content area without scrollbars
-            using (var child = ImRaii.Child("TermsContent", new Vector2(0, 300), true, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse))
+            // Terms fill the remaining content height · scrollable, padded,
+            // numbered paragraphs so the document reads structured
+            var tosH = SpheneUI.Layout.FillToViewBottomHeight();
+            if (SpheneUI.Layout.BeginScrollArea("TermsContent", new Vector2(0, tosH),
+                    border: true,
+                    contentPadding: new Vector2(14f, 10f) * SpheneUI.Scale))
             {
-                if (child)
+                if (_resetTosScroll)
                 {
-                    foreach (var paragraph in _tosParagraphs!)
+                    ImGui.SetScrollY(0);
+                    _resetTosScroll = false;
+                }
+                var accent = SpheneUI.Palette.SpheneGold;
+                for (var i = 0; i < _tosParagraphs!.Length; i++)
+                {
+                    SpheneUI.Text.Colored($"{i + 1}.", accent);
+                    ImGui.SameLine(0f, 8f * SpheneUI.Scale);
+                    SpheneUI.Text.Wrapped(_tosParagraphs[i]);
+                    if (i < _tosParagraphs.Length - 1)
                     {
-                        SpheneUI.Text.Wrapped(paragraph);
-                        SpheneUI.Layout.VerticalSpace();
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
                     }
                 }
             }
+            SpheneUI.Layout.EndScrollArea();
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Text.ColoredWrapped(Strings.ToS.LastUpdated, ImGuiColors.DalamudGrey3);
     }
 
     private void DrawCacheSetupPageContent()
@@ -350,42 +464,55 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         });
 
         SpheneUI.Layout.VerticalSpace();
-        if (SpheneUI.Controls.HeroButton("intro-join-discord", "Join Discord Community",
-                Dalamud.Interface.FontAwesomeIcon.Users, new Vector2(200f, 50f),
-                new Vector4(0.44f, 0.47f, 0.78f, 1.0f), textScale: 0.5f))
+
+        SpheneUI.Layout.SectionCard(() =>
         {
-            Util.OpenLink("https://discord.gg/GbnwsP2XsF");
-        }
+            SpheneUI.Text.SectionHeader("Community & Support", icon: Dalamud.Interface.FontAwesomeIcon.Users);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+            // brand links fill the card width in thirds · taller for bigger
+            // glyphs · Ko-fi carries the perks half as a joined split button
+            var brandH = 36f * SpheneUI.Scale;
+            var thirdW = (ImGui.GetContentRegionAvail().X - 16f * SpheneUI.Scale) / 3f;
+            if (SpheneBrandIcons.IconTextButton(SpheneBrandIcons.Brand.Discord, "Discord",
+                    "intro-discord", width: thirdW, tooltip: "Open the Sphene Discord community",
+                    height: brandH))
+            {
+                Util.OpenLink("https://discord.gg/GbnwsP2XsF");
+            }
+            ImGui.SameLine(0f, 8f * SpheneUI.Scale);
+
+            var split = SpheneBrandIcons.KofiPerksSplit(thirdW, brandH);
+            if (split.kofi)
+            {
+                Util.OpenLink("https://ko-fi.com/sphenedev");
+            }
+            if (split.perks)
+            {
+                _supporterStudio.OpenUnlockWindow();
+            }
+
+            ImGui.SameLine(0f, 8f * SpheneUI.Scale);
+            if (SpheneBrandIcons.IconTextButton(SpheneBrandIcons.Brand.Sphene, "Sphene",
+                    "intro-sphene", width: thirdW, tooltip: "Open sphene.online",
+                    height: brandH))
+            {
+                Util.OpenLink("https://sphene.online");
+            }
+
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Text.ColoredWrapped(
+                "Ko-fi donations unlock nameplate perks - tap the perks half for the live preview.",
+                ImGuiColors.DalamudGrey3);
+        });
 
         SpheneUI.Layout.VerticalSpace();
 
-        // Network Configuration
-        SpheneUI.Layout.SectionCard(() =>
-        {
-            SpheneUI.Text.SectionHeader("Network Configuration", icon: Dalamud.Interface.FontAwesomeIcon.Cog);
-            
-            int serverIdx = 0;
-
-            serverIdx = _uiShared.DrawServiceSelection(selectOnChange: true, showConnect: false);
-            if (serverIdx != _prevIdx)
-            {
-                _uiShared.ResetOAuthTasksState();
-                _prevIdx = serverIdx;
-            }
-
-            var selectedServer = _serverConfigurationManager.GetServerByIndex(serverIdx);
-            
-            // Force legacy authentication mode by default
-            _useLegacyLogin = true;
-            selectedServer.UseOAuth2 = false;
-            _serverConfigurationManager.Save();
-
-            if (_dalamudUtilService.IsWine)
-            {
-                SpheneUI.Layout.VerticalSpace();
-                ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "IntroWineForceWebSockets");
-            }
-        });
+        // Single canonical server - no selection UI needed; still pin legacy key auth
+        _useLegacyLogin = true;
+        var selectedServer = _serverConfigurationManager.GetServerByIndex(0);
+        selectedServer.UseOAuth2 = false;
+        _serverConfigurationManager.Save();
 
         SpheneUI.Layout.VerticalSpace();
         
@@ -410,6 +537,12 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     SpheneUI.Layout.VerticalSpace();
                     SpheneUI.Layout.Callout("Authentication key may only contain letters A-Z and numbers 2-7.",
                         Dalamud.Interface.FontAwesomeIcon.ExclamationCircle, ImGuiColors.DalamudRed, "Invalid Format");
+                }
+
+                if (_dalamudUtilService.IsWine)
+                {
+                    SpheneUI.Layout.VerticalSpace();
+                    ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "IntroWineForceWebSockets");
                 }
             });
         }
@@ -448,76 +581,74 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         }
     }
 
-    private void DrawStickyButtons()
+    private void DrawStickyButtons(int page)
     {
+        var fullW = new Vector2(-1f, 38f * SpheneUI.Scale);
         var successColor = new Vector4(0.25f, 0.70f, 0.35f, 1.0f);
-        if (!_configService.Current.AcceptedAgreement && !_readFirstPage)
+        switch (page)
         {
-            // Welcome page button
-            if (SpheneUI.Controls.HeroButton("intro-begin-setup", "Begin Setup"))
-            {
-                _readFirstPage = true;
+            case 0:
+                if (SpheneUI.Controls.PrimaryButton("Begin Setup",
+                        Dalamud.Interface.FontAwesomeIcon.Rocket, fullW))
+                {
+                    _readFirstPage = true;
+                    AdvanceOrResume(page);
 #if !DEBUG
-                _timeoutTask = Task.Run(async () =>
-                {
-                    for (int i = 20; i > 0; i--)
+                    _timeoutTask = Task.Run(async () =>
                     {
-                        _timeoutLabel = $"{Strings.ToS.ButtonWillBeAvailableIn} {i}s";
-                        await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
-                    }
-                });
+                        for (int i = 20; i > 0; i--)
+                        {
+                            _timeoutLabel = $"{Strings.ToS.ButtonWillBeAvailableIn} {i}s";
+                            await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                        }
+                    });
 #else
-                _timeoutTask = Task.CompletedTask;
+                    _timeoutTask = Task.CompletedTask;
 #endif
-            }
-        }
-        else if (!_configService.Current.AcceptedAgreement && _readFirstPage)
-        {
-            // Agreement page button
-            if (_timeoutTask?.IsCompleted ?? true)
-            {
-                if (SpheneUI.Controls.HeroButton("intro-agree", Strings.ToS.AgreeLabel, color: successColor))
-                {
-                    _configService.Current.AcceptedAgreement = true;
-                    _configService.Save();
                 }
-            }
-            else
-            {
-                SpheneUI.Controls.HeroButton("intro-agree-wait", $"Please Wait ({_timeoutLabel})",
-                    color: ImGuiColors.DalamudYellow, enabled: false);
-            }
-        }
-        else if (_configService.Current.AcceptedAgreement
-                 && (string.IsNullOrEmpty(_configService.Current.CacheFolder)
-                     || !_configService.Current.InitialScanComplete
-                     || !Directory.Exists(_configService.Current.CacheFolder)))
-        {
-            // Cache setup page button
-            if (!_cacheMonitor.IsScanRunning && !string.IsNullOrEmpty(_configService.Current.CacheFolder)
-                && _uiShared.HasValidPenumbraModPath && Directory.Exists(_configService.Current.CacheFolder)
-                && SpheneUI.Controls.HeroButton("intro-start-scan", "Start Archive Scan", color: successColor))
-            {
-                _cacheMonitor.InvokeScan();
-            }
-        }
-        else if (_configService.Current.AcceptedAgreement
-                 && !string.IsNullOrEmpty(_configService.Current.CacheFolder)
-                 && _configService.Current.InitialScanComplete
-                 && Directory.Exists(_configService.Current.CacheFolder)
-                 && !_configService.Current.HasSeenSyncshellSettings)
-        {
-            // ShrinkU step: continue to authentication
-            if (SpheneUI.Controls.HeroButton("intro-continue-auth", "Continue to Authentication", color: successColor))
-            {
-                _configService.Current.HasSeenSyncshellSettings = true;
-                _configService.Save();
-                _showShrinkUPage = false;
-            }
-        }
-        else if (!_uiShared.ApiController.ServerAlive && _useLegacyLogin && _secretKey.Length == 64 && Base32Regex().IsMatch(_secretKey)
-                 && SpheneUI.Controls.HeroButton("intro-save-key", "Save Authentication Key", color: successColor))
-        {
+                break;
+            case 1:
+                if (_timeoutTask?.IsCompleted ?? true)
+                {
+                    if (SpheneUI.Controls.PrimaryButton(Strings.ToS.AgreeLabel,
+                            Dalamud.Interface.FontAwesomeIcon.Check, fullW, successColor))
+                    {
+                        _configService.Current.AcceptedAgreement = true;
+                        _configService.Save();
+                        AdvanceOrResume(page);
+                    }
+                }
+                else
+                {
+                    SpheneUI.Controls.PrimaryButton($"Please Wait ({_timeoutLabel})",
+                        Dalamud.Interface.FontAwesomeIcon.Clock, fullW,
+                        ImGuiColors.DalamudYellow, enabled: false);
+                }
+                break;
+            case 2:
+                if (!_cacheMonitor.IsScanRunning && !string.IsNullOrEmpty(_configService.Current.CacheFolder)
+                    && _uiShared.HasValidPenumbraModPath && Directory.Exists(_configService.Current.CacheFolder)
+                    && SpheneUI.Controls.PrimaryButton("Start Archive Scan",
+                        Dalamud.Interface.FontAwesomeIcon.Sync, fullW, successColor))
+                {
+                    _cacheMonitor.InvokeScan();
+                }
+                break;
+            case 3:
+                if (SpheneUI.Controls.PrimaryButton("Continue to Authentication",
+                        Dalamud.Interface.FontAwesomeIcon.ArrowRight, fullW, successColor))
+                {
+                    _configService.Current.HasSeenSyncshellSettings = true;
+                    _configService.Save();
+                    _showShrinkUPage = false;
+                    _viewPage = null;
+                }
+                break;
+            case 4:
+                if (_useLegacyLogin && _secretKey.Length == 64 && Base32Regex().IsMatch(_secretKey)
+                    && SpheneUI.Controls.PrimaryButton("Save Authentication Key",
+                        Dalamud.Interface.FontAwesomeIcon.Key, fullW, successColor))
+                {
                 if (_serverConfigurationManager.CurrentServer == null) _serverConfigurationManager.SelectServer(0);
                 if (!_serverConfigurationManager.CurrentServer!.SecretKeys.Any())
                 {
@@ -538,6 +669,8 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 }
                 _secretKey = string.Empty;
                 _ = Task.Run(() => _uiShared.ApiController.CreateConnectionsAsync());
+                }
+                break;
         }
     }
 
@@ -684,7 +817,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             _uiShared.LoadLocalization(_languages.ElementAt(changeLanguageTo).Value);
         }
 
-        _tosParagraphs = [Strings.ToS.Paragraph1, Strings.ToS.Paragraph2, Strings.ToS.Paragraph3, Strings.ToS.Paragraph4, Strings.ToS.Paragraph5, Strings.ToS.Paragraph6];
+        _tosParagraphs = [Strings.ToS.Paragraph1, Strings.ToS.Paragraph2, Strings.ToS.Paragraph3, Strings.ToS.Paragraph4, Strings.ToS.Paragraph5, Strings.ToS.Paragraph6, Strings.ToS.Paragraph7];
     }
 
     [GeneratedRegex("^[A-Z0-9]{64}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, matchTimeoutMilliseconds: 1000)]

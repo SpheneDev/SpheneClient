@@ -18,7 +18,7 @@ internal static class SupporterPerks
     [
         new(FontAwesomeIcon.IdBadge, SpheneUI.Palette.SpheneGold,
             "Personal Nameplate Indicator",
-            "Your own supporter mark next to your in-game name — visible to every Sphene user."),
+            "Your own supporter mark next to your in-game name · visible to every Sphene user."),
         new(FontAwesomeIcon.Palette, SpheneUI.Palette.EtherealPurple,
             "Custom Symbol, Text & Colors",
             "Pick a symbol or your own label and style it with game UI colors plus an edge glow."),
@@ -55,7 +55,7 @@ internal static class SupporterPerks
         if (count < All.Count)
         {
             SpheneUI.Layout.Space(SpheneUI.Spacing.X8);
-            SpheneUI.Text.Muted($"…and {All.Count - count} more — see the Supporter page for the full list.");
+            SpheneUI.Text.Muted($"…and {All.Count - count} more · see the Supporter page for the full list.");
         }
     }
 
@@ -74,26 +74,17 @@ internal static class SupporterPerks
         var descSize = ImGui.CalcTextSize(perk.Description, wrapWidth: wrapW);
         var rowH = MathF.Max(plate, lineH + descGap + descSize.Y);
 
-        // icon plate in the perk's own accent
+        // bare glyph in the perk's own accent · the perk color is its
+        // identity marker, no tile behind it
         var plateMin = rowMin + new Vector2(0f, (rowH - plate) * 0.5f);
-        drawList.AddRectFilled(plateMin, plateMin + new Vector2(plate),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(perk.Color, 0.14f)),
-            plate * 0.28f);
-        var iconSize = SpheneUI.Icons.Size(perk.Icon);
-        using (SpheneUI.IconFont.Push())
-        {
-            drawList.AddText(plateMin + (new Vector2(plate) - iconSize) * 0.5f,
-                SpheneUI.ColorUtils.ToU32(perk.Color), perk.Icon.ToIconString());
-        }
+        SpheneUI.Layout.SlotIcon(drawList, plateMin, plate, perk.Icon,
+            SpheneUI.ColorUtils.WithAlpha(perk.Color, 0.9f));
 
         ImGui.SetCursorScreenPos(new Vector2(textX, rowMin.Y + (rowH - lineH - descGap - descSize.Y) * 0.5f));
         SpheneUI.Text.Colored(perk.Title, SpheneUI.Colors.TextPrimary);
         ImGui.SetCursorScreenPos(new Vector2(textX, ImGui.GetCursorScreenPos().Y + descGap));
         ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + wrapW);
-        using (ImRaii.PushColor(ImGuiCol.Text, SpheneUI.Colors.TextMuted))
-        {
-            ImGui.TextUnformatted(perk.Description);
-        }
+        SpheneUI.Text.Colored(perk.Description, SpheneUI.Colors.TextMuted);
         ImGui.PopTextWrapPos();
         ImGui.SetCursorScreenPos(new Vector2(rowMin.X, rowMin.Y + rowH));
     }

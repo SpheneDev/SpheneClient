@@ -19,7 +19,7 @@ public static partial class SpheneUI
     /// </summary>
     public static class Text
     {
-        /// <summary>Plain text in the themed text color — replaces raw ImGui.Text/TextUnformatted.</summary>
+        /// <summary>Plain text in the themed text color · replaces raw ImGui.Text/TextUnformatted.</summary>
         public static void Plain(string text) => ImGui.TextUnformatted(text);
 
         /// <summary>Wrapped text in the themed text color.</summary>
@@ -32,7 +32,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Truncates <paramref name="text"/> to <paramref name="maxWidth"/>
-        /// pixels with an ellipsis — first line only, binary-search measured.
+        /// pixels with an ellipsis · first line only, binary-search measured.
         /// </summary>
         public static string Ellipsize(string text, float maxWidth)
         {
@@ -85,18 +85,111 @@ public static partial class SpheneUI
             Wrapped(text, wrapPos);
         }
 
-        /// <summary>Bullet-prefixed text line — replaces raw ImGui.BulletText.</summary>
+        /// <summary>Bullet-prefixed text line · replaces raw ImGui.BulletText.</summary>
         public static void Bullet(string text) => ImGui.BulletText(text);
 
-        /// <summary>Secondary-tone wrapped text — the standard description style.</summary>
+        /// <summary>Secondary-tone wrapped text · the standard description style.</summary>
         public static void Muted(string text) => Colored(text, Colors.TextMuted);
 
-        /// <summary>Secondary-tone wrapped text — the standard description style.</summary>
+        /// <summary>Secondary-tone wrapped text · the standard description style.</summary>
         public static void MutedWrapped(string text, float wrapPos = 0)
             => ColoredWrapped(text, Colors.TextMuted, wrapPos);
 
         /// <summary>
-        /// One-line muted page blurb — ellipsized to the content width, the
+        /// Meta text for feed rows and card footers (timestamps, counts,
+        /// separators)  ·  a touch dimmer than <see cref="Muted"/> so it never
+        /// competes with the label above it.
+        /// </summary>
+        /// <summary>Word-wraps <paramref name="text"/> into at most
+        /// <paramref name="maxLines"/> lines at <paramref name="maxWidth"/>;
+        /// the last line is ellipsized when it still overflows.</summary>
+        public static List<string> WrapLines(string text, float maxWidth,
+            int maxLines)
+        {
+            var lines = new List<string>();
+            var remaining = text.Trim();
+            while (remaining.Length > 0 && lines.Count < maxLines)
+            {
+                if (ImGui.CalcTextSize(remaining).X <= maxWidth)
+                {
+                    lines.Add(remaining);
+                    break;
+                }
+                var cut = 0;
+                var sp = -1;
+                for (var i = 0; i < remaining.Length; i++)
+                {
+                    if (remaining[i] == ' ') sp = i;
+                    if (ImGui.CalcTextSize(remaining[..i]).X > maxWidth) break;
+                    cut = i;
+                }
+                if (sp > 0 && sp < cut) cut = sp;
+                if (lines.Count == maxLines - 1)
+                {
+                    lines.Add(Ellipsize(remaining, maxWidth));
+                    break;
+                }
+                lines.Add(remaining[..cut].TrimEnd());
+                remaining = remaining[cut..].TrimStart();
+            }
+            return lines;
+        }
+
+        /// <summary>Canonical date format for user-facing text:
+        /// "Jun 12, 2026" · ISO strings pass through when unparseable.</summary>
+        public static string FormatDate(string date)
+            => DateTime.TryParse(date,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var d)
+                ? d.ToString("MMM d, yyyy",
+                    System.Globalization.CultureInfo.InvariantCulture)
+                : date;
+
+        /// <summary>"Jun 12, 2026"</summary>
+        public static string FormatDate(DateTime date)
+            => date.ToString("MMM d, yyyy",
+                System.Globalization.CultureInfo.InvariantCulture);
+
+        public static string FormatDate(DateTimeOffset date)
+            => FormatDate(date.DateTime);
+
+        /// <summary>"Jun 12, 2026 14:30"</summary>
+        public static string FormatDateTime(DateTime date, bool includeSeconds = false)
+            => date.ToString(
+                includeSeconds ? "MMM d, yyyy HH:mm:ss" : "MMM d, yyyy HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture);
+
+        public static string FormatDateTime(DateTimeOffset date,
+                bool includeSeconds = false)
+            => FormatDateTime(date.DateTime, includeSeconds);
+
+        /// <summary>"Jun 12" · short form for dense lists.</summary>
+        public static string FormatShortDate(DateTime date)
+            => date.ToString("MMM d",
+                System.Globalization.CultureInfo.InvariantCulture);
+
+        public static string FormatShortDate(DateTimeOffset date)
+            => FormatShortDate(date.DateTime);
+
+        public static void Timestamp(string text)
+            => Colored(text, ColorUtils.WithAlpha(Colors.TextMuted,
+                Colors.TextMuted.W * 0.82f));
+
+        /// <summary>Right-aligned variant of <see cref="Timestamp"/> for
+        /// meta text docked to the row's end.</summary>
+        public static void TimestampRight(string text)
+        {
+            var w = ImGui.CalcTextSize(text).X;
+            var avail = ImGui.GetContentRegionAvail().X;
+            if (w < avail)
+            {
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + avail - w);
+            }
+            Timestamp(text);
+        }
+
+        /// <summary>
+        /// One-line muted page blurb · ellipsized to the content width, the
         /// full text rides the hover tooltip. The standard description line
         /// on pages whose title already lives in the breadcrumb.
         /// </summary>
@@ -110,12 +203,16 @@ public static partial class SpheneUI
             }
         }
 
-        /// <summary>Large display text in the shared UI font.</summary>
+        /// <summary>
+        /// Large display text in the shared UI font · renders in the display
+        /// font (~26px) under <see cref="DensityProfile.Compact"/> so headings
+        /// stay proportional on small windows instead of eating two rows.
+        /// </summary>
         public static void Big(string text, Vector4? color = null)
         {
-            if (UidFont is { } font)
+            if ((Density.IsCompact ? _displayFont : _uidFont) is { } handle)
             {
-                Font(font, text, color);
+                Font(handle, text, color);
             }
             else
             {
@@ -124,7 +221,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Display-size heading text in the dedicated display font (~26px) —
+        /// Display-size heading text in the dedicated display font (~26px)  · 
         /// the crisp way to render large text; never use
         /// <c>SetWindowFontScale</c> for headings, it raster-scales glyphs.
         /// </summary>
@@ -186,7 +283,7 @@ public static partial class SpheneUI
             }
         }
 
-        /// <summary>Outlined text at the current cursor — alias of <see cref="Outlined"/>.</summary>
+        /// <summary>Outlined text at the current cursor · alias of <see cref="Outlined"/>.</summary>
         public static void OutlinedOn(string text, Vector4 fontColor, Vector4 outlineColor,
             int thickness = 1)
             => Outlined(text, fontColor, outlineColor, thickness);
@@ -226,14 +323,15 @@ public static partial class SpheneUI
         /// optional muted description and the standard section gap.
         /// </summary>
         public static void SectionHeader(string title, string? description = null,
-            FontAwesomeIcon? icon = null)
+            FontAwesomeIcon? icon = null, Vector4? accent = null)
         {
+            var tone = accent ?? Palette.CrystalBlue;
             if (icon.HasValue)
             {
-                Icons.Icon(icon.Value, Palette.CrystalBlue);
+                Icons.Icon(icon.Value, tone);
                 ImGui.SameLine();
             }
-            Colored(title, Palette.CrystalBlue);
+            Colored(title, tone);
             if (!string.IsNullOrWhiteSpace(description))
             {
                 MutedWrapped(description);
@@ -242,7 +340,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Accent header in the mono font with the double crystal underline —
+        /// Accent header in the mono font with the double crystal underline  · 
         /// port of the former <c>DrawSpheneHeader</c> styling primitive.
         /// </summary>
         public static void Header(string text, bool underline = true)
@@ -288,8 +386,18 @@ public static partial class SpheneUI
     /// </summary>
     public static void AttachTooltip(string text)
     {
+        AttachTooltip(text, ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled));
+    }
+
+    /// <summary>
+    /// Same themed tooltip as <see cref="AttachTooltip(string)"/> but driven by
+    /// an explicit hover state · for drawlist-only hit zones that submit no
+    /// ImGui item (rect-hovered chips, overlay controls).
+    /// </summary>
+    public static void AttachTooltip(string text, bool hovered)
+    {
         const string separator = "--SEP--";
-        if (!ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        if (!hovered)
         {
             return;
         }
@@ -315,6 +423,63 @@ public static partial class SpheneUI
         }
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
+    }
+
+    /// <summary>
+    /// Same themed tooltip as <see cref="AttachTooltip(string,bool)"/> but
+    /// painted on the foreground drawlist - for overlays that already float
+    /// above ImGui tooltip windows (e.g. the unsaved-changes toast). Style
+    /// tokens and segment handling stay identical; only the layer differs.
+    /// </summary>
+    public static void AttachTooltipForeground(string text, bool hovered)
+    {
+        const string separator = "--SEP--";
+        if (!hovered)
+        {
+            return;
+        }
+        var scale = SpheneUI.Scale;
+        var theme = SpheneTheme.Current;
+        var dl = ImGui.GetForegroundDrawList();
+        var wrapW = ImGui.GetFontSize() * 35f;
+        var pad = theme.WindowPadding;
+        var rounding = theme.CompactTooltipRounding;
+        var segments = _tooltipSegmentsCache.GetOrAdd(text,
+            t => t.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        float w = 0, h = 0;
+        foreach (var seg in segments)
+        {
+            var s = ImGui.CalcTextSize(seg, false, wrapW);
+            w = MathF.Max(w, s.X);
+            h += s.Y;
+        }
+        var box = new Vector2(w, h) + pad * 2f + new Vector2(0, (segments.Length - 1) * 8f * scale);
+        var mouse = ImGui.GetMousePos();
+        var pos = mouse + new Vector2(14f, 16f) * scale;
+        var bounds = ImGui.GetIO().DisplaySize;
+        if (pos.X + box.X > bounds.X - 4f) pos.X = mouse.X - box.X - 14f * scale;
+        if (pos.Y + box.Y > bounds.Y - 4f) pos.Y = mouse.Y - box.Y - 16f * scale;
+        dl.AddRectFilled(pos, pos + box, ImGui.GetColorU32(ImGuiCol.PopupBg), rounding);
+        if (theme.CompactTooltipBorderSize > 0)
+        {
+            dl.AddRect(pos, pos + box, ImGui.GetColorU32(ImGuiCol.Border),
+                rounding, ImDrawFlags.None, theme.CompactTooltipBorderSize);
+        }
+        var ty = pos.Y + pad.Y;
+        var textCol = ImGui.GetColorU32(ImGuiCol.Text);
+        for (var i = 0; i < segments.Length; i++)
+        {
+            dl.AddText(ImGui.GetFont(), ImGui.GetFontSize(),
+                new Vector2(pos.X + pad.X, ty), textCol, segments[i], wrapW);
+            ty += ImGui.CalcTextSize(segments[i], false, wrapW).Y;
+            if (i != segments.Length - 1)
+            {
+                ty += 4f * scale;
+                dl.AddLine(new Vector2(pos.X + pad.X, ty), new Vector2(pos.X + box.X - pad.X, ty),
+                    ImGui.GetColorU32(ImGuiCol.Separator));
+                ty += 4f * scale;
+            }
+        }
     }
 
     private static readonly ConcurrentDictionary<string, string[]> _tooltipSegmentsCache = new(StringComparer.Ordinal);

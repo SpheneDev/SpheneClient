@@ -178,6 +178,51 @@ public sealed class ChangelogService
         }
     }
 
+    private readonly Dictionary<string, byte[]?> _imageCache = new(StringComparer.Ordinal);
+
+    /// <summary>Fetches an image referenced by a changelog field (banner,
+    /// gallery). Relative paths resolve against the changelog repo; a leading
+    /// "repo/" prefix (repo-folder style) is stripped. Cached per URL.</summary>
+    /// <summary>Base URL for repo-relative changelog assets - derived from
+    /// the changelog URL's directory ("…/changelogs/" → repo root).</summary>
+    private static string ResolveImageUrl(string path)
+    {
+        if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+        var p = path.TrimStart('/');
+        if (p.StartsWith("repo/", StringComparison.Ordinal))
+        {
+            p = p[5..];
+        }
+        var baseUrl = DefaultUrl.Substring(0,
+            DefaultUrl.LastIndexOf("changelogs/", StringComparison.Ordinal));
+        return baseUrl + p;
+    }
+
+    public byte[]? GetCachedImage(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        url = ResolveImageUrl(url);
+        if (_imageCache.TryGetValue(url, out var cached)) return cached;
+        _imageCache[url] = null;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _imageCache[url] = await _httpClient.GetByteArrayAsync(url)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Changelog image fetch failed: {url}", url);
+            }
+        });
+        return null;
+    }
+
 public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(CancellationToken ct = default)
     {
         var url = DefaultUrl;
@@ -216,6 +261,47 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
                     ? (dProp.GetString() ?? string.Empty).Trim()
                     : string.Empty;
                 entry.IsPrerelease = item.TryGetProperty("isPrerelease", out var prProp) && prProp.ValueKind == JsonValueKind.True;
+                // structure v3 · optional presentation fields, all absent-tolerant
+                if (item.TryGetProperty("banner", out var bProp) && bProp.ValueKind == JsonValueKind.String)
+                    entry.Banner = bProp.GetString() ?? string.Empty;
+                if (item.TryGetProperty("author", out var aProp) && aProp.ValueKind == JsonValueKind.String)
+                    entry.Author = aProp.GetString() ?? string.Empty;
+                if (item.TryGetProperty("pinned", out var pProp) && pProp.ValueKind == JsonValueKind.True)
+                    entry.Pinned = true;
+                if (item.TryGetProperty("highlights", out var hProp) && hProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var h in hProp.EnumerateArray())
+                    {
+                        var hv = new ReleaseHighlightView();
+                        if (h.TryGetProperty("icon", out var hi) && hi.ValueKind == JsonValueKind.String)
+                            hv.Icon = hi.GetString() ?? string.Empty;
+                        if (h.TryGetProperty("title", out var ht) && ht.ValueKind == JsonValueKind.String)
+                            hv.Title = ht.GetString() ?? string.Empty;
+                        if (h.TryGetProperty("text", out var hx) && hx.ValueKind == JsonValueKind.String)
+                            hv.Text = hx.GetString() ?? string.Empty;
+                        if (hv.Title.Length > 0) entry.Highlights.Add(hv);
+                    }
+                }
+                if (item.TryGetProperty("gallery", out var gProp) && gProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var g in gProp.EnumerateArray())
+                    {
+                        if (g.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(g.GetString()))
+                            entry.Gallery.Add(g.GetString()!);
+                    }
+                }
+                if (item.TryGetProperty("links", out var lProp) && lProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var l in lProp.EnumerateArray())
+                    {
+                        var lv = new ReleaseLinkView();
+                        if (l.TryGetProperty("label", out var ll) && ll.ValueKind == JsonValueKind.String)
+                            lv.Label = ll.GetString() ?? string.Empty;
+                        if (l.TryGetProperty("url", out var lu) && lu.ValueKind == JsonValueKind.String)
+                            lv.Url = lu.GetString() ?? string.Empty;
+                        if (lv.Label.Length > 0 && lv.Url.Length > 0) entry.Links.Add(lv);
+                    }
+                }
                 ExtractLegacyTitleDate(entry);
 
                 if (item.TryGetProperty("changes", out var changesProp) && changesProp.ValueKind == JsonValueKind.Array)
@@ -336,7 +422,7 @@ public async Task<List<ReleaseChangelogViewEntry>> GetChangelogEntriesAsync(Canc
     }
 
     // Legacy v1-era entries carry the date inside the title as "[YY-MM-DD]"
-    // or "[YYYY-MM-DD]" — move it into Date and keep only the trailing title.
+    // or "[YYYY-MM-DD]" - move it into Date and keep only the trailing title.
     private static void ExtractLegacyTitleDate(ReleaseChangelogViewEntry entry)
     {
         if (!string.IsNullOrWhiteSpace(entry.Date) || string.IsNullOrWhiteSpace(entry.Title))

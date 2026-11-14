@@ -69,33 +69,31 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
         var latestVersionLabel = _updateInfo.IsTestBuildUpdate ? "Latest Testbuild Version:" : "Latest Version:";
 
         // Header
-        SpheneUI.Text.PageHeader($"{updateKind} Available!",
-            _updateInfo.IsTestBuildUpdate
+        SpheneUI.Layout.PageHeader($"{updateKind} Available!", "updatenotif", () =>
+        {
+            SpheneUI.Text.MutedWrapped(_updateInfo.IsTestBuildUpdate
                 ? "A newer testbuild version of Sphene is available for download."
-                : "A new version of Sphene is available for download.");
+                : "A new version of Sphene is available for download.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
 
         // Version info
         SpheneUI.Layout.SectionCard(() =>
         {
-            using (var table = ImRaii.Table("VersionTable", 2, ImGuiTableFlags.None))
+            using var table = SpheneUI.Tables.Begin("VersionTable", 2, ImGuiTableFlags.None);
+            if (table.Success)
             {
-                if (table)
-                {
-                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, 120);
-                    ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthStretch);
+                SpheneUI.Tables.Column("Label", ImGuiTableColumnFlags.WidthFixed, 120);
+                SpheneUI.Tables.Column("Version", ImGuiTableColumnFlags.WidthStretch);
 
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Muted("Current Version:");
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Colored(_updateInfo.CurrentVersion.ToString(), ImGuiColors.DalamudYellow);
+                SpheneUI.Tables.BeginRow();
+                SpheneUI.Text.Muted("Current Version:");
+                SpheneUI.Tables.NextColumn();
+                SpheneUI.Text.Colored(_updateInfo.CurrentVersion.ToString(), ImGuiColors.DalamudYellow);
 
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Muted(latestVersionLabel);
-                    ImGui.TableNextColumn();
-                    SpheneUI.Text.Colored(_updateInfo.LatestVersion.ToString(), ImGuiColors.HealerGreen);
-                }
+                SpheneUI.Tables.BeginRow();
+                SpheneUI.Text.Muted(latestVersionLabel);
+                SpheneUI.Tables.NextColumn();
+                SpheneUI.Text.Colored(_updateInfo.LatestVersion.ToString(), ImGuiColors.HealerGreen);
             }
         });
 

@@ -113,6 +113,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
 
         if (!Directory.Exists(_pluginInterface.ConfigDirectory.FullName))
             Directory.CreateDirectory(_pluginInterface.ConfigDirectory.FullName);
+        Sphene.UI.Components.AreaArt.ConfigDir = _pluginInterface.ConfigDirectory.FullName;
         var traceDir = Path.Join(_pluginInterface.ConfigDirectory.FullName, "tracelog");
         if (!Directory.Exists(traceDir))
             Directory.CreateDirectory(traceDir);
@@ -166,7 +167,9 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton(_namePlateGui);
             collection.AddSingleton(_objectTable);
             collection.AddSingleton(_gameGui);
+            collection.AddSingleton(_gameData);
             collection.AddSingleton(_textureProvider);
+            collection.AddSingleton(_gameInteropProvider);
 
             // ShrinkU integration services and windows
             collection.AddSingleton<Microsoft.Extensions.Logging.ILogger>(s => s.GetRequiredService<ILoggerFactory>().CreateLogger("ShrinkU"));
@@ -311,6 +314,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton<PluginWarningNotificationService>();
             collection.AddSingleton<UpdateCheckService>();
             collection.AddSingleton<LoginHandler>();
+            collection.AddSingleton<LodestoneAvatarService>();
             collection.AddSingleton<FileCompactor>();
             collection.AddSingleton<TagHandler>();
             collection.AddSingleton<IdDisplayHandler>();
@@ -384,11 +388,15 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<DalamudUtilService>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new IpcCallerBrio(s.GetRequiredService<ILogger<IpcCallerBrio>>(), _pluginInterface,
                 s.GetRequiredService<DalamudUtilService>()));
+            collection.AddSingleton((s) => new IpcCallerLifestream(s.GetRequiredService<ILogger<IpcCallerLifestream>>(), _pluginInterface));
             collection.AddSingleton((s) => new IpcManager(s.GetRequiredService<ILogger<IpcManager>>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<IpcCallerPenumbra>(), s.GetRequiredService<IpcCallerGlamourer>(),
                 s.GetRequiredService<IpcCallerCustomize>(), s.GetRequiredService<IpcCallerHeels>(), s.GetRequiredService<IpcCallerHonorific>(),
                 s.GetRequiredService<IpcCallerMoodles>(), s.GetRequiredService<IpcCallerPetNames>(), s.GetRequiredService<IpcCallerBypassEmote>(),
-                s.GetRequiredService<IpcCallerBrio>()));
+                s.GetRequiredService<IpcCallerBrio>(), s.GetRequiredService<IpcCallerLifestream>()));
+            collection.AddSingleton((s) => new LifestreamTravelService(s.GetRequiredService<ILogger<LifestreamTravelService>>(),
+                s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<IpcCallerLifestream>(),
+                s.GetRequiredService<DalamudUtilService>()));
             collection.AddSingleton((s) => new MessageService(s.GetRequiredService<ILogger<MessageService>>(), _notificationManager, s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<SpheneMediator>()));
             collection.AddSingleton((s) => new AcknowledgmentBatchingService(
                 s.GetRequiredService<ILogger<AcknowledgmentBatchingService>>(),
@@ -457,14 +465,17 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddScoped<SelectTagForPairUi>();
             collection.AddScoped<SettingsUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<SettingsUi>());
+            collection.AddScoped<SupporterNameplateStudioUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, CompactUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, SpheneIcon>();
             collection.AddScoped<WindowMediatorSubscriberBase, IntroUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, IdentitySetupUi>();
             collection.AddScoped<WindowMediatorSubscriberBase, DownloadUi>();
-            collection.AddScoped<WindowMediatorSubscriberBase, DataAnalysisUi>();
-            collection.AddScoped<WindowMediatorSubscriberBase, JoinSyncshellUI>();
-            collection.AddScoped<WindowMediatorSubscriberBase, CreateSyncshellUI>();
+            collection.AddScoped<DataAnalysisUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<DataAnalysisUi>());
+            collection.AddScoped<JoinSyncshellUI>();
+            collection.AddScoped<UI.Housing.HousingPageView>();
+            collection.AddScoped<CreateSyncshellUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, EventViewerUI>();
             collection.AddScoped<CharaDataHubUi>();
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<CharaDataHubUi>());
@@ -485,6 +496,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<SpheneHubUi>());
 
             collection.AddScoped<WindowMediatorSubscriberBase, PairRequestsUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, TextureConversionUi>();
 
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellConsentUI>();
             collection.AddScoped<WindowMediatorSubscriberBase, AreaBoundSyncshellSelectionUI>();
@@ -501,7 +513,9 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 return instance;
             });
             collection.AddSingleton<WindowMediatorSubscriberBase>(s => s.GetRequiredService<CitySyncshellExplanationUI>());
-            collection.AddScoped<WindowMediatorSubscriberBase, WelcomePageLivePreviewUI>();
+            collection.AddScoped<WindowMediatorSubscriberBase, SyncshellImageViewerUI>();
+            collection.AddScoped<WindowMediatorSubscriberBase, EventPreviewUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase, Sphene.UI.Chronicles.ChroniclePreviewUi>();
             collection.AddSingleton<WindowMediatorSubscriberBase, UpdateNotificationUi>((s) => new UpdateNotificationUi(
                 s.GetRequiredService<ILogger<UpdateNotificationUi>>(),
                 s.GetRequiredService<UiSharedService>(),
@@ -517,8 +531,10 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<ChangelogService>()));
             collection.AddSingleton<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ReleaseChangelogUi>());
 
-            collection.AddScoped<ImageCropUi>();
-            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<ImageCropUi>());
+            collection.AddSingleton<ScreenCaptureService>();
+            collection.AddSingleton<GameUiVisibility>();
+            collection.AddScoped<PhotoStudioUi>();
+            collection.AddScoped<WindowMediatorSubscriberBase>(s => s.GetRequiredService<PhotoStudioUi>());
             collection.AddScoped<EditProfileUi>((s) => new EditProfileUi(
                 s.GetRequiredService<ApiController>(), s.GetRequiredService<SpheneProfileManager>()));
             collection.AddScoped<WindowMediatorSubscriberBase, PopupHandler>();
@@ -547,11 +563,17 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton<HalloweenEasterEggService>();
             collection.AddSingleton<SupporterIconService>();
             collection.AddSingleton<SupporterNameplateService>();
+            collection.AddSingleton<NotificationInboxService>();
+            collection.AddSingleton<CommunityFeedService>();
+            collection.AddSingleton<CommunityMediaClientService>();
+            collection.AddSingleton<AnnouncementService>();
+            collection.AddSingleton<ChatService>();
             
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), _pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),
                 s.GetRequiredService<UiFactory>(),
-                s.GetRequiredService<FileDialogManager>(), s.GetRequiredService<SpheneMediator>()));
+                s.GetRequiredService<FileDialogManager>(), s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<IFramework>()));
             collection.AddScoped((s) => new CommandManagerService(_commandManager, s.GetRequiredService<PerformanceCollectorService>(),
                 s.GetRequiredService<ServerConfigurationManager>(), s.GetRequiredService<CacheMonitor>(), s.GetRequiredService<ApiController>(),
                 s.GetRequiredService<SpheneMediator>(), s.GetRequiredService<SpheneConfigService>()));
@@ -559,6 +581,8 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<CacheMonitor>(), s.GetRequiredService<FileDialogManager>(), s.GetRequiredService<SpheneConfigService>(), s.GetRequiredService<DalamudUtilService>(),
                 _pluginInterface, _textureProvider, s.GetRequiredService<Dalamud.Localization>(), s.GetRequiredService<ServerConfigurationManager>(), s.GetRequiredService<TokenProvider>(),
                 s.GetRequiredService<SpheneMediator>()));
+            collection.AddScoped((s) => new PluginInstallerService(s.GetRequiredService<ILogger<PluginInstallerService>>(), s.GetRequiredService<IpcManager>(),
+                _pluginInterface, s.GetRequiredService<SpheneMediator>()));
 
             collection.AddHostedService(p => p.GetRequiredService<ConfigurationSaveService>());
             collection.AddHostedService(p => p.GetRequiredService<SpheneMediator>());
@@ -572,6 +596,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<EventAggregator>());
             collection.AddHostedService(p => p.GetRequiredService<IpcProvider>());
             collection.AddHostedService(p => p.GetRequiredService<LoginHandler>());
+            collection.AddHostedService(p => p.GetRequiredService<LodestoneAvatarService>());
             collection.AddHostedService(p => p.GetRequiredService<UpdateCheckService>());
             collection.AddSingleton<ChangelogService>();
             collection.AddSingleton<ReleaseChangelogStartupService>();
@@ -587,6 +612,10 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<CitySyncshellService>());
             collection.AddHostedService(p => p.GetRequiredService<HalloweenEasterEggService>());
             collection.AddHostedService(p => p.GetRequiredService<SupporterNameplateService>());
+            collection.AddHostedService(p => p.GetRequiredService<NotificationInboxService>());
+            collection.AddHostedService(p => p.GetRequiredService<CommunityFeedService>());
+            collection.AddHostedService(p => p.GetRequiredService<AnnouncementService>());
+            collection.AddHostedService(p => p.GetRequiredService<ChatService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
             collection.AddSingleton<CharacterIdentityService>();
             collection.AddHostedService(p => p.GetRequiredService<CharacterIdentityService>());

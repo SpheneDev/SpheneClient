@@ -10,6 +10,7 @@ using Sphene.API.Data;
 using Sphene.API.Dto.Files;
 using Sphene.Services;
 using Sphene.Services.Mediator;
+using Sphene.UI.Syncshell;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -37,7 +38,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     private bool _statusIsError;
     private bool _isInstalling;
     private float? _progress;
-    // Measured height of the footer bar plus host trailing chrome — calibrated
+    // Measured height of the footer bar plus host trailing chrome · calibrated
     // each frame so the clip region never leaves residual scrollMax behind.
     private float _receiveTailReserve = -1f;
     private string? _installedVersion;
@@ -53,7 +54,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     // Lazily resolved metadata for locally installed mods (thumbnails, author).
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<ShrinkU.Services.PenumbraIpc.ModMetadata?>> _modMetaTasks
         = new(StringComparer.OrdinalIgnoreCase);
-    // Last decoded avatar bytes per user — a new array instance means the
+    // Last decoded avatar bytes per user · a new array instance means the
     // profile was (re)fetched and the cached texture must be evicted.
     private readonly Dictionary<string, byte[]> _avatarBytes = new(StringComparer.Ordinal);
 
@@ -442,7 +443,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             {
                 var name = notif.ModFolderName ?? string.Empty;
                 var senderUid = notif.Sender?.UID ?? string.Empty;
-                var senderAliasOrUid = notif.Sender?.AliasOrUID ?? string.Empty;
+                var senderAliasOrUid = SyncshellCommunityView.HumanName(notif.Sender) ?? string.Empty;
                 var sender = notif.Sender != null
                     ? _uiSharedService.GetPreferredUserDisplayName(notif.Sender)
                     : _uiSharedService.GetPreferredUserDisplayName(senderUid, senderAliasOrUid);
@@ -478,7 +479,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         var accent = SpheneUI.Palette.NetworkActive;
         var style = ImGui.GetStyle();
         // Fixed clip region sized to the host's remaining space minus the
-        // footer bar — same skeleton as the send page. The reserve is
+        // footer bar · same skeleton as the send page. The reserve is
         // self-measured below: after one frame it equals the real tail height,
         // so the host never keeps a scrollable residue.
         var navAvail = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
@@ -497,14 +498,16 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         ImGui.PopStyleVar();
         if (regionBegun)
         {
-            // EndTable appends ItemSpacing — keep the bound that far inside
+            // EndTable appends ItemSpacing · keep the bound that far inside
             // the clip edge or the region retains a few px of scrollMax.
             var colBottom = ImGui.GetCursorScreenPos().Y + regionH - style.ItemSpacing.Y - scale;
 
             if (!isEmbedded)
             {
-                SpheneUI.Text.PageHeader("Receive Mods",
-                    "Mods shared with you by paired users — install or discard them here.");
+                SpheneUI.Layout.PageHeader("Receive Mods", "receivemods", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Mods shared with you by paired users · install or discard them here.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
             }
             // Embedded: ModSharingUi draws the intro line above the receive-options card.
 
@@ -518,7 +521,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         DrawReceiveFooterBar(scale, accent, pending.Count);
 
         // Self-calibrating reserve: the leftover under the last row must cover
-        // the host scroll area's trailing inset — anything less leaves a few
+        // the host scroll area's trailing inset · anything less leaves a few
         // px of scrollMax that shows as a scroll/snap jitter on wheel input.
         var leftover = ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY();
         var targetTail = style.ItemSpacing.Y
@@ -527,23 +530,24 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             tailReserve + (targetTail - leftover), 0f, MathF.Max(0f, navAvail));
     }
 
-    /// <summary>Inbox card on the left, package details on the right — both filling the bound.</summary>
+    /// <summary>Inbox card on the left, package details on the right · both filling the bound.</summary>
     private void DrawReceiveBody(List<FileTransferNotificationDto> pending,
         List<FileTransferNotificationDto> displayed, FileTransferNotificationDto? currentSelected,
         float scale, Vector4 accent, bool isEmbedded, float colBottom)
     {
         // Unique table ID: "MainLayout" collides with stored column ratios
-        // in imgui.ini — a stale Resizable entry silently overrides the weights.
-        if (ImGui.BeginTable("ReceiveModLayout" + (isEmbedded ? "Embedded" : "Standalone"),
-                2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp))
+        // in imgui.ini · a stale Resizable entry silently overrides the weights.
+        using var layoutTable = SpheneUI.Tables.Begin("ReceiveModLayout" + (isEmbedded ? "Embedded" : "Standalone"),
+            2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp);
+        if (layoutTable.Success)
         {
-            ImGui.TableSetupColumn("Inbox", ImGuiTableColumnFlags.WidthStretch, 0.45f);
-            ImGui.TableSetupColumn("ModDetails", ImGuiTableColumnFlags.WidthStretch, 0.55f);
+            SpheneUI.Tables.Column("Inbox", ImGuiTableColumnFlags.WidthStretch, 0.45f);
+            SpheneUI.Tables.Column("ModDetails", ImGuiTableColumnFlags.WidthStretch, 0.55f);
 
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
+            SpheneUI.Tables.Row();
+            SpheneUI.Tables.SetColumn(0);
 
-            // LEFT COLUMN: Inbox card — filter, select-toolbar, scroll-faded
+            // LEFT COLUMN: Inbox card · filter, select-toolbar, scroll-faded
             // list. Batch actions live in the page footer; no inner card footer.
             SpheneUI.Layout.SectionCard(() =>
             {
@@ -569,7 +573,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     if (_pendingNotifications.Count == 0)
                     {
                         SpheneUI.Layout.Callout(
-                            "No packages pending — mods shared with you appear here.",
+                            "No packages pending · mods shared with you appear here.",
                             FontAwesomeIcon.Inbox, ImGuiColors.DalamudGrey);
                     }
                     else if (displayed.Count == 0)
@@ -658,7 +662,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                                     SpheneUI.Text.Plain(icon.ToIconString());
                                 }
                             }
-                            if (ImGui.IsItemHovered()) ImGui.SetTooltip(statusTip);
+                            SpheneUI.AttachTooltip(statusTip);
                             ImGui.SameLine(0f, 6f * scale);
 
                             bool isChecked;
@@ -691,7 +695,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                         foreach (var notif in displayed)
                         {
                             var uid = notif.Sender?.UID ?? string.Empty;
-                            var aliasOrUid = notif.Sender?.AliasOrUID ?? string.Empty;
+                            var aliasOrUid = SyncshellCommunityView.HumanName(notif.Sender) ?? string.Empty;
                             var key = string.IsNullOrWhiteSpace(uid) ? (string.IsNullOrWhiteSpace(aliasOrUid) ? "Unknown" : aliasOrUid) : uid;
                             if (!senderGroups.TryGetValue(key, out var list))
                             {
@@ -729,15 +733,13 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                                 if (containsSelected) flags |= ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.Selected;
 
                                 using var id = ImRaii.PushId("sender" + key);
-                                var isOpen = ImGui.TreeNodeEx($"{senderLabel} ({list.Count})##node", flags);
-                                if (isOpen)
+                                SpheneUI.Layout.Tree($"{senderLabel} ({list.Count})##node", () =>
                                 {
                                     foreach (var notif in list.OrderBy(n => n.ModFolderName ?? string.Empty, StringComparer.OrdinalIgnoreCase))
                                     {
                                         DrawNotificationEntry(notif);
                                     }
-                                    ImGui.TreePop();
-                                }
+                                }, flags);
                             }
                         }
                         else
@@ -752,7 +754,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
             }, title: $"1 · Inbox ({pending.Count})", accentColor: accent);
 
-            ImGui.TableSetColumnIndex(1);
+            SpheneUI.Tables.SetColumn(1);
 
             // RIGHT COLUMN: Package details card
             SpheneUI.Layout.SectionCard(() =>
@@ -760,7 +762,6 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 DrawRightPanel(scale, isEmbedded, colBottom, accent);
             }, title: "2 · Package Details", accentColor: accent);
 
-            ImGui.EndTable();
             SpheneUI.Lint.CheckFillBottom(colBottom, "ReceiveMods.Table");
         }
     }
@@ -768,7 +769,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     private void DrawRightPanel(float scale, bool isEmbedded, float colBottom, Vector4 accent)
     {
         var style = ImGui.GetStyle();
-        // Per-package actions sit in this card's own footer — reserve their
+        // Per-package actions sit in this card's own footer · reserve their
         // row plus separator so the details scroll fills the rest cleanly.
         var cardFooterH = _selectedNotification != null
             ? ImGui.GetFrameHeight() + style.ItemSpacing.Y * 3f + scale
@@ -792,7 +793,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 var modInfo = _selectedNotification.ModInfo?.FirstOrDefault();
                 var isInstalled = _shrinkuPenumbraIpc.ModExists(modFolderName);
 
-                // Local artwork is only known once the mod exists in Penumbra —
+                // Local artwork is only known once the mod exists in Penumbra  · 
                 // then the resolved meta.json Image renders as the package icon.
                 var localMeta = isInstalled ? MetaOf(modFolderName) : null;
                 var thumbWrap = localMeta?.ImagePath is { } imgPath
@@ -850,7 +851,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     SpheneUI.Text.MutedWrapped(modInfo.Description.Trim());
                 }
 
-                // Status badge — the same signal the inbox icons carry.
+                // Status badge · the same signal the inbox icons carry.
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 var receivedVer0 = modInfo?.Version;
                 if (!isInstalled)
@@ -885,26 +886,26 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 {
                     SpheneUI.Layout.Badge("INSTALLED", ImGuiColors.DalamudGrey);
                     ImGui.SameLine();
-                    SpheneUI.Text.Muted("Already in Penumbra — installing overwrites it.");
+                    SpheneUI.Text.Muted("Already in Penumbra · installing overwrites it.");
                 }
 
                 if (isInstalled)
                 {
                     SpheneUI.Layout.VerticalSpace();
                     SpheneUI.Layout.Callout(
-                        $"Already installed as '{modFolderName}' — installing again overwrites the existing mod.",
+                        $"Already installed as '{modFolderName}' · installing again overwrites the existing mod.",
                         FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudOrange);
                 }
 
                 SpheneUI.Layout.VerticalSpace();
                 SpheneUI.Layout.Callout(
-                    "Only install mods from people you fully trust — invalid or malicious mods can break your game.",
+                    "Only install mods from people you fully trust · invalid or malicious mods can break your game.",
                     FontAwesomeIcon.ShieldAlt, ImGuiColors.DalamudYellow);
             }
         }
         SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
 
-        // Per-package actions — they act on the package under review, so they
+        // Per-package actions · they act on the package under review, so they
         // stay in this card; batch actions live in the page footer bar. No
         // selection → no footer separator, the scroll area fills the card.
         if (_selectedNotification != null)
@@ -1019,7 +1020,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 : "Check packages to batch-install, or pick one to review.");
         }
 
-        // Right zone: batch actions — primary last.
+        // Right zone: batch actions · primary last.
         var discardAllText = $"Discard all ({pendingCount})";
         var discardSelText = $"Discard ({selectedCount})";
         var installText = $"Install selected ({selectedCount})";
@@ -1070,7 +1071,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// The user's Sphene profile picture as a cached texture — null while the
+    /// The user's Sphene profile picture as a cached texture · null while the
     /// profile or texture is still loading. Evicts the cache entry when the
     /// profile data instance changes (avatar updated/refetched).
     /// </summary>

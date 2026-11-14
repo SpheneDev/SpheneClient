@@ -88,7 +88,7 @@ public class DrawGroupedGroupFolder : IDrawFolder
 
         if (_tagHandler.IsTagOpen(_id))
         {
-            // same indent the base folders use — nested group headers align
+            // same indent the base folders use · nested group headers align
             // with the pair rows inside tag folders
             using var indent = ImRaii.PushIndent(
                 SpheneUI.Icons.Size(FontAwesomeIcon.EllipsisV).X + ImGui.GetStyle().ItemSpacing.X, false);

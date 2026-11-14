@@ -99,7 +99,11 @@ internal sealed class WindowThemeScope : ThemeStyleScope
         PushColor(ImGuiCol.FrameBgHovered, theme.FrameBgHovered);
         PushColor(ImGuiCol.FrameBgActive, theme.FrameBgActive);
 
-        PushColor(ImGuiCol.ScrollbarBg, theme.ScrollbarBg);
+        // Overlay scrollbars idle at a thin strip - the track stays faint so
+        // the grab reads as a floating line until the bar expands on hover.
+        PushColor(ImGuiCol.ScrollbarBg,
+            new Vector4(theme.ScrollbarBg.X, theme.ScrollbarBg.Y, theme.ScrollbarBg.Z,
+                theme.ScrollbarBg.W * 0.35f));
         PushColor(ImGuiCol.ScrollbarGrab, theme.ScrollbarGrab);
         PushColor(ImGuiCol.ScrollbarGrabHovered, theme.ScrollbarGrabHovered);
         PushColor(ImGuiCol.ScrollbarGrabActive, theme.ScrollbarGrabActive);
@@ -155,7 +159,7 @@ internal sealed class WindowThemeScope : ThemeStyleScope
         PushStyleVar(ImGuiStyleVar.ItemSpacing, theme.ItemSpacing);
         PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, theme.ItemInnerSpacing);
         PushStyleVar(ImGuiStyleVar.IndentSpacing, theme.IndentSpacing);
-        PushStyleVar(ImGuiStyleVar.ScrollbarSize, theme.ScrollbarSize);
+        PushStyleVar(ImGuiStyleVar.ScrollbarSize, SpheneUI.Scrollbar.Resolve(theme.ScrollbarSize));
         PushStyleVar(ImGuiStyleVar.GrabMinSize, theme.GrabMinSize);
     }
 }
@@ -168,9 +172,16 @@ internal sealed class WindowThemeScope : ThemeStyleScope
 /// </summary>
 internal sealed class CompactThemeScope : ThemeStyleScope
 {
-    /// <summary>Pushes the CompactUI token set.</summary>
-    public CompactThemeScope()
+    private readonly string? _hostWindowName;
+
+    /// <summary>
+    /// Pushes the CompactUI token set. <paramref name="hostWindowName"/> lets
+    /// the scrollbar overlay resolve the host window - the compact scope is
+    /// created in PreDraw, before ImGui's current window is the host.
+    /// </summary>
+    public CompactThemeScope(string? hostWindowName = null)
     {
+        _hostWindowName = hostWindowName;
         SpheneUI.ThemeScopeTracker.PushCompact();
         Apply();
     }
@@ -271,7 +282,7 @@ internal sealed class CompactThemeScope : ThemeStyleScope
         PushStyleVar(ImGuiStyleVar.ItemInnerSpacing, theme.CompactItemInnerSpacing);
         PushStyleVar(ImGuiStyleVar.CellPadding, theme.CompactCellPadding);
         PushStyleVar(ImGuiStyleVar.IndentSpacing, theme.CompactIndentSpacing);
-        PushStyleVar(ImGuiStyleVar.ScrollbarSize, theme.CompactScrollbarSize);
+        PushStyleVar(ImGuiStyleVar.ScrollbarSize, SpheneUI.Scrollbar.Resolve(theme.CompactScrollbarSize, _hostWindowName));
         PushStyleVar(ImGuiStyleVar.GrabMinSize, theme.CompactGrabMinSize);
         PushStyleVar(ImGuiStyleVar.ButtonTextAlign, theme.CompactButtonTextAlign);
         PushStyleVar(ImGuiStyleVar.SelectableTextAlign, theme.CompactSelectableTextAlign);

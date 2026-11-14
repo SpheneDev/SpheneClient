@@ -88,6 +88,9 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
     }
 
     public long CurrentFileProgress => _currentFileProgress;
+    public long ProcessedBytes => _processedBytes;
+    public long TotalBytesToProcess { get; private set; }
+    private long _processedBytes;
     public long FileCacheSize { get; set; }
     public long FileCacheDriveFree { get; set; }
     public ConcurrentDictionary<string, int> HaltScanLocks { get; set; } = new(StringComparer.Ordinal);
@@ -397,6 +400,8 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
     {
         TotalFiles = 0;
         _currentFileProgress = 0;
+        _processedBytes = 0;
+        TotalBytesToProcess = 0;
         _scanCancellationTokenSource = _scanCancellationTokenSource?.CancelRecreate() ?? new CancellationTokenSource();
         var token = _scanCancellationTokenSource.Token;
         _ = Task.Run(async () =>
@@ -590,17 +595,22 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
 
         if (ct.IsCancellationRequested) return;
 
-        // scan files from database
-        var threadCount = Math.Clamp((int)(Environment.ProcessorCount / 2.0f), 2, 8);
+        // scan files from database - hashing is CPU-bound, scale near
+        // physical cores and leave headroom for the game thread
+        var threadCount = Math.Clamp(Environment.ProcessorCount - 2, 4, 16);
 
         List<FileCacheEntity> entitiesToRemove = [];
         List<FileCacheEntity> entitiesToUpdate = [];
         var sync = new Lock();
         Thread[] workerThreads = new Thread[threadCount];
 
-        ConcurrentQueue<FileCacheEntity> fileCaches = new(_fileDbManager.GetAllFileCaches());
+        // largest first - the byte-based progress bar moves quickly early
+        // and the tail of cheap small files flies through at the end
+        var sortedCaches = _fileDbManager.GetAllFileCaches().OrderByDescending(e => e.Size ?? 0L).ToList();
+        ConcurrentQueue<FileCacheEntity> fileCaches = new(sortedCaches);
 
         TotalFilesStorage = fileCaches.Count;
+        TotalBytesToProcess = sortedCaches.Sum(e => Math.Max(0L, e.Size ?? 0L));
 
         for (int i = 0; i < threadCount; i++)
         {
@@ -648,6 +658,7 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
                         Logger.LogWarning(ex, "Failed validating {path}", workload.ResolvedFilepath);
                     }
                     Interlocked.Increment(ref _currentFileProgress);
+                    Interlocked.Add(ref _processedBytes, Math.Max(0L, workload.Size ?? 0L));
                 }
 
                 Logger.LogTrace("Ending Worker Thread {i}", threadNr);
@@ -659,9 +670,11 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
             workerThreads[i].Start(i);
         }
 
-        while (!ct.IsCancellationRequested && workerThreads.Any(u => u.IsAlive))
+        // wait for the workers without the up-to-1s sleep-poll overshoot
+        foreach (var worker in workerThreads)
         {
-            Thread.Sleep(1000);
+            if (ct.IsCancellationRequested) break;
+            worker.Join();
         }
 
         if (ct.IsCancellationRequested) return;
@@ -702,12 +715,19 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         // scan new files
         if (allScannedFiles.Any(c => !c.Value))
         {
-            Parallel.ForEach(allScannedFiles.Where(c => !c.Value).Select(c => c.Key),
+            // largest first - same bar-feel argument as the storage queue
+            var newPaths = allScannedFiles.Where(c => !c.Value).Select(c => c.Key).ToArray();
+            var newFiles = new (string path, long size)[newPaths.Length];
+            Parallel.For(0, newPaths.Length, i => newFiles[i] = (newPaths[i], FileSizeOf(newPaths[i])));
+            Array.Sort(newFiles, (a, b) => b.size.CompareTo(a.size));
+            TotalBytesToProcess += newFiles.Sum(t => Math.Max(0L, t.size));
+
+            Parallel.ForEach(newFiles,
                 new ParallelOptions()
                 {
                     MaxDegreeOfParallelism = threadCount,
                     CancellationToken = ct
-                }, (cachePath) =>
+                }, (item) =>
                 {
                     if (ct.IsCancellationRequested) return;
 
@@ -719,15 +739,16 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
 
                     try
                     {
-                        var entry = _fileDbManager.CreateFileEntry(cachePath);
-                        if (entry == null) _ = _fileDbManager.CreateCacheEntry(cachePath);
+                        var entry = _fileDbManager.CreateFileEntry(item.path);
+                        if (entry == null) _ = _fileDbManager.CreateCacheEntry(item.path);
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogWarning(ex, "Failed adding {file}", cachePath);
+                        Logger.LogWarning(ex, "Failed adding {file}", item.path);
                     }
 
                     Interlocked.Increment(ref _currentFileProgress);
+                    Interlocked.Add(ref _processedBytes, Math.Max(0L, item.size));
                 });
 
             Logger.LogTrace("Scanner added {notScanned} new files to db", allScannedFiles.Count(c => !c.Value));
@@ -736,6 +757,8 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
         Logger.LogDebug("Scan complete");
         TotalFiles = 0;
         _currentFileProgress = 0;
+        _processedBytes = 0;
+        TotalBytesToProcess = 0;
         entitiesToRemove.Clear();
         allScannedFiles.Clear();
 
@@ -746,5 +769,11 @@ public sealed class CacheMonitor : DisposableMediatorSubscriberBase
             StartSpheneWatcher(_configService.Current.CacheFolder);
             StartPenumbraWatcher(penumbraDir);
         }
+    }
+
+    private static long FileSizeOf(string path)
+    {
+        try { return new System.IO.FileInfo(path).Length; }
+        catch { return -1; }
     }
 }

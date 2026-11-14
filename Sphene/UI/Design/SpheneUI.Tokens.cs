@@ -10,7 +10,7 @@ public static partial class SpheneUI
 {
     /// <summary>
     /// An immutable spacing token on the design grid. Implicitly converts to
-    /// the UI-scaled pixel value — helpers receive tokens, never raw floats,
+    /// the UI-scaled pixel value · helpers receive tokens, never raw floats,
     /// so off-grid spacing cannot sneak in through the public API.
     /// </summary>
     public readonly struct Space : IEquatable<Space>
@@ -55,7 +55,7 @@ public static partial class SpheneUI
     }
 
     /// <summary>
-    /// Fixed spacing scale — the only legal gaps, paddings and indents in the
+    /// Fixed spacing scale · the only legal gaps, paddings and indents in the
     /// design system. Base values are unscaled; <see cref="Space"/> applies
     /// <see cref="ImGuiHelpers.GlobalScale"/> automatically. Use the semantic
     /// aliases for layout code and the raw steps only when no alias fits.
@@ -78,42 +78,88 @@ public static partial class SpheneUI
         /// <summary>Horizontal gap between elements sharing one row (SameLine).</summary>
         public static Space Inline => X4;
 
+        /// <summary>
+        /// The semantic aliases below remap to a neighbor grid step under
+        /// <see cref="Density"/> · Compact tightens, Comfortable relaxes.
+        /// Raw steps (X1..X32) never move, so the grid stays intact.
+        /// </summary>
+
         /// <summary>Vertical gap between consecutive rows/controls.</summary>
-        public static Space Row => X8;
+        public static Space Row => Density.Current switch
+        {
+            DensityProfile.Compact => X4,
+            DensityProfile.Comfortable => X10,
+            _ => X8,
+        };
 
         /// <summary>Vertical gap between logical groups inside a card.</summary>
-        public static Space Section => X12;
+        public static Space Section => Density.Current switch
+        {
+            DensityProfile.Compact => X8,
+            DensityProfile.Comfortable => X16,
+            _ => X12,
+        };
 
         /// <summary>Gap between sibling cards on a page.</summary>
-        public static Space CardGap => X8;
+        public static Space CardGap => Density.Current switch
+        {
+            DensityProfile.Compact => X4,
+            DensityProfile.Comfortable => X12,
+            _ => X8,
+        };
 
         /// <summary>Inner padding of cards.</summary>
-        public static Space CardPadding => X16;
+        public static Space CardPadding => Density.Current switch
+        {
+            DensityProfile.Compact => X10,
+            DensityProfile.Comfortable => X20,
+            _ => X16,
+        };
 
         /// <summary>Outer page padding inside the content scroll area.</summary>
-        public static Space PagePadding => X16;
+        public static Space PagePadding => Density.Current switch
+        {
+            DensityProfile.Compact => X10,
+            DensityProfile.Comfortable => X24,
+            _ => X16,
+        };
 
         /// <summary>Default horizontal inset of scroll-area content.</summary>
-        public static Space ScrollInset => X10;
+        public static Space ScrollInset => Density.Current switch
+        {
+            DensityProfile.Compact => X8,
+            DensityProfile.Comfortable => X12,
+            _ => X10,
+        };
 
         /// <summary>Title bar horizontal padding.</summary>
-        public static Space TitlePadX => X12;
+        public static Space TitlePadX => Density.Current switch
+        {
+            DensityProfile.Compact => X10,
+            DensityProfile.Comfortable => X16,
+            _ => X12,
+        };
 
         /// <summary>Title bar vertical padding.</summary>
-        public static Space TitlePadY => X8;
+        public static Space TitlePadY => Density.Current switch
+        {
+            DensityProfile.Compact => X4,
+            DensityProfile.Comfortable => X10,
+            _ => X8,
+        };
 
         /// <summary>Gap between title bar buttons.</summary>
         public static Space TitleButtonGap => X4;
 
         /// <summary>
-        /// Escape hatch for a non-grid value — always records a lint hit.
+        /// Escape hatch for a non-grid value · always records a lint hit.
         /// Prefer adding a new step or semantic alias instead.
         /// </summary>
         public static Space Custom(float value) => new(value, custom: true);
     }
 
     /// <summary>
-    /// The static Sphene palette — crystalline blues, ethereal purples and
+    /// The static Sphene palette · crystalline blues, ethereal purples and
     /// golden accents plus network/status colors. These are constants, not
     /// theme-resolved; prefer <see cref="Colors"/> in controls.
     /// </summary>
@@ -124,6 +170,8 @@ public static partial class SpheneUI
         public static readonly Vector4 DeepCrystal = new(0.2f, 0.4f, 0.8f, 1.0f);          // #3366CC
         public static readonly Vector4 EtherealPurple = new(0.6f, 0.4f, 0.9f, 1.0f);       // #9966E6
         public static readonly Vector4 VoidPurple = new(0.4f, 0.2f, 0.7f, 1.0f);           // #6633B3
+        public static readonly Vector4 SpheneViolet = new(0.545f, 0.361f, 0.965f, 1.0f);   // #8B5CF6
+        public static readonly Vector4 SpheneMagenta = new(0.659f, 0.333f, 0.969f, 1.0f);  // #A855F7
 
         // Accent Colors - Golden and Light Tones
         public static readonly Vector4 SpheneGold = new(1.0f, 0.8f, 0.3f, 1.0f);           // #FFCC4D
@@ -228,14 +276,46 @@ public static partial class SpheneUI
     }
 
     /// <summary>
-    /// Semantic colors resolved against <see cref="SpheneTheme.Current"/> —
+    /// Semantic colors resolved against <see cref="SpheneTheme.Current"/>  · 
     /// never raw ImGui style. Controls and helpers use these; a theme tweak
     /// re-themes every control at once.
     /// </summary>
     public static partial class Colors
     {
-        /// <summary>Primary accent (links, active states, selected marks).</summary>
-        public static Vector4 Accent => Palette.AccentBlue;
+        /// <summary>Primary accent (links, active states, selected marks) ·
+        /// theme-resolved, overrideable via <see cref="SpheneUI.AccentScope"/>.</summary>
+        public static Vector4 Accent => _accentOverrides.Count > 0
+            ? _accentOverrides[^1]
+            : Theme.Current.AccentCyan;
+
+        private static readonly List<Vector4> _accentOverrides = new();
+
+        internal static void PushAccentOverride(Vector4 accent) => _accentOverrides.Add(accent);
+
+        internal static void PopAccentOverride()
+        {
+            if (_accentOverrides.Count > 0)
+            {
+                _accentOverrides.RemoveAt(_accentOverrides.Count - 1);
+            }
+        }
+
+        /// <summary>
+        /// Two-stop gradient ramp derived from an accent: a darker
+        /// violet-shadowed low stop and a lightened high stop. Every
+        /// gradient fill in the design system (primary buttons, active nav
+        /// pills, toggle tracks, solid badges) samples this ramp so the look
+        /// follows the theme instead of a hardcoded color pair.
+        /// </summary>
+        public static (Vector4 Deep, Vector4 Hi) AccentRamp(Vector4 accent)
+            => (ColorUtils.LerpColor(accent, new Vector4(0.14f, 0.04f, 0.32f, 1f), 0.34f),
+                ColorUtils.LerpColor(accent, new Vector4(1f, 0.90f, 1f, 1f), 0.26f));
+
+        /// <summary>Deep stop of <see cref="AccentRamp"/> for the current accent.</summary>
+        public static Vector4 AccentDeep => AccentRamp(Accent).Deep;
+
+        /// <summary>High stop of <see cref="AccentRamp"/> for the current accent.</summary>
+        public static Vector4 AccentHi => AccentRamp(Accent).Hi;
 
         /// <summary>Standard readable text.</summary>
         public static Vector4 TextPrimary => Theme.Current.TextPrimary;
@@ -281,7 +361,7 @@ public static partial class SpheneUI
     }
 
     /// <summary>
-    /// Geometry tokens — control heights, corner radii and reserved space.
+    /// Geometry tokens · control heights, corner radii and reserved space.
     /// Helpers read these instead of hardcoding numbers or trusting ImGui's
     /// global style.
     /// </summary>
@@ -290,11 +370,37 @@ public static partial class SpheneUI
         /// <summary>Standard height of value controls (sliders, inputs, swatches).</summary>
         public static float ControlHeight => ImGui.GetFrameHeight();
 
+        /// <summary>
+        /// Height of one <see cref="Rows"/> row inside a
+        /// <see cref="Layout.RowGroup"/> · density-aware (24/28/32 base)
+        /// so settings rows compress on small windows.
+        /// </summary>
+        public static float RowHeight => MathF.Max(
+            (Density.Current switch
+            {
+                DensityProfile.Compact => 24f,
+                DensityProfile.Comfortable => 32f,
+                _ => 28f,
+            }) * SpheneUI.Scale,
+            ImGui.GetFrameHeight() + 6f * SpheneUI.Scale);
+
+        /// <summary>
+        /// Default minimum cell width for <see cref="Layout.CardGrid{T}"/>  · 
+        /// below this a column collapses into the next lower column count.
+        /// Density-aware so card grids fit narrower columns on small windows.
+        /// </summary>
+        public static float GridMinCell => Density.Current switch
+        {
+            DensityProfile.Compact => 180f,
+            DensityProfile.Comfortable => 230f,
+            _ => 200f,
+        } * SpheneUI.Scale;
+
         /// <summary>Corner radius of framed value controls.</summary>
         public static float ControlRadius => ImGui.GetFrameHeight() * ControlRadiusFactor;
 
         /// <summary>
-        /// Corner radius of push buttons — the theme's frame rounding, so
+        /// Corner radius of push buttons · the theme's frame rounding, so
         /// every button (menus, pages, settings) matches the title-bar
         /// buttons. Resolves to the compact token inside CompactUI scopes.
         /// </summary>
@@ -303,7 +409,7 @@ public static partial class SpheneUI
             : Theme.Current.FrameRounding;
 
         /// <summary>
-        /// Frame border thickness of push buttons — the theme's frame border,
+        /// Frame border thickness of push buttons · the theme's frame border,
         /// so buttons carry no outline unless the theme defines one.
         /// Resolves to the compact token inside CompactUI scopes.
         /// </summary>
@@ -361,7 +467,7 @@ public static partial class SpheneUI
         public static float TrailingIconReserve => ImGui.GetTextLineHeight() + Gap;
 
         /// <summary>
-        /// Vertical inset from a framed control's top edge to its text/glyph —
+        /// Vertical inset from a framed control's top edge to its text/glyph  · 
         /// the same offset <c>AlignTextToFramePadding</c> applies.
         /// </summary>
         public static float FrameTextInsetY => ImGui.GetStyle().FramePadding.Y;
@@ -390,7 +496,7 @@ public static partial class SpheneUI
 {
     public static partial class Colors
     {
-        /// <summary>Green for true, red for false — the bool-state pair.</summary>
+        /// <summary>Green for true, red for false · the bool-state pair.</summary>
         public static Vector4 Bool(bool input) => input ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed;
 
         /// <summary>Upload progress color: grey when empty, green when complete, yellow in between.</summary>

@@ -11,7 +11,7 @@ namespace Sphene.UI.Panels;
 /// Shared rich list-row renderer for the Mod Sharing surfaces: hover/accent fx,
 /// a rounded thumbnail (image or themed icon placeholder), an ellipsized title
 /// line and a muted meta line below it. Prepared so mod artwork, authors and
-/// versions can flow in as soon as they are known — callers only pass what they
+/// versions can flow in as soon as they are known · callers only pass what they
 /// have and the row degrades gracefully.
 /// </summary>
 internal static class ModListRows
@@ -28,13 +28,13 @@ internal static class ModListRows
     /// <summary>
     /// Draws one list row at the cursor and advances past it. Trailing widgets
     /// (checkboxes, badges, buttons) are drawn by the caller afterwards at
-    /// <see cref="Result.TrailingPos"/> — widgets submitted later win input over
+    /// <see cref="Result.TrailingPos"/> · widgets submitted later win input over
     /// the row's invisible button inside their own rect. After trailing content,
     /// restore the cursor with <see cref="Result.RowEnd"/>.
     /// <paramref name="trailingReserve"/> shrinks the text zone so ellipsized
     /// text never collides with the trailing content.
     /// <paramref name="checkIndicator"/> draws a selection square at the
-    /// trailing edge — use for whole-row toggle semantics (click anywhere).
+    /// trailing edge · use for whole-row toggle semantics (click anywhere).
     /// </summary>
     public static Result Draw(string id, string title, string? meta,
         IDalamudTextureWrap? thumb, FontAwesomeIcon placeholderIcon,
@@ -53,7 +53,11 @@ internal static class ModListRows
         var rowId = ImGui.GetID($"##modrow{id}");
         if (enabled)
         {
-            ImGui.InvisibleButton($"##modrow{id}", new Vector2(width, rowH));
+            // The row button must not cover the trailing reserve - submitted
+            // first it would claim the hover id and swallow every click
+            // meant for caller-drawn trailing widgets (checkboxes, actions).
+            ImGui.InvisibleButton($"##modrow{id}",
+                new Vector2(MathF.Max(0f, width - trailingReserve), rowH));
             clicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
             hovered = ImGui.IsItemHovered();
         }

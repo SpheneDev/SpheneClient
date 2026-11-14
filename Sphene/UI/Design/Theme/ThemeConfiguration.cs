@@ -45,7 +45,7 @@ public class ThemeConfiguration
     public float CompactPairRowContentPadding { get; set; } = 4.0f;
     // Pair-row corner radius; -1 follows <see cref="CompactChildRounding"/>.
     public float CompactPairRowRounding { get; set; } = -1.0f;
-    // Pair-row hover fill — kept independent from the global CompactHover so
+    // Pair-row hover fill · kept independent from the global CompactHover so
     // list rows can stay subtle while buttons keep a stronger highlight.
     public Vector4 CompactPairRowHover { get; set; } = new(0.55f, 0.62f, 0.85f, 0.10f);
     public float CompactIndentSpacing { get; set; } = 21.0f;
@@ -91,8 +91,8 @@ public class ThemeConfiguration
     public Vector4 CompactProgressBarForeground { get; set; } = new(0.2f, 0.4f, 0.8f, 1.0f);
     public Vector4 CompactProgressBarBorder { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
     public bool ProgressBarUseGradient { get; set; } = false;
-    public Vector4 ProgressBarGradientStart { get; set; } = new(0.2f, 0.4f, 0.8f, 1.0f);
-    public Vector4 ProgressBarGradientEnd { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
+    public Vector4 ProgressBarGradientStart { get; set; } = new(0.55f, 0.36f, 0.97f, 1.0f);
+    public Vector4 ProgressBarGradientEnd { get; set; } = new(0.66f, 0.33f, 0.97f, 1.0f);
     
     // Transmission Progress Bar Settings (bars under players)
     public float TransmissionBarRounding { get; set; } = 2.0f;
@@ -154,14 +154,14 @@ public class ThemeConfiguration
     // Basic Color Settings (as Vector4 for RGBA)
     public Vector4 PrimaryDark { get; set; } = new(0.1f, 0.1f, 0.15f, 0.8f);
     public Vector4 SecondaryDark { get; set; } = new(0.15f, 0.15f, 0.2f, 0.8f);
-    public Vector4 AccentBlue { get; set; } = new(0.2f, 0.4f, 0.8f, 1.0f);
-    public Vector4 AccentCyan { get; set; } = new(0.3f, 0.6f, 0.9f, 1.0f);
+    public Vector4 AccentBlue { get; set; } = new(0.545f, 0.361f, 0.965f, 1.0f);
+    public Vector4 AccentCyan { get; set; } = new(0.659f, 0.333f, 0.969f, 1.0f);
     public Vector4 TextPrimary { get; set; } = new(0.9f, 0.9f, 0.9f, 1.0f);
     public Vector4 TextSecondary { get; set; } = new(0.7f, 0.7f, 0.7f, 1.0f);
     public Vector4 Border { get; set; } = new(0.3f, 0.3f, 0.4f, 1.0f);
-    public Vector4 Hover { get; set; } = new(0.25f, 0.45f, 0.85f, 1.0f);
-    public Vector4 Active { get; set; } = new(0.3f, 0.5f, 0.9f, 1.0f);
-    public Vector4 HeaderBg { get; set; } = new(0.2f, 0.4f, 0.8f, 0.0f);
+    public Vector4 Hover { get; set; } = new(0.42f, 0.28f, 0.75f, 1.0f);
+    public Vector4 Active { get; set; } = new(0.55f, 0.36f, 0.97f, 1.0f);
+    public Vector4 HeaderBg { get; set; } = new(0.55f, 0.36f, 0.97f, 0.0f);
     
     // Extended Color Settings for complete customization
     // Window Colors
@@ -171,13 +171,13 @@ public class ThemeConfiguration
     public Vector4 BorderShadow { get; set; } = new(0.0f, 0.0f, 0.0f, 0.0f);
     
     // Frame Colors
-    public Vector4 FrameBg { get; set; } = new(0.16f, 0.29f, 0.48f, 0.54f);
-    public Vector4 FrameBgHovered { get; set; } = new(0.26f, 0.59f, 0.98f, 0.40f);
-    public Vector4 FrameBgActive { get; set; } = new(0.26f, 0.59f, 0.98f, 0.67f);
+    public Vector4 FrameBg { get; set; } = new(0.27f, 0.20f, 0.45f, 0.54f);
+    public Vector4 FrameBgHovered { get; set; } = new(0.66f, 0.33f, 0.97f, 0.40f);
+    public Vector4 FrameBgActive { get; set; } = new(0.66f, 0.33f, 0.97f, 0.67f);
     
     // Title Bar Colors
     public Vector4 TitleBg { get; set; } = new(0.04f, 0.04f, 0.04f, 1.0f);
-    public Vector4 TitleBgActive { get; set; } = new(0.16f, 0.29f, 0.48f, 1.0f);
+    public Vector4 TitleBgActive { get; set; } = new(0.30f, 0.22f, 0.50f, 1.0f);
     public Vector4 TitleBgCollapsed { get; set; } = new(0.0f, 0.0f, 0.0f, 0.51f);
     
     // Menu Colors
@@ -190,38 +190,38 @@ public class ThemeConfiguration
     public Vector4 ScrollbarGrabActive { get; set; } = new(0.51f, 0.51f, 0.51f, 1.0f);
     
     // Check Mark Colors
-    public Vector4 CheckMark { get; set; } = new(0.26f, 0.59f, 0.98f, 1.0f);
-    
+    public Vector4 CheckMark { get; set; } = new(0.66f, 0.33f, 0.97f, 1.0f);
+
     // Slider Colors
-    public Vector4 SliderGrab { get; set; } = new(0.24f, 0.52f, 0.88f, 1.0f);
-    public Vector4 SliderGrabActive { get; set; } = new(0.26f, 0.59f, 0.98f, 1.0f);
-    
+    public Vector4 SliderGrab { get; set; } = new(0.55f, 0.36f, 0.92f, 1.0f);
+    public Vector4 SliderGrabActive { get; set; } = new(0.66f, 0.33f, 0.97f, 1.0f);
+
     // Button Colors
-    public Vector4 Button { get; set; } = new(0.26f, 0.59f, 0.98f, 0.40f);
-    public Vector4 ButtonHovered { get; set; } = new(0.26f, 0.59f, 0.98f, 1.0f);
-    public Vector4 ButtonActive { get; set; } = new(0.06f, 0.53f, 0.98f, 1.0f);
-    
+    public Vector4 Button { get; set; } = new(0.66f, 0.33f, 0.97f, 0.40f);
+    public Vector4 ButtonHovered { get; set; } = new(0.66f, 0.33f, 0.97f, 1.0f);
+    public Vector4 ButtonActive { get; set; } = new(0.55f, 0.30f, 0.95f, 1.0f);
+
     // Header Colors
-    public Vector4 Header { get; set; } = new(0.26f, 0.59f, 0.98f, 0.31f);
-    public Vector4 HeaderHovered { get; set; } = new(0.26f, 0.59f, 0.98f, 0.80f);
-    public Vector4 HeaderActive { get; set; } = new(0.26f, 0.59f, 0.98f, 1.0f);
+    public Vector4 Header { get; set; } = new(0.66f, 0.33f, 0.97f, 0.31f);
+    public Vector4 HeaderHovered { get; set; } = new(0.66f, 0.33f, 0.97f, 0.80f);
+    public Vector4 HeaderActive { get; set; } = new(0.66f, 0.33f, 0.97f, 1.0f);
     
     // Separator Colors
     public Vector4 Separator { get; set; } = new(0.43f, 0.43f, 0.50f, 0.50f);
-    public Vector4 SeparatorHovered { get; set; } = new(0.10f, 0.40f, 0.75f, 0.78f);
-    public Vector4 SeparatorActive { get; set; } = new(0.10f, 0.40f, 0.75f, 1.0f);
+    public Vector4 SeparatorHovered { get; set; } = new(0.55f, 0.36f, 0.97f, 0.78f);
+    public Vector4 SeparatorActive { get; set; } = new(0.55f, 0.36f, 0.97f, 1.0f);
     
     // Resize Grip Colors
-    public Vector4 ResizeGrip { get; set; } = new(0.26f, 0.59f, 0.98f, 0.20f);
-    public Vector4 ResizeGripHovered { get; set; } = new(0.26f, 0.59f, 0.98f, 0.67f);
-    public Vector4 ResizeGripActive { get; set; } = new(0.26f, 0.59f, 0.98f, 0.95f);
-    
+    public Vector4 ResizeGrip { get; set; } = new(0.66f, 0.33f, 0.97f, 0.20f);
+    public Vector4 ResizeGripHovered { get; set; } = new(0.66f, 0.33f, 0.97f, 0.67f);
+    public Vector4 ResizeGripActive { get; set; } = new(0.66f, 0.33f, 0.97f, 0.95f);
+
     // Tab Colors
-    public Vector4 Tab { get; set; } = new(0.18f, 0.35f, 0.58f, 0.86f);
-    public Vector4 TabHovered { get; set; } = new(0.26f, 0.59f, 0.98f, 0.80f);
-    public Vector4 TabActive { get; set; } = new(0.20f, 0.41f, 0.68f, 1.0f);
+    public Vector4 Tab { get; set; } = new(0.36f, 0.24f, 0.60f, 0.86f);
+    public Vector4 TabHovered { get; set; } = new(0.66f, 0.33f, 0.97f, 0.80f);
+    public Vector4 TabActive { get; set; } = new(0.45f, 0.28f, 0.75f, 1.0f);
     public Vector4 TabUnfocused { get; set; } = new(0.07f, 0.10f, 0.15f, 0.97f);
-    public Vector4 TabUnfocusedActive { get; set; } = new(0.14f, 0.26f, 0.42f, 1.0f);
+    public Vector4 TabUnfocusedActive { get; set; } = new(0.28f, 0.20f, 0.45f, 1.0f);
     
     // Table Colors
     public Vector4 TableHeaderBg { get; set; } = new(0.19f, 0.19f, 0.20f, 1.0f);
@@ -232,13 +232,13 @@ public class ThemeConfiguration
     
     // Text Colors
     public Vector4 TextDisabled { get; set; } = new(0.5f, 0.5f, 0.5f, 1.0f);
-    public Vector4 TextSelectedBg { get; set; } = new(0.26f, 0.59f, 0.98f, 0.35f);
+    public Vector4 TextSelectedBg { get; set; } = new(0.66f, 0.33f, 0.97f, 0.35f);
     
     // Drag Drop Colors
     public Vector4 DragDropTarget { get; set; } = new(1.0f, 1.0f, 0.0f, 0.90f);
     
     // Navigation Colors
-    public Vector4 NavHighlight { get; set; } = new(0.26f, 0.59f, 0.98f, 1.0f);
+    public Vector4 NavHighlight { get; set; } = new(0.66f, 0.33f, 0.97f, 1.0f);
     public Vector4 NavWindowingHighlight { get; set; } = new(1.0f, 1.0f, 1.0f, 0.70f);
     public Vector4 NavWindowingDimBg { get; set; } = new(0.80f, 0.80f, 0.80f, 0.20f);
     

@@ -1,5 +1,6 @@
 using Sphene.API.Data;
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 
 namespace Sphene.PlayerData.Pairs.State;
 
@@ -16,6 +17,7 @@ public sealed class SessionAcknowledgmentState
         string? PreviousAcknowledgmentId,
         bool WasReplaced);
 
+    [StructLayout(LayoutKind.Auto)]
     public readonly record struct ProcessAcknowledgmentResult(
         bool WasProcessed,
         bool WasLatest,
@@ -108,12 +110,10 @@ public sealed class SessionAcknowledgmentState
         }
 
         var infoForTiming = latestInfo;
-        if (matchesHistory && !matchesLatest)
+        if (matchesHistory && !matchesLatest
+            && !_latestAcknowledgments.TryGetValue(userUid, out infoForTiming))
         {
-            if (!_latestAcknowledgments.TryGetValue(userUid, out infoForTiming))
-            {
-                infoForTiming = new LatestInfo(acknowledgmentId, receivedAt);
-            }
+            infoForTiming = new LatestInfo(acknowledgmentId, receivedAt);
         }
 
         infoForTiming = infoForTiming.AcknowledgmentId != null ? infoForTiming : new LatestInfo(acknowledgmentId, receivedAt);

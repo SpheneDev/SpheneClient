@@ -38,5 +38,13 @@
   "ToS.Paragraph5": {
     "message": "Nous nous réservons le droit de modifier ces conditions à tout moment. L'utilisation continue après les modifications constitue l'acceptation des nouvelles conditions. Pour toute question ou préoccupation, veuillez contacter notre équipe de support via Discord.",
     "description": "Fifth paragraph about terms changes and support"
+  },
+  "ToS.Paragraph7": {
+    "message": "Les contenus représentant ou sexualisant des Lalafells ou tout personnage paraissant mineur sont strictement interdits et entraînent une suppression immédiate et définitive du Network. Le harcèlement, les discours de haine, le doxxing et tout autre comportement toxique envers d'autres utilisateurs ne sont pas tolérés non plus - le Sphene Network repose sur le respect mutuel entre compagnons.",
+    "description": "Seventh paragraph about prohibited content and community standards"
+  },
+  "ToS.LastUpdated": {
+    "message": "Dernière mise à jour : octobre 2026",
+    "description": "Terms of Service last-updated stamp"
   }
 }

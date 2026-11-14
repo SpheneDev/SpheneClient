@@ -9,7 +9,6 @@ public static class ButtonStyleKeys
     public const string Compact_Conversion = "CompactUI.Conversion";
     public const string Compact_IncognitoOn = "CompactUI.IncognitoOn";
     public const string Compact_IncognitoOff = "CompactUI.IncognitoOff";
-    public const string Compact_AreaSelect = "CompactUI.AreaSelect";
     public const string Compact_Settings = "CompactUI.Settings";
     public const string Compact_ModSharing = "CompactUI.ModSharing";
     public const string Compact_Close = "CompactUI.Close";

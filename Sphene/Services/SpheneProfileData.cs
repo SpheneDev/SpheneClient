@@ -1,6 +1,8 @@
+using Sphene.API.Dto.User;
+
 namespace Sphene.Services;
 
-public record SpheneProfileData(bool IsFlagged, bool IsNSFW, string Base64ProfilePicture, string Base64SupporterPicture, string Description, string StatusMessage = "", string Tags = "", string Base64BannerImage = "", string Theme = "", int Visibility = 0, string Base64RowImage = "")
+public record SpheneProfileData(bool IsFlagged, bool IsNSFW, string Base64ProfilePicture, string Base64SupporterPicture, string Description, string StatusMessage = "", string Tags = "", string Base64BannerImage = "", string Theme = "", int Visibility = 0, string Base64RowImage = "", List<UserProfileLinkDto>? Links = null)
 {
     public Lazy<byte[]> ImageData { get; } = new Lazy<byte[]>(Convert.FromBase64String(Base64ProfilePicture));
     public Lazy<byte[]> SupporterImageData { get; } = new Lazy<byte[]>(string.IsNullOrEmpty(Base64SupporterPicture) ? [] : Convert.FromBase64String(Base64SupporterPicture));

@@ -31,7 +31,7 @@ internal sealed partial class CharaDataHubUi
 
         if (updateDto == null)
         {
-            SpheneUI.Text.ColoredWrapped("Something went wrong — there is no update DTO. Try re-downloading your character data.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.ColoredWrapped("Something went wrong · there is no update DTO. Try re-downloading your character data.", ImGuiColors.DalamudYellow);
             return;
         }
 
@@ -62,7 +62,7 @@ internal sealed partial class CharaDataHubUi
                     ImGui.SameLine();
                     using (ImRaii.Disabled(_charaDataManager.CharaUpdateTask != null && !_charaDataManager.CharaUpdateTask.IsCompleted))
                     {
-                        if (SpheneUI.Controls.SegmentButton("Save to Server", FontAwesomeIcon.ArrowCircleUp))
+                        if (SpheneUI.Controls.PrimaryButton("Save to Server", FontAwesomeIcon.ArrowCircleUp))
                         {
                             _charaDataManager.UploadCharaData(dataDto.Id);
                         }
@@ -100,7 +100,7 @@ internal sealed partial class CharaDataHubUi
                 }
                 else if (uploadTask is { IsFaulted: true })
                 {
-                    SpheneUI.Text.ColoredWrapped("Upload failed — check the log and try again.", ImGuiColors.DalamudRed);
+                    SpheneUI.Text.ColoredWrapped("Upload failed · check the log and try again.", ImGuiColors.DalamudRed);
                 }
             }, 5f, SpheneUI.Layout.CardAlignedAvailX());
         }
@@ -146,20 +146,17 @@ internal sealed partial class CharaDataHubUi
 
         SpheneUI.Layout.ScaledNextItemWidth(200);
         var dtoAccessType = updateDto.AccessType;
-        using (var accessCtl = SpheneUI.Controls.PushValueControlStyle())
+        if (SpheneUI.Controls.BeginComboBox("Access Restrictions", GetAccessTypeString(dtoAccessType)))
         {
-            if (ImGui.BeginCombo("Access Restrictions", GetAccessTypeString(dtoAccessType)))
+            foreach (var accessType in Enum.GetValues(typeof(AccessTypeDto)).Cast<AccessTypeDto>())
             {
-                foreach (var accessType in Enum.GetValues(typeof(AccessTypeDto)).Cast<AccessTypeDto>())
+                if (SpheneUI.Controls.Selectable(GetAccessTypeString(accessType), accessType == dtoAccessType))
                 {
-                    if (SpheneUI.Controls.Selectable(GetAccessTypeString(accessType), accessType == dtoAccessType))
-                    {
-                        updateDto.AccessType = accessType;
-                    }
+                    updateDto.AccessType = accessType;
                 }
-
-                ImGui.EndCombo();
             }
+
+            SpheneUI.Controls.EndComboBox();
         }
         SpheneUI.Controls.HelpText("You can control who has access to your character data based on the access restrictions." + SpheneUI.TooltipSeparator
             + "Specified: Only people and syncshells you directly specify in 'Specific Individuals / Syncshells' can access this character data" + Environment.NewLine
@@ -174,20 +171,17 @@ internal sealed partial class CharaDataHubUi
 
         SpheneUI.Layout.ScaledNextItemWidth(200);
         var dtoShareType = updateDto.ShareType;
-        using (var shareCtl = SpheneUI.Controls.PushValueControlStyle())
+        if (SpheneUI.Controls.BeginComboBox("Sharing", GetShareTypeString(dtoShareType)))
         {
-            if (ImGui.BeginCombo("Sharing", GetShareTypeString(dtoShareType)))
+            foreach (var shareType in Enum.GetValues(typeof(ShareTypeDto)).Cast<ShareTypeDto>())
             {
-                foreach (var shareType in Enum.GetValues(typeof(ShareTypeDto)).Cast<ShareTypeDto>())
+                if (SpheneUI.Controls.Selectable(GetShareTypeString(shareType), shareType == dtoShareType))
                 {
-                    if (SpheneUI.Controls.Selectable(GetShareTypeString(shareType), shareType == dtoShareType))
-                    {
-                        updateDto.ShareType = shareType;
-                    }
+                    updateDto.ShareType = shareType;
                 }
-
-                ImGui.EndCombo();
             }
+
+            SpheneUI.Controls.EndComboBox();
         }
         SpheneUI.Controls.HelpText("This regulates how you want to distribute this character data." + SpheneUI.TooltipSeparator
             + "Code Only: People require to have the code to download this character data" + Environment.NewLine
@@ -244,7 +238,7 @@ internal sealed partial class CharaDataHubUi
         }
         else if (hasFiles && !updateDto.IsAppearanceEqual)
         {
-            SpheneUI.Text.Colored("New data was set — it may contain files that will be uploaded when saving to the server.", ImGuiColors.DalamudYellow);
+            SpheneUI.Text.Colored("New data was set · it may contain files that will be uploaded when saving to the server.", ImGuiColors.DalamudYellow);
         }
 
         DrawInfoRow("Manipulation Data",
@@ -255,7 +249,7 @@ internal sealed partial class CharaDataHubUi
 
     private void DrawEditCharaDataGeneral(CharaDataFullExtendedDto dataDto, CharaDataExtendedUpdateDto updateDto)
     {
-        // Identity block — label/value rows instead of disabled input boxes.
+        // Identity block · label/value rows instead of disabled input boxes.
         DrawInfoRow("Character Data Code", () =>
         {
             SpheneUI.Text.Plain(dataDto.FullId);
@@ -290,11 +284,10 @@ internal sealed partial class CharaDataHubUi
         }
         SpheneUI.Controls.HelpText("If expiration is enabled, the uploaded character data will be automatically deleted from the server at the specified date.");
         using (ImRaii.Disabled(!isExpiring))
-        using (var dateCtl = SpheneUI.Controls.PushValueControlStyle())
         {
             ImGui.SameLine();
             SpheneUI.Layout.ScaledNextItemWidth(100);
-            if (ImGui.BeginCombo("Year", expiryDate.Year.ToString()))
+            if (SpheneUI.Controls.BeginComboBox("Year", expiryDate.Year.ToString()))
             {
                 for (int year = DateTime.UtcNow.Year; year < DateTime.UtcNow.Year + 4; year++)
                 {
@@ -303,13 +296,13 @@ internal sealed partial class CharaDataHubUi
                         updateDto.SetExpiry(year, expiryDate.Month, expiryDate.Day);
                     }
                 }
-                ImGui.EndCombo();
+                SpheneUI.Controls.EndComboBox();
             }
             ImGui.SameLine();
 
             int daysInMonth = DateTime.DaysInMonth(expiryDate.Year, expiryDate.Month);
             SpheneUI.Layout.ScaledNextItemWidth(100);
-            if (ImGui.BeginCombo("Month", expiryDate.Month.ToString()))
+            if (SpheneUI.Controls.BeginComboBox("Month", expiryDate.Month.ToString()))
             {
                 for (int month = 1; month <= 12; month++)
                 {
@@ -318,12 +311,12 @@ internal sealed partial class CharaDataHubUi
                         updateDto.SetExpiry(expiryDate.Year, month, expiryDate.Day);
                     }
                 }
-                ImGui.EndCombo();
+                SpheneUI.Controls.EndComboBox();
             }
             ImGui.SameLine();
 
             SpheneUI.Layout.ScaledNextItemWidth(100);
-            if (ImGui.BeginCombo("Day", expiryDate.Day.ToString()))
+            if (SpheneUI.Controls.BeginComboBox("Day", expiryDate.Day.ToString()))
             {
                 for (int day = 1; day <= daysInMonth; day++)
                 {
@@ -332,7 +325,7 @@ internal sealed partial class CharaDataHubUi
                         updateDto.SetExpiry(expiryDate.Year, expiryDate.Month, day);
                     }
                 }
-                ImGui.EndCombo();
+                SpheneUI.Controls.EndComboBox();
             }
         }
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
@@ -529,7 +522,7 @@ internal sealed partial class CharaDataHubUi
     private void DrawMcdOnline()
     {
         DrawPageTitle("Character Data Online",
-            "Your character data stored on the server — create codes, edit entries, and manage sharing.");
+            "Your character data stored on the server · create codes, edit entries, and manage sharing.");
 
         DrawHelpFoldout("In this tab you can create, view and edit your own Sphene Character Data that is stored on the server." + Environment.NewLine + Environment.NewLine
             + "Sphene Character Data Online functions similar to the previous MCDF standard for exporting your character, except that you do not have to send a file to the other person but solely a code." + Environment.NewLine + Environment.NewLine
@@ -603,7 +596,7 @@ internal sealed partial class CharaDataHubUi
         }
         else if (_charaDataManager.DataCreationTask is { IsFaulted: true })
         {
-            SpheneUI.Text.ColoredWrapped("Failed to create the entry on server — check the log and try again.", ImGuiColors.DalamudRed);
+            SpheneUI.Text.ColoredWrapped("Failed to create the entry on server · check the log and try again.", ImGuiColors.DalamudRed);
         }
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
@@ -651,7 +644,7 @@ internal sealed partial class CharaDataHubUi
         else if (filteredEntries.Count == 0)
         {
             SpheneUI.Layout.Callout(_charaDataManager.OwnCharaData.Count == 0
-                    ? "No character data entries yet — create one with \"New Entry\"."
+                    ? "No character data entries yet · create one with \"New Entry\"."
                     : "No entries match the active filters.",
                 FontAwesomeIcon.Search, ImGuiColors.DalamudGrey);
         }
@@ -693,7 +686,7 @@ internal sealed partial class CharaDataHubUi
 
     /// <summary>
     /// One entry in the online list: code + favorite star, status icons right,
-    /// description and meta line below — click anywhere on the text to edit it.
+    /// description and meta line below · click anywhere on the text to edit it.
     /// </summary>
     private void DrawMcdOnlineEntry(CharaDataFullExtendedDto entry)
     {
@@ -733,7 +726,7 @@ internal sealed partial class CharaDataHubUi
             SpheneUI.Controls.DockToCardEdge(clusterW);
             SpheneUI.Icons.BoolIcon(isDownloadable, false);
             SpheneUI.AttachTooltip(isDownloadable ? "Can be downloaded by others"
-                : "Cannot be downloaded: has missing files or data — review this entry");
+                : "Cannot be downloaded: has missing files or data · review this entry");
             ImGui.SameLine();
             SpheneUI.Icons.BoolIcon(hasGlamourerData, false);
             SpheneUI.AttachTooltip(hasGlamourerData ? "Has Glamourer data attached" : "No Glamourer data attached");
@@ -774,17 +767,20 @@ internal sealed partial class CharaDataHubUi
     {
         SpheneUI.Layout.Collapsible("Access for Specific Individuals / Syncshells", () =>
         {
-            // Two bounded columns — the old SameLine+Space layout overflowed on
+            // Two bounded columns · the old SameLine+Space layout overflowed on
             // narrower windows and the list boxes used fixed pixel sizes.
-            if (ImGui.BeginTable("specificAccess", 2, ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
+            using (var specTable = SpheneUI.Tables.Begin("specificAccess", 2,
+                ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
             {
-                ImGui.TableSetupColumn("Individuals", ImGuiTableColumnFlags.WidthStretch, 0.5f);
-                ImGui.TableSetupColumn("Syncshells", ImGuiTableColumnFlags.WidthStretch, 0.5f);
-                ImGui.TableNextColumn();
-                DrawSpecificIndividuals(updateDto);
-                ImGui.TableNextColumn();
-                DrawSpecificGroups(updateDto);
-                ImGui.EndTable();
+                if (specTable.Success)
+                {
+                    SpheneUI.Tables.Column("Individuals", ImGuiTableColumnFlags.WidthStretch, 0.5f);
+                    SpheneUI.Tables.Column("Syncshells", ImGuiTableColumnFlags.WidthStretch, 0.5f);
+                    SpheneUI.Tables.NextColumn();
+                    DrawSpecificIndividuals(updateDto);
+                    SpheneUI.Tables.NextColumn();
+                    DrawSpecificGroups(updateDto);
+                }
             }
 
             SpheneUI.Layout.Separator();
@@ -812,14 +808,17 @@ internal sealed partial class CharaDataHubUi
             + "Note: Mistyped entries will be automatically removed on updating data to server.");
 
         var listHeight = 140f * SpheneUI.Scale;
-        using (var lb = ImRaii.ListBox("##userList", new(-1f, listHeight)))
+        using (var lb = SpheneUI.Lists.Begin("##userList", height: listHeight))
         {
-            foreach (var user in updateDto.UserList)
+            if (lb.Success)
             {
-                var userString = user.AliasOrUID;
-                if (SpheneUI.Controls.Selectable(userString, string.Equals(user.UID, _selectedSpecificUserIndividual, StringComparison.Ordinal)))
+                foreach (var user in updateDto.UserList)
                 {
-                    _selectedSpecificUserIndividual = user.UID;
+                    if (SpheneUI.Lists.Item(user.UID, user.AliasOrUID,
+                        string.Equals(user.UID, _selectedSpecificUserIndividual, StringComparison.Ordinal)))
+                    {
+                        _selectedSpecificUserIndividual = user.UID;
+                    }
                 }
             }
         }
@@ -876,14 +875,18 @@ internal sealed partial class CharaDataHubUi
             + "Note: Mistyped entries will be automatically removed on updating data to server.");
 
         var listHeight = 140f * SpheneUI.Scale;
-        using (var lb = ImRaii.ListBox("##groupList", new(-1f, listHeight)))
+        using (var lb = SpheneUI.Lists.Begin("##groupList", height: listHeight))
         {
-            foreach (var group in updateDto.GroupList)
+            if (lb.Success)
             {
-                var userString = string.IsNullOrEmpty(group.Alias) ? group.GID : $"{group.Alias} ({group.GID})";
-                if (SpheneUI.Controls.Selectable(userString, string.Equals(group.GID, _selectedSpecificGroupIndividual, StringComparison.Ordinal)))
+                foreach (var group in updateDto.GroupList)
                 {
-                    _selectedSpecificGroupIndividual = group.GID;
+                    var userString = string.IsNullOrEmpty(group.Alias) ? group.GID : $"{group.Alias} ({group.GID})";
+                    if (SpheneUI.Lists.Item(group.GID, userString,
+                        string.Equals(group.GID, _selectedSpecificGroupIndividual, StringComparison.Ordinal)))
+                    {
+                        _selectedSpecificGroupIndividual = group.GID;
+                    }
                 }
             }
         }
@@ -928,8 +931,8 @@ internal sealed partial class CharaDataHubUi
         SpheneUI.Controls.InputText(inputId, ref value, 20);
         ImGui.SameLine(0.0f, 0.0f);
 
-        using var combo = ImRaii.Combo(comboId, string.Empty, ImGuiComboFlags.NoPreview | ImGuiComboFlags.PopupAlignLeft);
-        if (!combo)
+        if (!SpheneUI.Controls.BeginComboBox(comboId, string.Empty,
+                flags: ImGuiComboFlags.NoPreview | ImGuiComboFlags.PopupAlignLeft))
         {
             return;
         }
@@ -960,5 +963,6 @@ internal sealed partial class CharaDataHubUi
                 value = aliasOrId;
             }
         }
+        SpheneUI.Controls.EndComboBox();
     }
 }

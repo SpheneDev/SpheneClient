@@ -35,10 +35,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private readonly ICommandManager _commandManager;
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly ShrinkUHostService _shrinkuHostService;
+    private readonly NotificationInboxService _notificationInbox;
+    private readonly Sphene.PlayerData.Pairs.PairManager _pairManager;
     // Built-in ShrinkU integration
     private readonly ShrinkU.Configuration.ShrinkUConfigService _shrinkuConfig;
     private readonly ShrinkU.UI.ConversionUI _shrinkuConversion;
     private readonly ShrinkU.UI.FirstRunSetupUI _shrinkuFirstRun;
+    private float _bubbleT;
+    private float _menuT;
     
     private Vector2 _iconPosition = new Vector2(100, 100);
     private bool _hasStoredIconPosition = false;
@@ -88,7 +92,9 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         ShrinkU.Configuration.ShrinkUConfigService shrinkuConfig,
         ShrinkU.UI.ConversionUI shrinkuConversion,
         ShrinkU.UI.SettingsUI shrinkuSettings,
-        ShrinkU.UI.FirstRunSetupUI shrinkuFirstRun) 
+        ShrinkU.UI.FirstRunSetupUI shrinkuFirstRun,
+        NotificationInboxService notificationInbox,
+        Sphene.PlayerData.Pairs.PairManager pairManager)
         : base(logger, mediator, "###SpheneIcon", performanceCollectorService)
     {
         _logger = logger;
@@ -100,6 +106,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _commandManager = commandManager;
         _dalamudUtilService = dalamudUtilService;
         _shrinkuHostService = shrinkuHostService;
+        _notificationInbox = notificationInbox;
+        _pairManager = pairManager;
         _shrinkuConfig = shrinkuConfig;
         _shrinkuConversion = shrinkuConversion;
         _ = shrinkuSettings;
@@ -156,58 +164,294 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _logger.LogDebug("SpheneIcon created at position {Position}", _iconPosition);
     }
     
+    /// <summary>
+    /// Right-click quick panel: status header, pending inbox shortcut,
+    /// app jump-off points (Hub / CompactUI / Settings / Downloads), the
+    /// compatible-plugin grid, icon options and community links - all in the
+    /// segmented design language instead of raw menu items.
+    /// </summary>
+    /// <summary>
+    /// Right-click regulator menu · a compact flyout that grows straight out
+    /// of the icon's right edge (the mark tilts away while open). Two-column
+    /// plugin grid keeps the panel short; app destinations are icon-only so
+    /// nothing clips.
+    /// </summary>
+    /// Inbox mode inside the icon menu · click "pending" swaps the panel's
+    /// content instead of opening a second window; back shrinks it again.
+    private bool _menuShowsInbox;
+
+    /// <summary>
+    /// Inbox content swapped into the icon-menu panel · the panel widens
+    /// (flyout auto-resizes), caps at the menu's height and scrolls past
+    /// that. The back arrow returns to the quick menu view.
+    /// </summary>
+    private void DrawMenuInbox(float w, float listH)
+    {
+        // back + title on one line · back is the only exit besides closing
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowLeft))
+        {
+            _menuShowsInbox = false;
+        }
+        SpheneUI.AttachTooltip("Back to menu");
+        ImGui.SameLine();
+        SpheneUI.Text.Colored("Pending", SpheneUI.Colors.TextPrimary);
+        var pending = NotificationInbox.PendingCount(_notificationInbox, _pairManager);
+        ImGui.SameLine();
+        SpheneUI.Text.Timestamp($"{pending} items");
+        SpheneUI.Layout.Separator();
+
+        // fixed list height handed in by the panel · more items scroll.
+        if (pending == 0)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.BellSlash,
+                "All caught up", "Pair requests, transfers and updates land here.");
+        }
+        else if (SpheneUI.Layout.BeginScrollArea("menu-inbox-scroll",
+                new Vector2(w, listH)))
+        {
+            NotificationInbox.Draw(_notificationInbox, _pairManager,
+                _apiController, Mediator);
+            SpheneUI.Layout.EndScrollArea();
+        }
+    }
+
     private void DrawContextMenu()
     {
-        // Use BeginPopupContextItem for proper context menu behavior
-        if (SpheneUI.Popups.BeginContextStyled("SpheneIconContextMenu"))
+        if (!SpheneUI.Popups.BeginFlyout("icon-menu"))
         {
-            SpheneUI.Text.Plain("Quick Access Plugins");
-            ImGui.Separator();
-            
-            // Check available plugins and show them
-            var availablePlugins = GetAvailablePlugins();
-            
-            foreach (var plugin in availablePlugins)
-            {
-                var isShrinkU = string.Equals(plugin.InternalName, "ShrinkU.Builtin", StringComparison.OrdinalIgnoreCase);
-                var enabled = !isShrinkU || _configService.Current.EnableShrinkUIntegration;
-                if (ImGui.MenuItem($"Open {plugin.Name}", string.Empty, false, enabled))
-                {
-                    OpenPlugin(plugin.InternalName);
-                }
-            }
-            
-            if (availablePlugins.Count == 0)
-            {
-                SpheneUI.Text.Muted("No compatible plugins found");
-            }
-
-            SpheneUI.Layout.Separator();
-
-            // Toggle icon lock state
-            var locked = _configService.Current.LockSpheneIcon;
-            if (ImGui.MenuItem("Lock Icon Position", string.Empty, locked, true))
-            {
-                _configService.Current.LockSpheneIcon = !locked;
-                _configService.Save();
-            }
-            
-            SpheneUI.Layout.Separator();
-            
-            if (ImGui.MenuItem("Sphene Hub"))
-            {
-                // Open the central Sphene Hub window
-                _mediator.Publish(new UiToggleMessage(typeof(SpheneHubUi)));
-            }
-
-            if (ImGui.MenuItem("Settings"))
-            {
-                // Open Sphene settings
-                _mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
-            }
-            
-            SpheneUI.Popups.EndStyled();
+            _menuShowsInbox = false;
+            // snap the width tween back to menu size · otherwise a closed
+            // inbox-mode tween reopens the panel at inbox width.
+            SpheneUI.Fx.TweenSet("icon-menu:w", 272f * SpheneUI.Scale);
+            return;
         }
+        var scale = SpheneUI.Scale;
+        var accent = SpheneUI.Colors.Accent;
+        var pending = NotificationInbox.PendingCount(_notificationInbox, _pairManager);
+        var gap = ImGui.GetStyle().ItemSpacing.X;
+        var closeMenu = false;
+
+        // fixed geometry · the panel is exactly 272px wide in the menu and
+        // 304px in the inbox, PanelH tall in both - a dummy pads whatever
+        // the view didn't fill, nothing is left to auto-measurement.
+        // pending button row (~30) + its separator (~10) drops out when
+        // nothing is pending - the panel shrinks by exactly that much.
+        var panelH = pending > 0 ? 384f : 344f;
+        var w = SpheneUI.Fx.Tween("icon-menu:w",
+            _menuShowsInbox ? 304f * scale : 272f * scale);
+        var boundMin = ImGui.GetCursorScreenPos();
+        ImGui.Dummy(new Vector2(w, 0f));
+        SpheneUI.ContentBounds.Push(
+            new Vector2(boundMin.X, boundMin.X + w));
+        if (_menuShowsInbox)
+        {
+            DrawMenuInbox(w, panelH * scale - 48f * scale);
+        }
+        else
+        {
+
+        // Status strip · dot + name + server state, one line
+        var statusColor = GetStatusColor(_apiController.ServerState);
+        SpheneUI.Icons.Icon(FontAwesomeIcon.Circle, statusColor);
+        ImGui.SameLine();
+        SpheneUI.Text.Colored("Sphene", SpheneUI.Colors.TextPrimary);
+        ImGui.SameLine();
+        SpheneUI.Text.Timestamp(GetStatusText(_apiController.ServerState));
+
+        if (pending > 0)
+        {
+            // fixed to the tweened width · a full-avail button would hold
+            // the auto-resize flyout at the wider inbox size on the way back.
+            if (SpheneUI.Controls.SegmentButton(
+                    $"{pending} pending · inbox###icon-open-inbox",
+                    FontAwesomeIcon.Bell, size: new Vector2(w, 0f),
+                    accent: SpheneUI.Palette.SpheneGold))
+            {
+                // swap this panel into the inbox instead of a second window
+                _menuShowsInbox = true;
+            }
+            SpheneUI.Layout.Separator();
+        }
+
+        // App jump-off · one row of four icon buttons, tooltips carry names
+        var appH = 30f * scale;
+        var appW = (w - gap * 3f) * 0.25f;
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Home, appH, null, null, appW))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(SpheneHubUi)));
+            closeMenu = true;
+        }
+        SpheneUI.AttachTooltip("Sphene Hub");
+        ImGui.SameLine(0f, gap);
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.List, appH, null, null, appW))
+        {
+            ToggleMainWindow();
+            closeMenu = true;
+        }
+        SpheneUI.AttachTooltip("Control Panel");
+        ImGui.SameLine(0f, gap);
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Cog, appH, null, null, appW))
+        {
+            _mediator.Publish(new UiToggleMessage(typeof(SettingsUi)));
+            closeMenu = true;
+        }
+        SpheneUI.AttachTooltip("Settings");
+        ImGui.SameLine(0f, gap);
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.ExchangeAlt, appH, null, null, appW))
+        {
+            _mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.ModSharing));
+            closeMenu = true;
+        }
+        SpheneUI.AttachTooltip("Mod Share");
+
+        SpheneUI.Layout.Separator();
+        SpheneUI.Text.SectionHeader("Quick Access");
+
+        // Two-column plugin grid · names only (the "Open" prefix stole ~35px),
+        // ellipsized to the cell so nothing overflows the panel edge
+        var plugins = GetAvailablePlugins();
+        var colW = (w - gap) * 0.5f;
+        var cell = new Vector2(colW, 30f * scale);
+        for (var i = 0; i < plugins.Count; i++)
+        {
+            var plugin = plugins[i];
+            var isShrinkU = string.Equals(plugin.InternalName, "ShrinkU.Builtin",
+                StringComparison.OrdinalIgnoreCase);
+            var enabled = !isShrinkU || _configService.Current.EnableShrinkUIntegration;
+            DrawPluginCell(plugin, cell, accent, enabled, ref closeMenu);
+            if (i % 2 == 0 && i + 1 < plugins.Count)
+            {
+                ImGui.SameLine(0f, gap);
+            }
+        }
+        if (plugins.Count == 0)
+        {
+            SpheneUI.Text.Muted("No compatible plugins found");
+        }
+
+        SpheneUI.Layout.Separator();
+
+        var locked = _configService.Current.LockSpheneIcon;
+        if (SpheneUI.Controls.Checkbox("Lock position###icon-lock", ref locked))
+        {
+            _configService.Current.LockSpheneIcon = locked;
+            _configService.Save();
+        }
+        ImGui.SameLine();
+        var bubble = _configService.Current.ShowIconNotificationBubble;
+        if (SpheneUI.Controls.Checkbox("Bubble###icon-bubble", ref bubble))
+        {
+            _configService.Current.ShowIconNotificationBubble = bubble;
+            _configService.Save();
+        }
+        SpheneUI.AttachTooltip("Notification bubble on the icon");
+
+        SpheneUI.Layout.Separator();
+        LinkChips.Chip("Discord", "https://discord.gg/GbnwsP2XsF", "discord", accent, 1);
+        ImGui.SameLine();
+        LinkChips.Chip("Ko-fi", "https://ko-fi.com/sphene", "kofi",
+            SpheneUI.Palette.SpheneGold, 2);
+        }   // menu content
+
+        // pad the shorter view out to the fixed panel height
+        ImGui.Dummy(new Vector2(0f, MathF.Max(0f,
+            boundMin.Y + panelH * scale - ImGui.GetCursorScreenPos().Y)));
+        SpheneUI.ContentBounds.Pop();
+        if (closeMenu)
+        {
+            SpheneUI.Popups.CloseFlyout("icon-menu");
+        }
+        SpheneUI.Popups.EndFlyout();
+    }
+
+    /// <summary>
+    /// One plugin cell in the Quick Access grid - the plugin's real logo
+    /// cover-fills the left icon zone (rounded on the leading edge), name
+    /// ellipsized next to it. Hover lifts the whole cell like the link cards.
+    /// </summary>
+    private void DrawPluginCell(PluginInfo plugin, Vector2 cell, Vector4 accent,
+        bool enabled, ref bool closeMenu)
+    {
+        var scale = SpheneUI.Scale;
+        var dl = ImGui.GetWindowDrawList();
+        ImGui.PushID($"plcell-{plugin.InternalName}");
+        var clicked = ImGui.InvisibleButton("##cell", cell);
+        var hovered = enabled && ImGui.IsItemHovered();
+        var min = ImGui.GetItemRectMin();
+        var max = min + cell;
+        var radius = 8f * scale;
+        var id = ImGui.GetID("##cell");
+        var t = SpheneUI.Fx.HoverT(id, hovered);
+
+        var fill = SpheneUI.Layout.NavRailBandColor();
+        fill = SpheneUI.ColorUtils.WithAlpha(fill,
+            MathF.Min(1f, fill.W + 0.08f * t));
+        dl.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(fill), radius);
+        dl.AddRect(min, max, SpheneUI.ColorUtils.ToU32(
+            SpheneUI.ColorUtils.WithAlpha(
+                hovered ? accent : SpheneUI.Colors.Border,
+                hovered ? 0.55f : 0.3f)), radius);
+
+        // logo zone · square on the cell's left edge, logo cover-fills it
+        var side = cell.Y;
+        var logoMax = min + new Vector2(side, side);
+        var wrap = SphenePluginIcons.Texture(plugin.InternalName);
+        var alpha = enabled ? 1f : 0.45f;
+        if (wrap != null)
+        {
+            // logo conforms to the cell's rounding - rounded image with the
+            // square right corners masked by the cell clip.
+            dl.PushClipRect(min, max, true);
+            SpheneUI.Media.ImageRoundedInRect(dl, wrap, min, logoMax,
+                radius, new Vector4(1f, 1f, 1f, alpha));
+            dl.PopClipRect();
+            // hairline frame around the logo zone · barely-there border,
+            // easing to a soft accent edge on hover
+            var logoRim = SpheneUI.ColorUtils.WithAlpha(
+                hovered ? accent : SpheneUI.Colors.Border,
+                hovered ? 0.5f : 0.35f);
+            dl.AddRect(min, logoMax, SpheneUI.ColorUtils.ToU32(logoRim), radius,
+                ImDrawFlags.RoundCornersLeft);
+            dl.AddLine(new Vector2(logoMax.X + 0.5f, min.Y + 4f * scale),
+                new Vector2(logoMax.X + 0.5f, max.Y - 4f * scale),
+                SpheneUI.ColorUtils.ToU32(
+                    SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.Border, 0.3f)));
+        }
+        else
+        {
+            // drawlist-level glyph render - NOT an ImGui item, so the 2-col
+            // SameLine pairing keeps the cell rect as "last item" (an item
+            // here would steal the same-line anchor and overlap the next cell).
+            var glyph = SphenePluginIcons.FallbackGlyph(plugin.InternalName);
+            var glyphStr = FontAwesomeExtensions.ToIconString(glyph);
+            var gi = ImGui.CalcTextSize(glyphStr);
+            dl.AddText(UiBuilder.IconFont, gi.Y,
+                min + (new Vector2(side, side) - gi) * 0.5f,
+                SpheneUI.ColorUtils.ToU32(
+                    SpheneUI.ColorUtils.WithAlpha(
+                        hovered ? accent : SpheneUI.Colors.TextMuted, alpha)),
+                glyphStr);
+        }
+
+        // label · vertically centered next to the logo, ellipsized to fit
+        var label = SpheneUI.Text.Ellipsize(
+            plugin.Name, cell.X - side - 8f * scale);
+        var th = ImGui.GetTextLineHeight();
+        dl.AddText(new Vector2(logoMax.X + 6f * scale, min.Y + (cell.Y - th) * 0.5f),
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                SpheneUI.Colors.TextPrimary, alpha)), label);
+
+        if (clicked && enabled)
+        {
+            OpenPlugin(plugin.InternalName);
+            closeMenu = true;
+        }
+        if (ImGui.IsItemHovered())
+        {
+            SpheneUI.AttachTooltip(enabled
+                ? plugin.Name : "Enable ShrinkU integration first");
+        }
+        ImGui.PopID();
     }
     
     private List<PluginInfo> GetAvailablePlugins()
@@ -462,13 +706,24 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                  latestEventConfig.PulseMinRadius, latestEventConfig.PulseMaxRadius), iconAlpha, cfg.IconRainbowSpeed);
         }
 
+        // Regulator menu tilt · while the quick menu grows out of the
+        // icon's right edge, the mark leans away from it (counterclockwise),
+        // like the regulator swivelling to project the panel.
+        var menuOpen = SpheneUI.Popups.IsFlyoutOpen("icon-menu");
+        var mdt = ImGui.GetIO().DeltaTime;
+        _menuT = Math.Clamp(_menuT + (menuOpen ? mdt : -mdt) * 6f, 0f, 1f);
+        var menuT = _menuT * _menuT * (3f - 2f * _menuT);
+        // the menu mirrors to the right when the icon sits near the left
+        // screen edge - the tilt follows the same direction.
+        var menuOnRight = iconPos.X - 280f * SpheneUI.Scale < 4f;
+        var tilt = (menuOnRight ? -0.28f : 0.28f) * menuT;
+
         // Draw Sphene Logo or fallback
-        var logoTexture = _spheneLogoTexture ??= SpheneUI.Media.Texture("sphene:logo",
-            () => Convert.FromBase64String(SpheneImages.SpheneLogoBase64));
+        var logoTexture = _spheneLogoTexture ??= SpheneBrandIcons.SpheneLogo();
         if (logoTexture != null)
         {
-            SpheneUI.Media.ImageInRect(drawList, logoTexture, iconPos,
-                iconPos + new Vector2(scaledIconSize, scaledIconSize), ImageFit.Stretch,
+            SpheneUI.Media.ImageQuadInRect(drawList, logoTexture, iconPos,
+                iconPos + new Vector2(scaledIconSize, scaledIconSize), tilt,
                 new Vector4(1, 1, 1, iconAlpha));
         }
         else
@@ -502,6 +757,105 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
         // Draw event badges
         DrawEventBadges(drawList, iconPos, scaledIconSize, cfg);
+
+        // Notification bubble ("Sprechblase") · eases in top-right of the
+        // icon while inbox items or pair requests are pending. Click opens
+        // the inbox flyout anchored to the bubble.
+        var pending = NotificationInbox.PendingCount(_notificationInbox, _pairManager);
+        var bubbleOn = cfg.ShowIconNotificationBubble && pending > 0;
+        var dt = ImGui.GetIO().DeltaTime;
+        _bubbleT = Math.Clamp(_bubbleT + (bubbleOn ? dt : -dt) * 8f, 0f, 1f);
+        var bubbleT = _bubbleT * _bubbleT * (3f - 2f * _bubbleT);
+        var bubbleHovered = false;
+        if (bubbleT > 0.01f)
+        {
+            var countText = pending > 9 ? "9+" : pending.ToString();
+            var countW = ImGui.CalcTextSize(countText).X;
+            var bubbleW = (countW + 18f) * bubbleT;
+            var bubbleH = 17f;
+            var iconRight = iconPos.X + scaledIconSize;
+            var bubbleMax = new Vector2(iconRight + bubbleW * 0.45f, iconPos.Y - 1f);
+            var bubbleMin = bubbleMax - new Vector2(bubbleW, bubbleH);
+
+            var bubbleFill = SpheneUI.ColorUtils.WithAlpha(
+                SpheneUI.Palette.EtherealPurple, 0.92f * iconAlpha * bubbleT);
+            drawList.AddRectFilled(bubbleMin, bubbleMax,
+                ImGui.ColorConvertFloat4ToU32(bubbleFill), bubbleH * 0.5f);
+            drawList.AddRect(bubbleMin, bubbleMax,
+                ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 0.5f * iconAlpha * bubbleT)),
+                bubbleH * 0.5f, ImDrawFlags.None, 1f);
+
+            // speech tail · little triangle pointing down-left at the icon
+            var tailBase = new Vector2(bubbleMin.X + bubbleW * 0.25f, bubbleMax.Y);
+            drawList.AddTriangleFilled(
+                tailBase, tailBase + new Vector2(9f, 0f), tailBase + new Vector2(2f, 6f),
+                ImGui.ColorConvertFloat4ToU32(bubbleFill));
+
+            if (bubbleW > countW + 8f)
+            {
+                var textPos = new Vector2(
+                    bubbleMin.X + (bubbleW - countW) * 0.5f,
+                    bubbleMin.Y + (bubbleH - ImGui.GetTextLineHeight()) * 0.5f);
+                drawList.AddText(textPos,
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, iconAlpha * bubbleT)),
+                    countText);
+            }
+
+            var mouse = ImGui.GetIO().MousePos;
+            bubbleHovered = bubbleT > 0.9f
+                && mouse.X >= bubbleMin.X && mouse.X <= bubbleMax.X
+                && mouse.Y >= bubbleMin.Y && mouse.Y <= bubbleMax.Y;
+            if (bubbleHovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    if (SpheneUI.Popups.IsFlyoutOpen("icon-inbox"))
+                    {
+                        SpheneUI.Popups.CloseFlyout("icon-inbox");
+                    }
+                    else
+                    {
+                        // same anchor the quick menu uses · icon rect
+                        SpheneUI.Popups.OpenFlyout("icon-inbox", iconPos);
+                    }
+                }
+            }
+        }
+
+        // Inbox flyout · shared pending-items list (pair requests inline
+        // actions, transfers, updates, area-bound consents). EndFlyout only
+        // pairs with a successful BeginFlyout - an unmatched End pops style
+        // vars it never pushed (native crash).
+        if (SpheneUI.Popups.BeginFlyout("icon-inbox"))
+        {
+            var flyW = 300f * SpheneUI.Scale;
+            // height follows content · pair rows ~46px, inbox rows ~40px,
+            // capped at 320px before scrolling kicks in.
+            var itemCount = PairRequestsSection.PendingCount(_pairManager)
+                + _notificationInbox.GetItems().Count;
+            // same height as the quick menu so both panels read as one set -
+            // more items just scroll inside it.
+            var flyH = Math.Clamp(itemCount * 58f * SpheneUI.Scale
+                + SpheneUI.Spacing.X12.Scaled, 0f, 240f * SpheneUI.Scale);
+            // a 0-height scroll area means "fill remaining" and grows the
+            // auto-resize flyout forever · draw the empty state directly.
+            if (itemCount == 0)
+            {
+                ImGui.Dummy(new Vector2(flyW, 0f));
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.BellSlash,
+                    "All caught up",
+                    "Pair requests, transfers and updates land here.");
+            }
+            else if (SpheneUI.Layout.BeginScrollArea("icon-inbox-scroll",
+                    new Vector2(flyW, flyH)))
+            {
+                NotificationInbox.Draw(_notificationInbox, _pairManager,
+                    _apiController, Mediator);
+                SpheneUI.Layout.EndScrollArea();
+            }
+            SpheneUI.Popups.EndFlyout();
+        }
 
         // Draw hold-progress ring when mouse is held and drag is not locked
         if (!iconLocked && ImGui.IsMouseDown(ImGuiMouseButton.Left) && (_wasClicked || _isDragging))
@@ -553,7 +907,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // Handle dragging and clicking only for the icon area (rest of window is click-through)
         ImGui.SetCursorPos(new Vector2(padding, padding));
         ImGui.InvisibleButton("##sphene_icon_window", new Vector2(iconSize, iconSize));
-        
+        // Right-click · the regulator menu grows straight out of the icon's
+        // right edge via the flyout anchor (item rect = icon rect here).
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+        {
+            SpheneUI.Popups.ToggleFlyout("icon-menu");
+        }
+
         // Handle mouse interactions (press-and-hold before dragging)
         // Start tracking on left-press over the icon
         if (ImGui.IsItemActivated() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -583,8 +943,8 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             {
                 var delta = new Vector2(currentMouse.X - _dragStartMousePos.X, currentMouse.Y - _dragStartMousePos.Y);
                 var newPos = new Vector2(_dragStartIconPos.X + delta.X, _dragStartIconPos.Y + delta.Y);
-                // Dalamud applies Position right before Begin — never
-                // mid-frame — so the window and its draw commands land
+                // Dalamud applies Position right before Begin · never
+                // mid-frame · so the window and its draw commands land
                 // at the new spot together
                 Position = newPos;
                 PositionCondition = ImGuiCond.Always;
@@ -598,7 +958,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         {
             if (_isDragging)
             {
-                // Save position when drag ends — Position is the dragged
+                // Save position when drag ends · Position is the dragged
                 // target already applied before Begin
                 _isDragging = false;
                 _iconPosition = Position ?? ImGui.GetWindowPos();
@@ -755,8 +1115,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     {
         // Texture resolves asynchronously through the media cache; the draw
         // path renders the circle fallback until the wrap is available.
-        _ = SpheneUI.Media.Texture("sphene:logo",
-            () => Convert.FromBase64String(SpheneImages.SpheneLogoBase64));
+        _ = SpheneBrandIcons.SpheneLogo();
     }
     
     private void DrawStatusIndicator(ImDrawListPtr drawList, Vector2 iconPos, float iconSize, float alpha = 1.0f)
@@ -984,7 +1343,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         var radiusMax = iconSize * maxRadius;
         var radius = radiusMin + (radiusMax - radiusMin) * t;
 
-        // Alpha fades out quadratically as ring expands — full at start, gone at outer edge
+        // Alpha fades out quadratically as ring expands · full at start, gone at outer edge
         var pulseAlpha = alpha * (1f - t * t) * globalAlpha;
 
         var rgb = rainbow

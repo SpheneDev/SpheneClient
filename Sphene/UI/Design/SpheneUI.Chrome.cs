@@ -22,7 +22,17 @@ public static partial class SpheneUI
     public static class Chrome
     {
         internal const float TitleBarPaddingX = 12f;
-        internal const float TitleBarPaddingY = 7f;
+
+        /// <summary>
+        /// Vertical title bar padding · density-aware so the chrome itself
+        /// shrinks in Compact windows and breathes in Comfortable ones.
+        /// </summary>
+        internal static float TitleBarPaddingY => Density.Current switch
+        {
+            DensityProfile.Compact => 5f,
+            DensityProfile.Comfortable => 8f,
+            _ => 7f,
+        };
         internal const float TitleBarButtonSpacing = 6f;
         internal const float TitleBarAccentLineHeight = 3f;
         internal const float TitleBarAccentLineAlpha = 0.45f;
@@ -58,11 +68,68 @@ public static partial class SpheneUI
         private const float WindowBlurNoiseOpacity = 0f;
         private static readonly Vector4 WindowBlurTint = new(0.02f, 0.02f, 0.03f, 0.08f);
 
+        /// <summary>
+        /// Largest useful window size in unscaled units · 94% of the main
+        /// viewport's work area (screen minus taskbar), so a window can never
+        /// demand more than the display has. Falls back to the IO display
+        /// size when the viewport reports nothing.
+        /// </summary>
+        public static Vector2 WorkAreaMax
+        {
+            get
+            {
+                var work = ImGui.GetMainViewport().WorkSize;
+                if (work.X <= 0f || work.Y <= 0f)
+                {
+                    work = ImGui.GetIO().DisplaySize;
+                }
+                var scale = SpheneUI.Scale;
+                return new Vector2(work.X * 0.94f / scale, work.Y * 0.94f / scale);
+            }
+        }
+
+        /// <summary>
+        /// Clamps the window's <see cref="Window.SizeConstraints"/> minimum
+        /// and its default <see cref="Window.Size"/> to <see cref="WorkAreaMax"/>.
+        /// Called every PreDraw by the window base class - resolution and UI
+        /// scale changes are picked up live. <c>ImGuiCond.Always</c> sizes
+        /// (fold animation) are left alone.
+        /// </summary>
+        public static void FitToWorkArea(Window window)
+        {
+            var fit = WorkAreaMax;
+            if (fit.X <= 0f || fit.Y <= 0f)
+            {
+                return;
+            }
+            if (window.SizeConstraints is { } constraints)
+            {
+                var min = Vector2.Min(constraints.MinimumSize, fit);
+                var max = Vector2.Max(constraints.MaximumSize, min);
+                if (min != constraints.MinimumSize || max != constraints.MaximumSize)
+                {
+                    window.SizeConstraints = new WindowSizeConstraints
+                    {
+                        MinimumSize = min,
+                        MaximumSize = max,
+                    };
+                }
+            }
+            if (window.Size is { } size && window.SizeCondition != ImGuiCond.Always)
+            {
+                var clamped = Vector2.Min(size, fit);
+                if (clamped != size)
+                {
+                    window.Size = clamped;
+                }
+            }
+        }
+
         /// <summary>Total height of the custom title bar including its accent line.</summary>
         public static float TitleBarHeight =>
             ImGui.GetFrameHeight() + TitleBarPaddingY * 2f * SpheneUI.Scale;
 
-        /// <summary>Title bar height in unscaled units — for <c>Window.Size</c> math.</summary>
+        /// <summary>Title bar height in unscaled units · for <c>Window.Size</c> math.</summary>
         public static float TitleBarHeightUnscaled => TitleBarHeight / SpheneUI.Scale;
 
         /// <summary>A button on the right side of a <see cref="TitleBar"/>.</summary>
@@ -81,11 +148,11 @@ public static partial class SpheneUI
             public Vector2? SavedPos;
             public ImGuiCond SavedPosCondition;
             public ImGuiWindowFlags SavedFlags;
-            // Right edge + top of the window at toggle time — width-collapsing
+            // Right edge + top of the window at toggle time · width-collapsing
             // windows shrink toward this anchor so the fold control stays
             // under the cursor.
             public Vector2 AnchorRightTop;
-            // Set while the collapse animation forces the window position —
+            // Set while the collapse animation forces the window position  · 
             // released once the animation settles so the strip drags again.
             public bool PositionPinned;
         }
@@ -171,7 +238,7 @@ public static partial class SpheneUI
             window.Size = new Vector2(MathF.Max(width, 1f) / scale, MathF.Max(height, 1f) / scale);
             window.SizeCondition = ImGuiCond.Always;
             // While the size animates, pin the window so its right edge stays
-            // on the toggle-time anchor — the fold button rides along under
+            // on the toggle-time anchor · the fold button rides along under
             // the cursor instead of sliding away to the left. Once the
             // animation settles the position is released again so the
             // collapsed strip stays draggable.
@@ -194,11 +261,11 @@ public static partial class SpheneUI
         public static float CollapseAmount(string windowName)
             => EaseCollapse(GetFold(windowName).Amount);
 
-        /// <summary>True once the window is fully folded — skip drawing the content.</summary>
+        /// <summary>True once the window is fully folded · skip drawing the content.</summary>
         public static bool IsCollapsed(string windowName)
             => CollapseAmount(windowName) >= 1f;
 
-        /// <summary>Current fold target state — drives chevron icons on custom bars.</summary>
+        /// <summary>Current fold target state · drives chevron icons on custom bars.</summary>
         internal static bool FoldCollapsed(string windowName)
             => GetFold(windowName).Collapsed;
 
@@ -215,7 +282,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Restores a folded window instantly — reopening a window that was
+        /// Restores a folded window instantly · reopening a window that was
         /// closed while collapsed lands maximized, not mid-fold.
         /// </summary>
         public static void ResetFold(Window window, string windowName)
@@ -281,7 +348,7 @@ public static partial class SpheneUI
             DrawWindowSurface(drawList, windowPos, windowPos + ImGui.GetWindowSize(), style.WindowRounding);
             DrawTitleBarBackground(drawList, min, max, windowPos.Y + ImGui.GetWindowSize().Y,
                 style.WindowRounding, accent);
-            // No item covers the bar — ImGui's native window move handles
+            // No item covers the bar · ImGui's native window move handles
             // dragging at Begin time (moving the window mid-frame via
             // SetWindowPos leaves that frame's content behind).
             var leftEndX = DrawTitleBarLeft(min, headerHeight, title, leadingIcon, accent, leadingTexture);
@@ -331,7 +398,7 @@ public static partial class SpheneUI
         {
             var bg = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
             // Flat: any top/bottom difference quantizes into visible bands on
-            // large dark surfaces — the depth cue comes from rails and cards
+            // large dark surfaces · the depth cue comes from rails and cards
             // instead, and the nav-content backing samples the same tone.
             topColor = bg;
             bottomColor = bg;
@@ -366,7 +433,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Width the right-side buttons plus trailing text will occupy —
+        /// Width the right-side buttons plus trailing text will occupy  · 
         /// mirrors <see cref="DrawTitleBarRight"/>'s layout so middle content
         /// can size itself without overlapping the button zone.
         /// </summary>
@@ -492,7 +559,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Draws a small notification badge at the top-right corner of a title
-        /// bar button — a filled circle with a counter (clamped to 9+).
+        /// bar button · a filled circle with a counter (clamped to 9+).
         /// </summary>
         internal static void DrawTitleBarButtonBadge(Vector2 buttonPos, float buttonSize,
             int badgeCount, float scale)
@@ -542,7 +609,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Breadcrumb pill ("Parent › Current") for title bars and header
-        /// rows — a dark scrim + thin border keeps it legible over imagery.
+        /// rows · a dark scrim + thin border keeps it legible over imagery.
         /// The parent segment is clickable when <paramref name="onParentClick"/>
         /// is set; overlong text ellipsizes (parent drops first, then the label).
         /// </summary>
@@ -562,7 +629,7 @@ public static partial class SpheneUI
             var currentText = Text.Ellipsize(currentLabel, MathF.Max(24f * scale, maxTextW - parentW));
             if (ImGui.CalcTextSize(currentText).X + parentW > maxTextW)
             {
-                // still too wide — drop the parent before shrinking further
+                // still too wide · drop the parent before shrinking further
                 parentLabel = null;
                 parentW = 0f;
                 currentText = Text.Ellipsize(currentLabel, maxTextW);
@@ -783,7 +850,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Draws a child frame as filled edge strips and annulus corner sectors
-        /// so every part — including the corner arcs — keeps exactly borderSize
+        /// so every part · including the corner arcs · keeps exactly borderSize
         /// thickness. With <paramref name="openTop"/> the straight top segment
         /// is omitted while the top corner arcs are kept, making the frame read
         /// as open at the top.
@@ -1044,7 +1111,7 @@ public static partial class SpheneUI
             {
                 // The stamp follows the window's rounded silhouette: right
                 // edge down to the arc, the quarter-circle corner, the bottom
-                // edge — the hypotenuse closes it. Same triangle minus the
+                // edge · the hypotenuse closes it. Same triangle minus the
                 // notch the rounding carved out.
                 var arcCenter = corner - new Vector2(rounding, rounding);
                 drawList.PathLineTo(new Vector2(corner.X, corner.Y - stampSize));
@@ -1108,40 +1175,20 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Fills a rounded horizontal gradient — used by progress bars and
-        /// transmission bars.
+        /// Fills a rounded horizontal gradient · used by progress bars,
+        /// transmission bars, primary buttons and active nav pills.
+        /// <paramref name="corners"/> selects which corners round - absent
+        /// corners stay square (segmented bars). Rendered as a
+        /// vertex-coloured fan (<see cref="Media.FillRoundedGradient"/>) so
+        /// the blend follows the exact rounded silhouette - pill toggles
+        /// keep their shape and show no cap seams at any size.
         /// </summary>
         internal static void RoundedHorizontalGradient(ImDrawListPtr drawList, Vector2 a, Vector2 b,
-            float rounding, Vector4 startColor, Vector4 endColor)
+            float rounding, Vector4 startColor, Vector4 endColor,
+            ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
         {
-            var width = b.X - a.X;
-            if (width <= 0)
-            {
-                return;
-            }
-            var slices = Math.Clamp((int)(width / 8.0f), 8, 64);
-            var step = width / slices;
-            for (var i = 0; i < slices; i++)
-            {
-                var x0 = a.X + step * i;
-                var x1 = i == slices - 1 ? b.X : a.X + step * (i + 1);
-                var t = (float)i / (slices - 1);
-                var c = Vector4.Lerp(startColor, endColor, t);
-                var flags = ImDrawFlags.None;
-                var r = 0.0f;
-                if (i == 0)
-                {
-                    flags = ImDrawFlags.RoundCornersLeft;
-                    r = rounding;
-                }
-                else if (i == slices - 1)
-                {
-                    flags = ImDrawFlags.RoundCornersRight;
-                    r = rounding;
-                }
-                drawList.AddRectFilled(new Vector2(x0, a.Y), new Vector2(x1, b.Y),
-                    ColorUtils.ToU32(c), r, flags);
-            }
+            Media.FillRoundedGradient(drawList, a, b,
+                startColor, endColor, endColor, startColor, rounding, corners);
         }
 
         /// <summary>
@@ -1189,7 +1236,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Breathing corner bloom: one radial fan centred on the
         /// bottom-right arc centre whose rim is literally the card's
-        /// silhouette — along the bottom edge, around the corner arc, up
+        /// silhouette · along the bottom edge, around the corner arc, up
         /// the right edge, then back around on the disc's own arc. Vertex
         /// alpha follows the radial profile per point, so the glow is the
         /// exact crop of a soft disc by the rounded card: round

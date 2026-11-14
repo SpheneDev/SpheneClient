@@ -56,7 +56,7 @@ public class CharacterIdentityService : MediatorSubscriberBase, IHostedService
 
             if (auth == null)
             {
-                Logger.LogDebug("No known CID {cid} in authentications — new character or not configured", cid);
+                Logger.LogDebug("No known CID {cid} in authentications - new character or not configured", cid);
                 _hasCheckedThisSession = true;
                 return;
             }

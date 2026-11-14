@@ -27,7 +27,7 @@ public static partial class SpheneUI
         private static uint _markerColor;
         private static uint _markerTextColor;
 
-        /// <summary>Master switch — session only, wired to the Diagnostics page.</summary>
+        /// <summary>Master switch · session only, wired to the Diagnostics page.</summary>
         public static bool Enabled { get; set; }
 
         /// <summary>Violations recorded during the current frame.</summary>
@@ -40,11 +40,12 @@ public static partial class SpheneUI
         public static void BeginFrame()
         {
             _violations.Clear();
+            Layout.ChannelSplitReset();
         }
 
         /// <summary>
         /// Validates the most recently drawn item against the active content
-        /// bound — flags controls that overshoot the shared right edge.
+        /// bound · flags controls that overshoot the shared right edge.
         /// </summary>
         public static void CheckBounds(string context)
         {
@@ -108,6 +109,36 @@ public static partial class SpheneUI
             }
         }
 
+        /// <summary>
+        /// Flags a ? help marker that could not attach to a row's line inside
+        /// a row group · usually a call placed after spacer or block content
+        /// where the marker ends up floating on its own line.
+        /// </summary>
+        internal static void RecordDetachedHelp(string context)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+            _violations.Add(new Violation("detached-help", context, null, null,
+                "help marker sits on its own line inside a row group"));
+        }
+
+        /// <summary>
+        /// Flags a channel-splitting surface (Surface/SurfaceFlat/RowGroup)
+        /// opened inside another - ImGui draw-list channels cannot nest, so
+        /// the inner call would collapse the merge and blank the outer card.
+        /// </summary>
+        internal static void RecordNestedSurface(string context, Vector2 min, Vector2 max)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+            _violations.Add(new Violation("nested-surface", context, min, max,
+                "channel-splitting surface inside another surface - content can vanish"));
+        }
+
         /// <summary>Records an off-grid hit without a context item.</summary>
         internal static void RecordOffGrid(float value, string context)
         {
@@ -121,7 +152,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Flags design controls drawn without an active window/compact theme
-        /// scope — usually a window bypassing the base-class theme path.
+        /// scope · usually a window bypassing the base-class theme path.
         /// </summary>
         public static void CheckThemeScope(string context)
         {

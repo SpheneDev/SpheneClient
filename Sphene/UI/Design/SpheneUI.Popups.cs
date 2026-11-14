@@ -12,7 +12,7 @@ namespace Sphene.UI.Design;
 public static partial class SpheneUI
 {
     /// <summary>
-    /// Styled popup helpers — ImGui popups wrapped in the design-system popup
+    /// Styled popup helpers · ImGui popups wrapped in the design-system popup
     /// theme so rounding, border and padding apply to the popup frame itself
     /// (a scope pushed after Begin would only affect its content).
     /// </summary>
@@ -130,7 +130,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Toggles the anchored dropdown <paramref name="id"/> and captures the
-        /// anchor rect from the last submitted item — call this from the
+        /// anchor rect from the last submitted item · call this from the
         /// trigger button's click handler (its rect is still current then).
         /// </summary>
         public static void ToggleDropdown(string id)
@@ -148,14 +148,14 @@ public static partial class SpheneUI
         /// <summary>
         /// Anchored dropdown that visually grows out of its trigger button:
         /// a sliver under the button eases down and left to
-        /// <paramref name="contentSize"/> — right-aligned with the button's
+        /// <paramref name="contentSize"/> · right-aligned with the button's
         /// right edge, so the menu expands leftward and downward. While open
         /// the trigger is repainted as a flat-bottomed tab in the menu's
         /// surface color (its icon and label in accent), so button and menu
         /// read as one connected shape; clicking the button again, clicking
         /// outside, Escape or <see cref="CloseDropdown"/> reverses the
         /// animation. The window is focus-pinned while open so it stays in
-        /// front of the host window. Returns true while visible — render
+        /// front of the host window. Returns true while visible · render
         /// content after it and always pair with <see cref="EndDropdown"/>.
         /// </summary>
         public static bool BeginDropdown(string id, Vector2 contentSize,
@@ -190,7 +190,7 @@ public static partial class SpheneUI
             }
             ImGui.SetNextWindowPos(pos);
             ImGui.SetNextWindowSize(size);
-            // focus-pin keeps the menu above the host window — but must yield
+            // focus-pin keeps the menu above the host window · but must yield
             // while an inner popup/flyout (combo, color picker) is open, else
             // the pin would pull the menu in front of its own popup every frame
             if (st.Open && !ImGui.IsPopupOpen(string.Empty, ImGuiPopupFlags.AnyPopupId)
@@ -198,11 +198,11 @@ public static partial class SpheneUI
             {
                 ImGui.SetNextWindowFocus();
             }
-            // fully opaque surface — a translucent popup bg lets the host
+            // fully opaque surface · a translucent popup bg lets the host
             // window shine through and shows as a displaced strip of content
             ImGui.PushStyleColor(ImGuiCol.WindowBg,
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Surface, 1f)));
-            // the window's own border stays invisible — the merged
+            // the window's own border stays invisible · the merged
             // button∪menu outline is drawn manually in DrawDropdownTab
             ImGui.PushStyleColor(ImGuiCol.Border, 0u);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10f, 10f) * Scale);
@@ -267,7 +267,7 @@ public static partial class SpheneUI
             var below = wMin.Y >= st.AnchorMin.Y;
             drawList.PushClipRectFullScreen();
             // the tab fill extends a hair past the button rect so it covers
-            // the trigger's own border stroke — otherwise the button outline
+            // the trigger's own border stroke · otherwise the button outline
             // stays visible inside the merged surface
             var cover = 1f * Scale;
             var winR = 10f * Scale;
@@ -288,7 +288,7 @@ public static partial class SpheneUI
                 drawList.AddRectFilled(new Vector2(wMax.X - winR - cover, wMax.Y - winR - cover),
                     new Vector2(wMax.X + cover, wMax.Y + cover), surface);
             }
-            // one continuous outline around button ∪ window — the border
+            // one continuous outline around button ∪ window · the border
             // climbs around the button's rounded top instead of cutting a
             // straight line under it
             AddDropdownOutline(drawList, st, wMin, wMax, frameR, 10f * Scale, below, border);
@@ -325,7 +325,7 @@ public static partial class SpheneUI
         /// Strokes one continuous outline around the union of the trigger
         /// button and the dropdown window: the path leaves the window's top
         /// edge at the button's side, runs up around the button's rounded
-        /// top corners and comes back down on the other side — so the border
+        /// top corners and comes back down on the other side · so the border
         /// reads as if the menu and its button were cast as one shape.
         /// </summary>
         private static void AddDropdownOutline(ImDrawListPtr drawList, DropdownState st,
@@ -387,7 +387,7 @@ public static partial class SpheneUI
             }
         }
 
-        /// <summary>Drops all dropdown and flyout state — call on page/window resets like <see cref="Fx.Reset"/>.</summary>
+        /// <summary>Drops all dropdown and flyout state · call on page/window resets like <see cref="Fx.Reset"/>.</summary>
         public static void ResetDropdowns()
         {
             _dropdowns.Clear();
@@ -397,10 +397,16 @@ public static partial class SpheneUI
         /// <summary>Ends a dropdown opened via <see cref="BeginDropdown"/>.</summary>
         public static void EndDropdown()
         {
-            if (_activeDropdown != null
-                && _dropdowns.TryGetValue(_activeDropdown, out var st))
+            // No-op without a matching BeginDropdown · an unmatched End
+            // would pop style vars and a window it never opened (native
+            // crash on PopStyleVar).
+            if (_activeDropdown == null)
             {
-                // measured content height incl. bottom window padding — the
+                return;
+            }
+            if (_dropdowns.TryGetValue(_activeDropdown, out var st))
+            {
+                // measured content height incl. bottom window padding · the
                 // next BeginDropdown shrinks the menu to fit instead of
                 // reserving the maximum height
                 st.ContentH = Math.Max(0f, ImGui.GetCursorScreenPos().Y - st.WinMinY
@@ -424,12 +430,13 @@ public static partial class SpheneUI
             public Vector2 AnchorMin;
             public Vector2 AnchorMax;
             public bool JustOpened;
+            public bool WasFocused;
             public int LastFrame = -1;
         }
 
         private static readonly Dictionary<string, FlyoutState> _flyouts = new(StringComparer.Ordinal);
 
-        // entries age out when their host stopped rendering them — otherwise a
+        // entries age out when their host stopped rendering them · otherwise a
         // flyout orphaned by a closed dropdown would hold the gates forever
         private static bool AnyFlyoutOpen
         {
@@ -449,7 +456,7 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Toggles the anchored flyout <paramref name="id"/> and captures the
-        /// anchor rect from the last submitted item — call this from the
+        /// anchor rect from the last submitted item · call this from the
         /// trigger's click handler (its rect is still current then). Flyouts
         /// are plain styled windows pinned above their dropdown parent; they
         /// bypass <see cref="ImGui.OpenPopup"/>/<see cref="ImGui.BeginPopup"/>,
@@ -477,11 +484,54 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Opens a flyout without toggling · for programmatic entries (studio
+        /// focus, deep links) where no trigger item exists. <paramref name="anchorAt"/>
+        /// sets the anchor rect; without it the flyout anchors at the window's
+        /// content origin. Idempotent · never closes an already-open flyout.
+        /// </summary>
+        public static void OpenFlyout(string id, Vector2? anchorAt = null)
+        {
+            if (!_flyouts.TryGetValue(id, out var st))
+            {
+                st = new FlyoutState();
+                _flyouts[id] = st;
+            }
+            if (!st.Open)
+            {
+                st.Open = true;
+                st.JustOpened = true;
+            }
+            var anchor = anchorAt ?? ImGui.GetCursorScreenPos();
+            st.AnchorMin = anchor;
+            st.AnchorMax = anchor;
+            foreach (var kv in _flyouts)
+            {
+                if (!ReferenceEquals(kv.Value, st))
+                {
+                    kv.Value.Open = false;
+                }
+            }
+        }
+
+        /// <summary>True while the flyout <paramref name="id"/> is open or fading in.</summary>
+        public static bool IsFlyoutOpen(string id)
+            => _flyouts.TryGetValue(id, out var st) && st.Open;
+
+        /// <summary>Closes the flyout <paramref name="id"/> (fades out on the next frames).</summary>
+        public static void CloseFlyout(string id)
+        {
+            if (_flyouts.TryGetValue(id, out var st))
+            {
+                st.Open = false;
+            }
+        }
+
+        /// <summary>
         /// Anchored flyout panel that fades in at the right edge of its
         /// trigger (below it, flipping above near the viewport bottom), sized
         /// to its content via <see cref="ImGuiWindowFlags.AlwaysAutoResize"/>.
         /// It is focus-pinned so it renders above the host dropdown, and
-        /// closes on outside click or Escape. Returns true while visible —
+        /// closes on outside click or Escape. Returns true while visible  · 
         /// render content after it and always pair with
         /// <see cref="EndFlyout"/>.
         /// </summary>
@@ -503,12 +553,16 @@ public static partial class SpheneUI
             var disp = ImGui.GetIO().DisplaySize;
             var gap = 4f * Scale;
             var flip = st.AnchorMax.Y + gap + 260f * Scale > disp.Y - 4f;
+            // horizontal edge guard · the panel normally expands leftward from
+            // the anchor's right edge - near the left screen edge it mirrors
+            // and expands rightward from the anchor's left edge instead.
+            var flipX = st.AnchorMin.X - 280f * Scale < 4f;
             ImGui.SetNextWindowPos(
-                flip ? new Vector2(st.AnchorMax.X, st.AnchorMin.Y - gap)
-                    : new Vector2(st.AnchorMax.X, st.AnchorMax.Y + gap),
+                new Vector2(flipX ? st.AnchorMin.X : st.AnchorMax.X,
+                    flip ? st.AnchorMin.Y - gap : st.AnchorMax.Y + gap),
                 ImGuiCond.None,
-                flip ? new Vector2(1f, 1f) : new Vector2(1f, 0f));
-            if (st.Open)
+                new Vector2(flipX ? 0f : 1f, flip ? 1f : 0f));
+            if (st.JustOpened)
             {
                 ImGui.SetNextWindowFocus();
             }
@@ -517,27 +571,46 @@ public static partial class SpheneUI
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(10f, 10f) * Scale);
             ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 10f * Scale);
             ImGui.PushStyleVar(ImGuiStyleVar.Alpha, Math.Clamp(eased * 1.35f, 0f, 1f));
+            // kill the corner resize grip · flyouts auto-size to content,
+            // the stripes just read as a stray artifact at the bottom-right.
+            ImGui.PushStyleColor(ImGuiCol.ResizeGrip, Vector4.Zero);
+            ImGui.PushStyleColor(ImGuiCol.ResizeGripHovered, Vector4.Zero);
+            ImGui.PushStyleColor(ImGuiCol.ResizeGripActive, Vector4.Zero);
             // deliberately NOT ImGuiWindowFlags.Popup: Begin() reads the live
-            // popup stack for Popup-flagged windows — a window never opened
+            // popup stack for Popup-flagged windows · a window never opened
             // through OpenPopup gets a garbage PopupId, which makes focus and
             // close handling erratic (opens only after several clicks). The
             // focus pin + manual outside-close below do the job instead.
             var flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
                 | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings
                 | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoDocking
-                | ImGuiWindowFlags.NoScrollbar
+                | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoFocusOnAppearing
                 | ImGuiWindowFlags.AlwaysAutoResize;
             var visible = ImGui.Begin($"##flyout_{id}", flags);
-            var wMin = ImGui.GetWindowPos();
-            var wMax = wMin + ImGui.GetWindowSize();
+            // hovered = flyout window or any child · reliable even while
+            // AlwaysAutoResize settles and the window rect shifts frame 1→2.
             var m = ImGui.GetIO().MousePos;
-            var inWindow = m.X >= wMin.X && m.X <= wMax.X && m.Y >= wMin.Y && m.Y <= wMax.Y;
-            if (st.Open && !st.JustOpened && !inWindow
-                && (ImGui.IsMouseClicked(ImGuiMouseButton.Left)
-                    || ImGui.IsMouseClicked(ImGuiMouseButton.Right)))
+            var inWindow = ImGui.IsWindowHovered(
+                ImGuiHoveredFlags.RootAndChildWindows);
+            var inAnchor = m.X >= st.AnchorMin.X && m.X <= st.AnchorMax.X
+                && m.Y >= st.AnchorMin.Y && m.Y <= st.AnchorMax.Y;
+            // left click anywhere (incl. the anchor) dismisses · right click
+            // outside dismisses too, but a right click on the anchor belongs
+            // to the toggle itself and must not fire both paths at once.
+            var outsideClick = ImGui.IsMouseClicked(ImGuiMouseButton.Left)
+                || (ImGui.IsMouseClicked(ImGuiMouseButton.Right) && !inAnchor);
+            if (st.Open && !st.JustOpened && !inWindow && outsideClick)
             {
                 st.Open = false;
             }
+            // focus-loss close · the pin only applies on open, so clicking
+            // another window steals focus and the panel dismisses itself.
+            var focused = ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows);
+            if (st.Open && !st.JustOpened && st.WasFocused && !focused)
+            {
+                st.Open = false;
+            }
+            st.WasFocused = focused;
             if (st.Open && ImGui.IsKeyPressed(ImGuiKey.Escape)
                 && ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
             {
@@ -548,9 +621,10 @@ public static partial class SpheneUI
             {
                 ImGui.End();
                 ImGui.PopStyleVar(3);
-                ImGui.PopStyleColor(1);
+                ImGui.PopStyleColor(4);
                 return false;
             }
+            _activeFlyout = id;
             ContentBounds.PushNoneSentinel();
             return true;
         }
@@ -558,18 +632,27 @@ public static partial class SpheneUI
         /// <summary>Ends a flyout opened via <see cref="BeginFlyout"/>.</summary>
         public static void EndFlyout()
         {
+            // No-op without a matching BeginFlyout · an unmatched End pops
+            // style vars and a window it never opened (native crash).
+            if (_activeFlyout == null)
+            {
+                return;
+            }
+            _activeFlyout = null;
             ContentBounds.Pop();
             ImGui.End();
             ImGui.PopStyleVar(3);
-            ImGui.PopStyleColor(1);
+            ImGui.PopStyleColor(4);
         }
+
+        private static string? _activeFlyout;
 
         /// <summary>
         /// Reusable confirmation window: keep one instance per call site,
         /// call <see cref="Open"/> when the user requests a guarded action and
         /// <see cref="Draw"/> unconditionally in the host window's draw pass.
-        /// Renders as a small draggable window at the click position — popup
-        /// chrome, no modal dim, no focus steal — so nothing else on screen is
+        /// Renders as a small draggable window at the click position · popup
+        /// chrome, no modal dim, no focus steal · so nothing else on screen is
         /// blocked while it waits for the answer. The stored callback runs
         /// only when the confirm button is pressed; the X, Cancel and Escape
         /// simply drop it.
@@ -602,10 +685,10 @@ public static partial class SpheneUI
             }
 
             /// <summary>
-            /// Renders the window while open — call every frame. <paramref name="id"/>
+            /// Renders the window while open · call every frame. <paramref name="id"/>
             /// keeps it unique per call site; <paramref name="detail"/> adds a
             /// muted second line (e.g. a cooldown notice); <paramref name="media"/>
-            /// slots a banner image (or any texture — e.g. a tutorial frame) under
+            /// slots a banner image (or any texture · e.g. a tutorial frame) under
             /// the title bar. Button colors are semantic: normal dialogs get a
             /// green confirm + red cancel, <paramref name="danger"/> flips the
             /// confirm to destructive red and tones the cancel down.
@@ -647,7 +730,7 @@ public static partial class SpheneUI
                 using var themeScope = Theme.ContextMenuScope();
                 using var winRounding = ImRaii.PushStyle(ImGuiStyleVar.WindowRounding,
                     Theme.Current.WindowRounding * scale);
-                // custom chrome: no native title bar — Chrome.TitleBar paints
+                // custom chrome: no native title bar · Chrome.TitleBar paints
                 // the shared window chrome and still drags the window
                 if (ImGui.Begin(winName,
                         ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
@@ -717,7 +800,7 @@ public static partial class SpheneUI
                 }
             }
 
-            /// <summary>Icon chip + message + muted detail — the dialog body block.</summary>
+            /// <summary>Icon chip + message + muted detail · the dialog body block.</summary>
             private static void DrawConfirmBody(FontAwesomeIcon icon, Vector4 accent,
                 string message, string? detail, float scale)
             {

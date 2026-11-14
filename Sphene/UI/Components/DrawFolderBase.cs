@@ -133,7 +133,7 @@ public abstract class DrawFolderBase : IDrawFolder
             var nameMin = ImGui.GetItemRectMin();
             var nameMax = ImGui.GetItemRectMax();
 
-            // row-wide toggle on free header areas only — the name keeps its
+            // row-wide toggle on free header areas only · the name keeps its
             // own click (uid/alias toggle, note edit) and real buttons hover
             // via IsAnyItemHovered
             var mouse = ImGui.GetMousePos();
@@ -194,7 +194,7 @@ public abstract class DrawFolderBase : IDrawFolder
     protected float DrawRightSideInternal()
     {
         var barButtonSize = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.EllipsisV);
-        // Use container-relative positioning for buttons — the rightmost
+        // Use container-relative positioning for buttons · the rightmost
         // element keeps the same content inset the pair rows use
         var containerWidth = SpheneUI.Controls.BoundedAvailX();
         var actualWindowEndX = ImGui.GetCursorPosX() + containerWidth;

@@ -139,7 +139,7 @@ jobs:
           $repoFile = "plogonmaster.json"
           $entryName = "Sphene"
         } else {
-          $repoFile = "testplogon.json"
+          $repoFile = "plogontest.json"
           $entryName = "SpheneTest"
         }
 
@@ -177,7 +177,7 @@ jobs:
       run: |
         $isRelease = "${{ github.event.inputs.is_release }}"
         $version = "${{ steps.get_version.outputs.version }}"
-        $repoUrl = if ($isRelease -eq "true") { "plogonmaster.json" } else { "testplogon.json" }
+        $repoUrl = if ($isRelease -eq "true") { "plogonmaster.json" } else { "plogontest.json" }
         $pluginName = if ($isRelease -eq "true") { "Sphene" } else { "SpheneTest" }
         $buildType = if ($isRelease -eq "true") { "Release" } else { "Testbuild" }
         

@@ -639,11 +639,9 @@ public sealed class FileUploadManager : DisposableMediatorSubscriberBase
 
     private async Task<List<UploadFileDto>> FilesSend(List<string> hashes, List<string> uids, CancellationToken ct, Dictionary<string, string>? modFolderNames = null, List<ModInfoDto>? modInfo = null)
     {
-        Logger.LogDebug("FilesSend called - IsInitialized: {isInitialized}, FilesCdnUri: {filesCdnUri}", _orchestrator.IsInitialized, _orchestrator.FilesCdnUri);
-        Logger.LogDebug("Server connection status: {serverState}", _serverManager.CurrentServer?.ServerName ?? "No server");
-        if (!_orchestrator.IsInitialized) 
+        if (!_orchestrator.IsInitialized)
         {
-            Logger.LogError("[DEBUG] FileTransferManager is not initialized! FilesCdnUri: {filesCdnUri}, Server: {server}", _orchestrator.FilesCdnUri, _serverManager.CurrentServer?.ServerName ?? "No server");
+            Logger.LogError("FileTransferManager is not initialized! FilesCdnUri: {filesCdnUri}, Server: {server}", _orchestrator.FilesCdnUri, _serverManager.CurrentServer?.ServerName ?? "No server");
             throw new InvalidOperationException("FileTransferManager is not initialized");
         }
         FilesSendDto filesSendDto = new()

@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
+using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
@@ -30,18 +31,51 @@ public static partial class SpheneUI
         {
             public Task<IDalamudTextureWrap>? Task;
             public bool Failed;
+            public long LastUsedTicks;
         }
 
         private static readonly ConcurrentDictionary<string, TextureEntry> _textures = new(StringComparer.Ordinal);
+        private static readonly ConcurrentDictionary<string, long> _pendingEvict = new(StringComparer.Ordinal);
+        private const long EvictDelayMs = 100;
+        /// <summary>Soft cap on cached textures · beyond it the least-recently
+        /// used entries ride the same deferred eviction as explicit
+        /// <see cref="Evict"/> calls, so GPU memory stays bounded over a
+        /// session without churning textures still on screen.</summary>
+        private const int MaxCachedTextures = 256;
         private static ITextureProvider? _provider;
 
         /// <summary>Wires the texture provider. Called once from UiSharedService init.</summary>
         internal static void SetTextureProvider(ITextureProvider provider) => _provider = provider;
 
         /// <summary>
+        /// Shared in-game UI icon (job icons, action icons, …) resolved via
+        /// <see cref="ITextureProvider.GetFromGameIcon"/> · Dalamud owns the
+        /// cache, so this is safe to call every frame. Returns null until the
+        /// wrap resolves; render a placeholder or leave the slot empty.
+        /// </summary>
+        public static IDalamudTextureWrap? GameIcon(uint iconId, bool hiRes = false)
+        {
+            if (_provider == null)
+            {
+                return null;
+            }
+            try
+            {
+                return _provider.TryGetFromGameIcon(new GameIconLookup(iconId, hiRes: hiRes), out var tex)
+                    && tex.TryGetWrap(out var wrap, out _)
+                    ? wrap
+                    : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Cache-owned texture for <paramref name="data"/>, keyed by
         /// <paramref name="key"/>. Returns null while the texture is still
-        /// decoding — render <see cref="Placeholder"/> meanwhile. The cache
+        /// decoding · render <see cref="Placeholder"/> meanwhile. The cache
         /// owns the wrap: callers must not dispose it. Call
         /// <see cref="Evict"/> when the underlying bytes change.
         /// </summary>
@@ -55,6 +89,7 @@ public static partial class SpheneUI
         /// </summary>
         public static IDalamudTextureWrap? Texture(string key, Func<byte[]?> dataSource)
         {
+            FlushEvictions();
             if (_textures.TryGetValue(key, out var entry))
             {
                 return TryResolve(entry, key);
@@ -75,11 +110,14 @@ public static partial class SpheneUI
                 return null;
             }
 
-            entry = new TextureEntry();
+            entry = new TextureEntry { LastUsedTicks = Environment.TickCount64 };
             _textures[key] = entry;
+            TrimCapacity();
             try
             {
-                entry.Task = _provider.CreateFromImageAsync(data);
+                entry.Task = IsWebP(data)
+                    ? TranscodeToPngAsync(data)
+                    : _provider.CreateFromImageAsync(data);
             }
             catch (Exception ex)
             {
@@ -88,6 +126,24 @@ public static partial class SpheneUI
                 return null;
             }
             return TryResolve(entry, key);
+        }
+
+        /// <summary>RIFF/WEBP magic check - the provider's stb decoder can't
+        /// read WebP, but community uploads encode exactly that.</summary>
+        private static bool IsWebP(byte[] data)
+            => data.Length > 12
+                && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F'
+                && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
+
+        /// <summary>ImageSharp decodes WebP - re-encode to PNG once and let
+        /// the provider decode that. Runs inside the cache-owned task so the
+        /// transcode cost is paid once per key, never per frame.</summary>
+        private static async Task<IDalamudTextureWrap> TranscodeToPngAsync(byte[] data)
+        {
+            using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(data);
+            using var stream = new MemoryStream();
+            await image.SaveAsPngAsync(stream).ConfigureAwait(false);
+            return await _provider!.CreateFromImageAsync(stream.ToArray()).ConfigureAwait(false);
         }
 
         private static IDalamudTextureWrap? TryResolve(TextureEntry entry, string key)
@@ -99,6 +155,7 @@ public static partial class SpheneUI
             }
             if (task.IsCompletedSuccessfully)
             {
+                entry.LastUsedTicks = Environment.TickCount64;
                 return task.Result;
             }
             if (task.IsFaulted)
@@ -110,16 +167,60 @@ public static partial class SpheneUI
             return null;
         }
 
-        /// <summary>Evicts a cached texture (disposing the wrap) so it reloads.</summary>
+        /// <summary>Drops the oldest entries past <see cref="MaxCachedTextures"/>
+        /// via the deferred-eviction path - queued wraps are disposed by
+        /// <see cref="FlushEvictions"/> after the delay, never mid-draw.</summary>
+        private static void TrimCapacity()
+        {
+            var excess = _textures.Count - MaxCachedTextures;
+            if (excess <= 0)
+            {
+                return;
+            }
+            foreach (var kv in _textures.OrderBy(kv => kv.Value.LastUsedTicks).Take(excess))
+            {
+                _pendingEvict[kv.Key] = Environment.TickCount64;
+            }
+        }
+
+        /// <summary>
+        /// Evicts a cached texture so it reloads. Disposal is deferred by a
+        /// short delay: a wrap already recorded into the current frame's draw
+        /// lists must stay alive until the renderer consumed it - disposing
+        /// it mid-frame leaves a dangling D3D texture and crashes the game.
+        /// Timestamp-based (not <c>ImGui.GetFrameCount</c>) because callers may
+        /// evict off the UI thread, where touching the ImGui context crashes.
+        /// </summary>
         public static void Evict(string key)
         {
-            if (_textures.TryRemove(key, out var entry) && entry.Task is { IsCompletedSuccessfully: true } t)
+            _pendingEvict[key] = Environment.TickCount64;
+        }
+
+        /// <summary>Disposes wraps whose eviction delay elapsed · called
+        /// lazily from the texture entry points on the UI thread.</summary>
+        private static void FlushEvictions()
+        {
+            if (_pendingEvict.IsEmpty)
             {
-                t.Result.Dispose();
+                return;
             }
-            if (_animated.TryRemove(key, out var anim) && anim is { IsCompletedSuccessfully: true } at)
+            var now = Environment.TickCount64;
+            foreach (var kv in _pendingEvict)
             {
-                at.Result?.Dispose();
+                if (now - kv.Value < EvictDelayMs || !_pendingEvict.TryRemove(kv.Key, out _))
+                {
+                    continue;
+                }
+                if (_textures.TryRemove(kv.Key, out var entry)
+                    && entry.Task is { IsCompletedSuccessfully: true } t)
+                {
+                    t.Result.Dispose();
+                }
+                if (_animated.TryRemove(kv.Key, out var anim)
+                    && anim is { IsCompletedSuccessfully: true } at)
+                {
+                    at.Result?.Dispose();
+                }
             }
         }
 
@@ -266,10 +367,11 @@ public static partial class SpheneUI
         /// Cache-owned animated texture for <paramref name="data"/> (GIF/WebP,
         /// static images decode to a single frame). Frames are composited into
         /// a horizontal atlas off the UI thread; returns null while decoding.
-        /// The cache owns the atlas — callers must not dispose it.
+        /// The cache owns the atlas · callers must not dispose it.
         /// </summary>
         public static AnimatedImage? Animated(string key, byte[] data)
         {
+            FlushEvictions();
             if (_animated.TryGetValue(key, out var task))
             {
                 return task is { IsCompletedSuccessfully: true } ? task.Result : null;
@@ -443,15 +545,24 @@ public static partial class SpheneUI
         /// Draws <paramref name="wrap"/> into the rect [min,max] with the given
         /// fit mode, optional tint, corner rounding and border.
         /// <paramref name="corners"/> selects which corners
-        /// <paramref name="rounding"/> applies to.
+        /// <paramref name="rounding"/> applies to. <paramref name="zoom"/>
+        /// scales the sampled texture region toward its center · the output
+        /// rect and rounding stay fixed, so hover zooms never touch layout.
         /// </summary>
         public static void ImageInRect(ImDrawListPtr drawList, IDalamudTextureWrap wrap,
             Vector2 min, Vector2 max, ImageFit fit = ImageFit.Fit, Vector4? tint = null,
             float rounding = 0f, bool border = false,
-            ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
+            ImDrawFlags corners = ImDrawFlags.RoundCornersAll, float zoom = 1f)
         {
             FitRect(min, max, new Vector2(wrap.Width, wrap.Height), fit,
                 out var rectMin, out var rectMax, out var uv0, out var uv1);
+            if (zoom > 1.0001f)
+            {
+                var k = 1f - 1f / zoom;
+                var mid = (uv0 + uv1) * 0.5f;
+                uv0 = Vector2.Lerp(uv0, mid, k);
+                uv1 = Vector2.Lerp(uv1, mid, k);
+            }
             var tintU32 = tint.HasValue
                 ? ColorUtils.ToU32(tint.Value)
                 : ImGui.GetColorU32(Vector4.One);
@@ -506,7 +617,7 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Atlas/sprite image with explicit UVs drawn into a caller-owned rect —
+        /// Atlas/sprite image with explicit UVs drawn into a caller-owned rect  · 
         /// the drawList counterpart of <see cref="Sprite"/> for manual layouts
         /// (previews, composed rows) that position content themselves.
         /// </summary>
@@ -515,6 +626,40 @@ public static partial class SpheneUI
         {
             var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : uint.MaxValue;
             drawList.AddImage(handle, min, max, uv0, uv1, tintU32);
+        }
+
+        /// <summary>
+        /// Rounded-corner variant of <see cref="ImageInRect"/> for tile
+        /// cells where a logo must conform to the cell shape instead of
+        /// bleeding past the rounding.
+        /// </summary>
+        public static void ImageRoundedInRect(ImDrawListPtr drawList, IDalamudTextureWrap wrap,
+            Vector2 min, Vector2 max, float rounding, Vector4? tint = null)
+        {
+            var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : uint.MaxValue;
+            drawList.AddImageRounded(wrap.Handle, min, max, Vector2.Zero, Vector2.One,
+                tintU32, rounding);
+        }
+
+        /// <summary>
+        /// Texture drawn as a quad rotated <paramref name="radians"/> around
+        /// the rect's center - the icon-tilt for surfaces that grow out of a
+        /// brand mark (e.g. the icon menu). Angle 0 renders a regular rect.
+        /// </summary>
+        public static void ImageQuadInRect(ImDrawListPtr drawList, IDalamudTextureWrap wrap,
+            Vector2 min, Vector2 max, float radians, Vector4? tint = null)
+        {
+            var c = (min + max) * 0.5f;
+            var cos = MathF.Cos(radians);
+            var sin = MathF.Sin(radians);
+            var hw = (max.X - min.X) * 0.5f;
+            var hh = (max.Y - min.Y) * 0.5f;
+            Vector2 Rot(float x, float y)
+                => new(c.X + x * cos - y * sin, c.Y + x * sin + y * cos);
+            var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : uint.MaxValue;
+            drawList.AddImageQuad(wrap.Handle,
+                Rot(-hw, -hh), Rot(hw, -hh), Rot(hw, hh), Rot(-hw, hh),
+                Vector2.Zero, Vector2.UnitX, Vector2.One, Vector2.UnitY, tintU32);
         }
 
         /// <summary>
@@ -544,7 +689,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Discord-style presence badge on a circular avatar's lower-right
         /// edge: dark backdrop ring plus a colored core so it reads over any
-        /// avatar art. Fixed 45° position — only valid for circle avatars.
+        /// avatar art. Fixed 45° position · only valid for circle avatars.
         /// </summary>
         public static void PresenceDot(ImDrawListPtr drawList, Vector2 avatarPos,
             float avatarSize, Vector4 color)
@@ -600,6 +745,12 @@ public static partial class SpheneUI
             float height, ImageFit fit = ImageFit.Cover, Vector4? tint = null,
             Vector4? scrim = null, Space? rounding = null, Space? padding = null)
         {
+            if (Layout.InChannelSplit)
+            {
+                Layout.ChannelSplitFallback(nameof(ImageBackground), "imagebg", content);
+                return;
+            }
+
             var scale = SpheneUI.Scale;
             var pos = ImGui.GetCursorScreenPos();
             var width = ImGui.GetContentRegionAvail().X;
@@ -610,6 +761,7 @@ public static partial class SpheneUI
 
             var drawList = ImGui.GetWindowDrawList();
             drawList.ChannelsSplit(2);
+            Layout.ChannelSplitEnter();
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(pos + new Vector2(pad, pad));
@@ -640,6 +792,7 @@ public static partial class SpheneUI
                 PlaceholderInRect(drawList, pos, max, r, border: true);
             }
             drawList.ChannelsMerge();
+            Layout.ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(pos + new Vector2(0f, size.Y));
         }

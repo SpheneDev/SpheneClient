@@ -1,5 +1,97 @@
-# Raw image APIs are owned by SpheneUI.Media — banned outside UI/Design (see editorconfig scope).
+# Banned raw ImGui APIs - enforced as compile errors via RS0030.
+# Scope: applies everywhere EXCEPT paths exempted in .editorconfig
+# (UI/Design/** implements the facade, CompactUI-owned files keep their own
+# styling system - see DESIGN.md and the workspace UI ruleset).
+
+# --- Images: owned by SpheneUI.Media ---
 M:Dalamud.Bindings.ImGui.ImGui.Image;Use SpheneUI.Media.Image / ImageInRect / Sprite instead.
 M:Dalamud.Bindings.ImGui.ImGui.ImageWithBg;Use SpheneUI.Media.Image / ImageInRect / Sprite instead.
-M:Dalamud.Bindings.ImGui.ImDrawListPtr.AddImage;Use SpheneUI.Media.ImageInRect / ImageBackground instead.
+M:Dalamud.Bindings.ImGui.ImDrawListPtr.AddImage;Use SpheneUI.Media.ImageInRect / SpriteInRect instead.
 M:Dalamud.Bindings.ImGui.ImDrawListPtr.AddImageRounded;Use SpheneUI.Media.ImageInRect / Avatar instead.
+
+# --- Value controls: owned by SpheneUI.Controls ---
+M:Dalamud.Bindings.ImGui.ImGui.Button;Use SpheneUI.Controls.Button / Icons.TextButton instead.
+M:Dalamud.Bindings.ImGui.ImGui.SmallButton;Use SpheneUI.Controls.SmallButton instead.
+M:Dalamud.Bindings.ImGui.ImGui.ArrowButton;Use SpheneUI.Controls instead.
+M:Dalamud.Bindings.ImGui.ImGui.Checkbox;Use SpheneUI.Controls.Checkbox / Toggle instead.
+M:Dalamud.Bindings.ImGui.ImGui.CheckboxFlags;Use SpheneUI.Controls.Checkbox / Toggle instead.
+M:Dalamud.Bindings.ImGui.ImGui.RadioButton;Use SpheneUI.Controls instead.
+M:Dalamud.Bindings.ImGui.ImGui.Selectable;Use SpheneUI.Controls.Selectable instead.
+M:Dalamud.Bindings.ImGui.ImGui.SliderInt;Use SpheneUI.Controls.SliderInt instead.
+M:Dalamud.Bindings.ImGui.ImGui.SliderFloat;Use SpheneUI.Controls.SliderFloat instead.
+M:Dalamud.Bindings.ImGui.ImGui.SliderFloat2;Use SpheneUI.Controls.SliderFloat2 instead.
+M:Dalamud.Bindings.ImGui.ImGui.SliderAngle;Use SpheneUI.Controls instead.
+M:Dalamud.Bindings.ImGui.ImGui.DragInt;Use SpheneUI.Controls.DragInt instead.
+M:Dalamud.Bindings.ImGui.ImGui.DragFloat;Use SpheneUI.Controls.DragFloat instead.
+M:Dalamud.Bindings.ImGui.ImGui.DragFloat2;Use SpheneUI.Controls.DragFloat2 instead.
+M:Dalamud.Bindings.ImGui.ImGui.InputText;Use SpheneUI.Controls.InputText instead.
+M:Dalamud.Bindings.ImGui.ImGui.InputTextWithHint;Use SpheneUI.Controls.InputTextWithHint instead.
+M:Dalamud.Bindings.ImGui.ImGui.InputTextMultiline;Use SpheneUI.Controls.InputTextMultiline instead.
+M:Dalamud.Bindings.ImGui.ImGui.InputInt;Use SpheneUI.Controls.InputInt instead.
+M:Dalamud.Bindings.ImGui.ImGui.InputFloat;Use SpheneUI.Controls instead.
+M:Dalamud.Bindings.ImGui.ImGui.InputDouble;Use SpheneUI.Controls instead.
+M:Dalamud.Bindings.ImGui.ImGui.Combo;Use SpheneUI.Controls.Combo / LabeledCombo instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginCombo;Use SpheneUI.Controls.BeginComboBox instead.
+M:Dalamud.Bindings.ImGui.ImGui.EndCombo;Use SpheneUI.Controls.EndComboBox instead.
+M:Dalamud.Bindings.ImGui.ImGui.ColorEdit3;Use SpheneUI.Controls.ColorEdit instead.
+M:Dalamud.Bindings.ImGui.ImGui.ColorEdit4;Use SpheneUI.Controls.ColorEdit instead.
+M:Dalamud.Bindings.ImGui.ImGui.ColorPicker3;Use SpheneUI.Controls.ColorPicker instead.
+M:Dalamud.Bindings.ImGui.ImGui.ColorPicker4;Use SpheneUI.Controls.ColorPicker instead.
+M:Dalamud.Bindings.ImGui.ImGui.ProgressBar;Use SpheneUI.Controls.ProgressBar instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginListBox;Use SpheneUI.Lists.Begin instead.
+M:Dalamud.Bindings.ImGui.ImGui.EndListBox;Use SpheneUI.Lists scope instead.
+M:Dalamud.Bindings.ImGui.ImGui.ListBox;Use SpheneUI.Lists.Begin instead.
+M:Dalamud.Bindings.ImGui.ImGui.Bullet;Use SpheneUI.Text or Layout helpers instead.
+
+# --- Text: owned by SpheneUI.Text ---
+M:Dalamud.Bindings.ImGui.ImGui.Text;Use SpheneUI.Text.Plain / Colored instead.
+M:Dalamud.Bindings.ImGui.ImGui.TextUnformatted;Use SpheneUI.Text.Plain / Colored instead.
+M:Dalamud.Bindings.ImGui.ImGui.TextColored;Use SpheneUI.Text.Colored instead.
+M:Dalamud.Bindings.ImGui.ImGui.TextDisabled;Use SpheneUI.Text.Muted instead.
+M:Dalamud.Bindings.ImGui.ImGui.TextWrapped;Use SpheneUI.Text.Wrapped / ColoredWrapped instead.
+M:Dalamud.Bindings.ImGui.ImGui.BulletText;Use SpheneUI.Text instead.
+M:Dalamud.Bindings.ImGui.ImGui.LabelText;Use SpheneUI.Text instead.
+M:Dalamud.Bindings.ImGui.ImGui.SeparatorText;Use SpheneUI.Layout.SectionSeparator instead.
+
+# --- Tooltips: owned by SpheneUI.AttachTooltip / Theme.TooltipScope ---
+M:Dalamud.Bindings.ImGui.ImGui.SetTooltip;Use SpheneUI.AttachTooltip instead.
+
+# --- Trees & headers: owned by SpheneUI.Layout.Tree / Collapsible ---
+M:Dalamud.Bindings.ImGui.ImGui.TreeNode;Use SpheneUI.Layout.Tree instead.
+M:Dalamud.Bindings.ImGui.ImGui.TreeNodeEx;Use SpheneUI.Layout.Tree instead.
+M:Dalamud.Bindings.ImGui.ImGui.CollapsingHeader;Use SpheneUI.Layout.Collapsible instead.
+
+# --- Popups: owned by SpheneUI.Popups (OpenPopup/CloseCurrentPopup/MenuItem stay allowed) ---
+M:Dalamud.Bindings.ImGui.ImGui.BeginPopup;Use SpheneUI.Popups.BeginStyled instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginPopupModal;Use SpheneUI.Popups.BeginModalStyled instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginPopupContextItem;Use SpheneUI.Popups.BeginContextStyled instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginPopupContextWindow;Use SpheneUI.Popups.BeginContextStyled instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginPopupContextVoid;Use SpheneUI.Popups.BeginContextStyled instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginPopupEx;Use SpheneUI.Popups.BeginStyled instead.
+
+# --- Disabled regions: use ImRaii.Disabled scope ---
+M:Dalamud.Bindings.ImGui.ImGui.BeginDisabled;Use ImRaii.Disabled instead.
+M:Dalamud.Bindings.ImGui.ImGui.EndDisabled;Use ImRaii.Disabled instead.
+
+# --- Tabs: owned by the design-system tab/nav helpers ---
+M:Dalamud.Bindings.ImGui.ImGui.BeginTabBar;Use SpheneUI tab/nav helpers instead.
+M:Dalamud.Bindings.ImGui.ImGui.EndTabBar;Use SpheneUI tab/nav helpers instead.
+M:Dalamud.Bindings.ImGui.ImGui.BeginTabItem;Use SpheneUI tab/nav helpers instead.
+M:Dalamud.Bindings.ImGui.ImGui.EndTabItem;Use SpheneUI tab/nav helpers instead.
+M:Dalamud.Bindings.ImGui.ImGui.TabItemButton;Use SpheneUI tab/nav helpers instead.
+
+# --- Font scaling: SpheneUI.Text typography (Display/Big/SectionHeader) ---
+M:Dalamud.Bindings.ImGui.ImGui.SetWindowFontScale;Use SpheneUI.Text.Display / Big instead.
+
+# --- Spacing: SpheneUI.Layout.VerticalSpace / Space grid tokens ---
+M:Dalamud.Bindings.ImGui.ImGui.Spacing;Use SpheneUI.Layout.VerticalSpace / Space instead.
+
+# --- Tables: owned by SpheneUI.Tables ---
+M:Dalamud.Bindings.ImGui.ImGui.BeginTable;Use SpheneUI.Tables.Begin instead.
+M:Dalamud.Bindings.ImGui.ImGui.EndTable;Use SpheneUI.Tables scope instead.
+M:Dalamud.Bindings.ImGui.ImGui.Columns;Use SpheneUI.Tables.Begin instead.
+M:Dalamud.Bindings.ImGui.ImGui.NextColumn;Use SpheneUI.Tables.NextColumn instead.
+M:Dalamud.Interface.Utility.Raii.ImRaii.Table;Use SpheneUI.Tables.Begin instead.
+
+# --- Pick lists: owned by SpheneUI.Lists ---
+M:Dalamud.Interface.Utility.Raii.ImRaii.ListBox;Use SpheneUI.Lists.Begin instead.

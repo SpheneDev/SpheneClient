@@ -51,7 +51,6 @@ public static class ButtonStyleManagerUI
         (ButtonStyleKeys.Compact_Conversion, "Conversion", FontAwesomeIcon.ArrowsToEye, "Control Panel"),
         (ButtonStyleKeys.Compact_IncognitoOn, "Incognito Disabled", FontAwesomeIcon.Heart, "Control Panel"),
         (ButtonStyleKeys.Compact_IncognitoOff, "Incognito Enabled", FontAwesomeIcon.Play, "Control Panel"),
-        (ButtonStyleKeys.Compact_AreaSelect, "Area Select", FontAwesomeIcon.MapMarkerAlt, "Control Panel"),
         (ButtonStyleKeys.Compact_Settings, "Settings", FontAwesomeIcon.Cog, "Control Panel"),
         (ButtonStyleKeys.Compact_ModSharing, "Mod Sharing", FontAwesomeIcon.Share, "Control Panel"),
         (ButtonStyleKeys.Compact_Close, "Close", FontAwesomeIcon.Times, "Control Panel"),

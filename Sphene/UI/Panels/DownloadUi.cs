@@ -76,6 +76,11 @@ public class DownloadUi : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        SpheneUI.Layout.PageHeader("Downloads", "downloads", () =>
+        {
+            SpheneUI.Text.MutedWrapped("Active and queued transfers - watch progress, pause or cancel individual items.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+        });
+
         if (_configService.Current.ShowTransferWindow)
         {
             try

@@ -154,7 +154,7 @@ public class DrawFolderGroup : DrawFolderBase
                     // Show welcome message on demand
                     _ = ShowWelcomeMessageOnDemand();
                 }
-                SpheneUI.AttachTooltip("This is an area-bound syncshell\nClick to view welcome message");
+                SpheneUI.AttachTooltip("This is an area-bound syncshell\nClick to view the syncshell community page");
             }
         }
         else
@@ -178,7 +178,7 @@ public class DrawFolderGroup : DrawFolderBase
         {
             ImGui.AlignTextToFramePadding();
             SpheneUI.Icons.Icon(FontAwesomeIcon.UserShield);
-            SpheneUI.AttachTooltip("You are a moderator in " + _groupFullInfoDto.GroupAliasOrGID);
+            SpheneUI.AttachTooltip("You are staff in " + _groupFullInfoDto.GroupAliasOrGID);
         }
         else if (IsPinned)
         {
@@ -209,7 +209,7 @@ public class DrawFolderGroup : DrawFolderBase
                     // Show welcome message on demand
                     _ = ShowWelcomeMessageOnDemand();
                 }
-                SpheneUI.AttachTooltip("This is an area-bound syncshell\nClick to view welcome message");
+                SpheneUI.AttachTooltip("This is an area-bound syncshell\nClick to view the syncshell community page");
             }
         }
 
@@ -269,7 +269,7 @@ public class DrawFolderGroup : DrawFolderBase
             // Show regular "Leave Syncshell" button for non-owners in regular syncshells
             if (SpheneUI.Icons.ActionButton(FontAwesomeIcon.ArrowCircleLeft, "Leave Syncshell", menuWidth, ButtonStyleKeys.ContextMenu_Item) && UiSharedService.CtrlPressed())
             {
-                _ = _apiController.GroupLeave(_groupFullInfoDto);
+                _ = _apiController.GroupLeaveFully(new GroupDto(_groupFullInfoDto.Group));
                 ImGui.CloseCurrentPopup();
             }
             SpheneUI.AttachTooltip("Hold CTRL and click to leave this Syncshell");
@@ -347,7 +347,7 @@ public class DrawFolderGroup : DrawFolderBase
         var individualAnimDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableAnimations();
         var individualVFXDisabled = _groupFullInfoDto.GroupUserPermissions.IsDisableVFX();
 
-        // Walk left from the row's right edge — the caller already subtracted
+        // Walk left from the row's right edge · the caller already subtracted
         // the shared content inset from currentRightSideX
         var rightEdge = currentRightSideX;
         var menuButtonOffset = rightEdge - menuButtonSize.X;
@@ -459,10 +459,10 @@ public class DrawFolderGroup : DrawFolderBase
 
     private async Task ShowWelcomeMessageOnDemand()
     {
-        var welcomePage = await _apiController.GroupGetWelcomePage(new GroupDto(_groupFullInfoDto.Group)).ConfigureAwait(false);
-        if (welcomePage != null && welcomePage.IsEnabled)
+        var community = await _apiController.GroupGetCommunity(new GroupDto(_groupFullInfoDto.Group)).ConfigureAwait(false);
+        if (community != null)
         {
-            _spheneMediator.Publish(new OpenWelcomePageMessage(welcomePage, _groupFullInfoDto));
+            _spheneMediator.Publish(new OpenSyncshellCommunityMessage(community, _groupFullInfoDto, JoinPopup: false));
         }
     }
 }

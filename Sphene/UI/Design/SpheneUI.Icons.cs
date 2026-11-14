@@ -14,7 +14,7 @@ public static partial class SpheneUI
 {
     /// <summary>
     /// FontAwesome icon primitives: glyph text, icon buttons and
-    /// icon+label buttons — including the per-key style override system
+    /// icon+label buttons · including the per-key style override system
     /// (<see cref="ThemeConfiguration.ButtonStyles"/>). All glyphs render
     /// through the shared icon font handle.
     /// </summary>
@@ -136,8 +136,8 @@ public static partial class SpheneUI
             {
                 theme.ButtonStyles.TryGetValue(styleKey, out overrideStyle);
             }
-            // Outside compact scopes — and when no style override or the
-            // style picker applies — icon buttons render through the shared
+            // Outside compact scopes · and when no style override or the
+            // style picker applies · icon buttons render through the shared
             // segmented renderer (the zone look shared with the nav rails).
             if (!SpheneUI.ThemeScopeTracker.InCompactScope && overrideStyle == null
                 && (string.IsNullOrEmpty(styleKey) || !ButtonStyleManagerUI.IsPickerEnabled))

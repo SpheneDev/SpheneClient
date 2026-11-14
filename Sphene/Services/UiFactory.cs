@@ -10,7 +10,6 @@ using Sphene.UI.Panels;
 using Sphene.UI.Syncshell;
 using Sphene.WebAPI;
 using Microsoft.Extensions.Logging;
-using Dalamud.Interface.ImGuiFileDialog;
 using Dalamud.Interface.Textures.TextureWraps;
 
 namespace Sphene.Services;
@@ -23,14 +22,19 @@ public class UiFactory
     private readonly PairManager _pairManager;
     private readonly PerformanceCollectorService _performanceCollectorService;
     private readonly DalamudUtilService _dalamudUtilService;
-    private readonly FileDialogManager _fileDialogManager;
     private readonly HousingOwnershipService _housingOwnershipService;
     private readonly SpheneConfigService _configService;
+    private readonly SpheneProfileManager _spheneProfileManager;
+    private readonly CommunityMediaClientService _communityMedia;
+    private readonly LifestreamTravelService _lifestreamTravel;
+    private readonly Interop.Ipc.IpcManager _ipcManager;
 
     public UiFactory(ILoggerFactory loggerFactory, SpheneMediator spheneMediator, ApiController apiController,
         PairManager pairManager, PerformanceCollectorService performanceCollectorService,
-        DalamudUtilService dalamudUtilService, FileDialogManager fileDialogManager, HousingOwnershipService housingOwnershipService,
-        SpheneConfigService configService)
+        DalamudUtilService dalamudUtilService, HousingOwnershipService housingOwnershipService,
+        SpheneConfigService configService, SpheneProfileManager spheneProfileManager,
+        CommunityMediaClientService communityMedia,
+        LifestreamTravelService lifestreamTravel, Interop.Ipc.IpcManager ipcManager)
     {
         _loggerFactory = loggerFactory;
         _spheneMediator = spheneMediator;
@@ -38,15 +42,20 @@ public class UiFactory
         _pairManager = pairManager;
         _performanceCollectorService = performanceCollectorService;
         _dalamudUtilService = dalamudUtilService;
-        _fileDialogManager = fileDialogManager;
         _housingOwnershipService = housingOwnershipService;
         _configService = configService;
+        _spheneProfileManager = spheneProfileManager;
+        _communityMedia = communityMedia;
+        _lifestreamTravel = lifestreamTravel;
+        _ipcManager = ipcManager;
     }
 
     public SyncshellAdminUI CreateSyncshellAdminUi(GroupFullInfoDto dto)
     {
+        SyncshellCommunityView.MediaClient = _communityMedia;
         return new SyncshellAdminUI(_loggerFactory.CreateLogger<SyncshellAdminUI>(), _spheneMediator,
-            _apiController, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _fileDialogManager, _housingOwnershipService);
+            _apiController, _pairManager, _dalamudUtilService, dto, _performanceCollectorService, _housingOwnershipService, _spheneProfileManager,
+            _communityMedia, _lifestreamTravel, _ipcManager);
     }
 
     public PermissionWindowUI CreatePermissionPopupUi(Pair pair)
@@ -55,15 +64,13 @@ public class UiFactory
             _spheneMediator, _apiController, _performanceCollectorService);
     }
 
-    public SyncshellWelcomePageUI CreateSyncshellWelcomePageUi(SyncshellWelcomePageDto welcomePage, string groupName)
+    public SyncshellCommunityUI CreateSyncshellCommunityUi(SyncshellCommunityDto community, GroupFullInfoDto? group,
+        bool joinPopup, bool previewAsVisitor = false)
     {
-        return new SyncshellWelcomePageUI(_loggerFactory.CreateLogger<SyncshellWelcomePageUI>(), _spheneMediator,
-            _configService, welcomePage, groupName, _performanceCollectorService);
+        SyncshellCommunityView.MediaClient = _communityMedia;
+        return new SyncshellCommunityUI(_loggerFactory.CreateLogger<SyncshellCommunityUI>(), _spheneMediator,
+            _configService, _apiController, _spheneProfileManager, _pairManager, community, group, joinPopup, _performanceCollectorService, _communityMedia,
+            _dalamudUtilService, _lifestreamTravel, _ipcManager, previewAsVisitor);
     }
 
-    public WelcomePageLivePreviewUI CreateWelcomePageLivePreviewUi(PerformanceCollectorService performanceCollectorService)
-    {
-        return new WelcomePageLivePreviewUI(_loggerFactory.CreateLogger<WelcomePageLivePreviewUI>(), _spheneMediator,
-            performanceCollectorService);
-    }
 }

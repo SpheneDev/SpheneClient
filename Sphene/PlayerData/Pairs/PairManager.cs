@@ -787,9 +787,14 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
     public void SetGroupInfo(GroupInfoDto dto)
     {
-        _allGroups[dto.Group].Group = dto.Group;
-        _allGroups[dto.Group].Owner = dto.Owner;
-        _allGroups[dto.Group].GroupPermissions = dto.GroupPermissions;
+        // The dictionary key is immutable GroupData - patch the stored value so
+        // a rename broadcast lands even when the key still carries the old alias.
+        if (_allGroups.TryGetValue(dto.Group, out var info))
+        {
+            info.Group = dto.Group;
+            info.Owner = dto.Owner;
+            info.GroupPermissions = dto.GroupPermissions;
+        }
 
         RecreateLazy();
     }

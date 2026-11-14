@@ -1,7 +1,5 @@
 using Dalamud.Bindings.ImGui;
-using Dalamud.Interface.Colors;
-using Dalamud.Interface.Utility;
-using Dalamud.Interface.Utility.Raii;
+using Dalamud.Interface;
 using Microsoft.Extensions.Logging;
 using Sphene.API.Dto.Group;
 using Sphene.Services;
@@ -17,9 +15,9 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
     private readonly AreaBoundSyncshellService _areaBoundService;
     private readonly ApiController _apiController;
     private List<AreaBoundSyncshellDto>? _availableSyncshells;
-    private int _selectedIndex = -1;
     private string _errorMessage = string.Empty;
     private DateTime _openedAt;
+
 
     public AreaBoundSyncshellSelectionUI(ILogger<AreaBoundSyncshellSelectionUI> logger, 
         SpheneMediator mediator, 
@@ -31,9 +29,10 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
         _areaBoundService = areaBoundService;
         _apiController = apiController;
         
-        Size = new Vector2(600, 500);
+        Size = new Vector2(460, 240);
         SizeCondition = ImGuiCond.FirstUseEver;
-        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse;
+        Flags = ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoCollapse
+            | ImGuiWindowFlags.NoTitleBar;
         
         Mediator.Subscribe<AreaBoundSyncshellSelectionRequestMessage>(this, OnSelectionRequest);
         Mediator.Subscribe<AreaBoundLocationChangedMessage>(this, OnLocationChanged);
@@ -42,7 +41,6 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
     private void OnSelectionRequest(AreaBoundSyncshellSelectionRequestMessage message)
     {
         _availableSyncshells = message.AvailableSyncshells;
-        _selectedIndex = -1;
         _errorMessage = string.Empty;
         _openedAt = DateTime.UtcNow;
         IsOpen = true;
@@ -51,156 +49,60 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        SpheneUI.Chrome.TitleBar(nameof(AreaBoundSyncshellSelectionUI),
+            "Syncshells here", FontAwesomeIcon.MapMarkerAlt,
+            SpheneUI.Palette.CrystalBlue,
+            rightButtons:
+            [
+                new SpheneUI.Chrome.TitleBarButton(FontAwesomeIcon.Times,
+                    "Close", () => IsOpen = false),
+            ]);
         if (_availableSyncshells == null || _availableSyncshells.Count == 0) return;
 
-        // Header
-        SpheneUI.Text.PageHeader($"Multiple Area Syncshells Available ({_availableSyncshells.Count})");
+        SpheneUI.Layout.Callout(
+            $"{_availableSyncshells.Count} syncshell{(_availableSyncshells.Count == 1 ? " is" : "s are")} bound to this area · browse their profiles and join from the hub.",
+            FontAwesomeIcon.Users, SpheneUI.Palette.CrystalBlue,
+            title: "Area-bound syncshells");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
-        SpheneUI.Text.MutedWrapped("Multiple area-bound syncshells are available in this location. Expand each group to see details and select which one you would like to join:");
-
-        SpheneUI.Layout.VerticalSpace();
-
-        // Syncshell list with collapsible groups
-        if (SpheneUI.Layout.BeginScrollArea("SyncshellList", new Vector2(0, 300), border: true))
+        foreach (var shell in _availableSyncshells)
         {
-            for (int i = 0; i < _availableSyncshells.Count; i++)
-            {
-                var syncshell = _availableSyncshells[i];
-                
-                // Create a collapsible tree node for each syncshell
-                var treeNodeFlags = ImGuiTreeNodeFlags.DefaultOpen | ImGuiTreeNodeFlags.Framed;
-                
-                // Highlight selected syncshell
-                if (_selectedIndex == i)
-                {
-                    ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.6f, 1.0f, 0.3f));
-                    ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(0.2f, 0.6f, 1.0f, 0.4f));
-                    ImGui.PushStyleColor(ImGuiCol.HeaderActive, new Vector4(0.2f, 0.6f, 1.0f, 0.5f));
-                }
-                
-                var headerLabel = syncshell.IsLocked ? $"{syncshell.Group.AliasOrGID} (Locked)" : $"{syncshell.Group.AliasOrGID}";
-                bool nodeOpen = ImGui.TreeNodeEx($"##syncshell_tree_{i}", treeNodeFlags, headerLabel);
-                
-                if (_selectedIndex == i)
-                {
-                    ImGui.PopStyleColor(3);
-                }
-                
-                // Handle selection when clicking on the tree node
-                if (ImGui.IsItemClicked())
-                {
-                    _selectedIndex = i;
-                }
-                
-                if (nodeOpen)
-                {
-                    ImGui.Indent();
-                    
-                    // Syncshell details
-                    SpheneUI.Text.Muted($"ID: {syncshell.Group.GID}");
-
-                    // Rules info
-                    if (syncshell.Settings.RequireRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
-                    {
-                        SpheneUI.Text.Colored("⚠ Requires rules acceptance", ImGuiColors.DalamudYellow);
-                    }
-
-                    if (syncshell.IsLocked)
-                    {
-                        SpheneUI.Text.Colored("This syncshell is locked. Joining is disabled.", ImGuiColors.DalamudRed);
-                    }
-
-                    // Custom join message
-                    if (!string.IsNullOrEmpty(syncshell.Settings.CustomJoinMessage))
-                    {
-                        SpheneUI.Text.MutedWrapped(syncshell.Settings.CustomJoinMessage);
-                    }
-
-                    // Selection button within the expanded node
-                    if (_selectedIndex != i)
-                    {
-                        if (SpheneUI.Controls.Button($"Select##select_{i}"))
-                        {
-                            _selectedIndex = i;
-                        }
-                    }
-                    else
-                    {
-                        SpheneUI.Text.Colored("✓ Selected", SpheneUI.Palette.CrystalBlue);
-                    }
-                    
-                    ImGui.Unindent();
-                    ImGui.TreePop();
-                }
-                
-                SpheneUI.Layout.VerticalSpace();
-            }
+            var label = shell.IsLocked
+                ? $"{shell.Group.AliasOrGID} · locked"
+                : shell.Settings.RequireRulesAcceptance
+                    && !string.IsNullOrEmpty(shell.Settings.JoinRules)
+                    ? $"{shell.Group.AliasOrGID} · rules"
+                    : shell.Group.AliasOrGID;
+            SpheneUI.Text.Muted($"  {label}");
         }
-        SpheneUI.Layout.EndScrollArea();
 
-        // Error message
         if (!string.IsNullOrEmpty(_errorMessage))
         {
-            SpheneUI.Layout.Callout(_errorMessage, Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, SpheneUI.Colors.Danger);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            SpheneUI.Layout.Callout(_errorMessage, FontAwesomeIcon.ExclamationTriangle,
+                SpheneUI.Colors.Danger);
         }
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
-        SpheneUI.Layout.Separator();
-
-        // Buttons
-        var buttonWidth = (SpheneUI.Controls.BoundedAvailX() - ImGui.GetStyle().ItemSpacing.X * 2) / 3;
-        var buttonSize = new Vector2(buttonWidth, 0);
-
-        // Join button
-        bool canJoin = _selectedIndex >= 0
-                       && _selectedIndex < _availableSyncshells.Count
-                       && !_availableSyncshells[_selectedIndex].IsLocked;
-        using (ImRaii.Disabled(!canJoin))
+        var bw = (SpheneUI.Controls.BoundedAvailX() - ImGui.GetStyle().ItemSpacing.X) * 0.5f;
+        if (SpheneUI.Controls.PrimaryButton("Browse in Hub",
+                FontAwesomeIcon.ArrowRight, size: new Vector2(bw, 0)))
         {
-            if (SpheneUI.Controls.Button("Join Selected", buttonSize))
-            {
-                _ = Task.Run(async () =>
-                {
-                    try { await HandleJoin().ConfigureAwait(false); }
-                    catch (Exception ex) { _logger.LogError(ex, "Background error joining selected area-bound syncshell"); }
-                });
-            }
-        }
-
-        if (!canJoin)
-        {
-            SpheneUI.AttachTooltip(_selectedIndex >= 0 && _selectedIndex < _availableSyncshells.Count && _availableSyncshells[_selectedIndex].IsLocked
-                ? "This syncshell is locked. Joining is disabled."
-                : "Please select a syncshell to join");
-        }
-
-        ImGui.SameLine();
-
-        // Join All button
-        var allLocked = _availableSyncshells.All(s => s.IsLocked);
-        using (ImRaii.Disabled(allLocked))
-        {
-            if (SpheneUI.Controls.Button("Join All", buttonSize))
-            {
-                _ = Task.Run(async () =>
-                {
-                    try { await HandleJoinAll().ConfigureAwait(false); }
-                    catch (Exception ex) { _logger.LogError(ex, "Background error joining all area-bound syncshells"); }
-                });
-            }
-        }
-
-        SpheneUI.AttachTooltip(allLocked
-            ? "All syncshells in this area are locked. Joining is disabled."
-            : "Join all available syncshells in this area");
-
-        ImGui.SameLine();
-
-        // Cancel button
-        if (SpheneUI.Controls.Button("Cancel", buttonSize))
-        {
-            _logger.LogDebug("User cancelled syncshell selection");
+            Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Syncshells));
             _availableSyncshells = null;
             IsOpen = false;
+        }
+        SpheneUI.AttachTooltip("Opens the hub's syncshells page - profiles and join options are there.");
+        ImGui.SameLine();
+        var allLocked = _availableSyncshells!.All(s => s.IsLocked);
+        if (SpheneUI.Controls.PrimaryButton("Join All",
+                FontAwesomeIcon.Users, size: new Vector2(bw, 0), enabled: !allLocked))
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await HandleJoinAll().ConfigureAwait(false); }
+                catch (Exception ex) { _logger.LogError(ex, "Background error joining all area-bound syncshells"); }
+            });
         }
     }
 
@@ -211,60 +113,6 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
             Mediator.UnsubscribeAll(this);
         }
         base.Dispose(disposing);
-    }
-
-    private async Task HandleJoin()
-    {
-        if (_selectedIndex < 0 || _selectedIndex >= _availableSyncshells!.Count) return;
-        
-        var selectedSyncshell = _availableSyncshells[_selectedIndex];
-        _logger.LogDebug("User selected syncshell: {syncshellId}", selectedSyncshell.Group.GID);
-        
-        try
-        {
-            if (selectedSyncshell.IsLocked)
-            {
-                _errorMessage = "This syncshell is locked. Joining is currently disabled.";
-                return;
-            }
-
-            // Always check if user already has valid consent (for auto-rejoin)
-            var hasValidConsent = await _apiController.GroupCheckAreaBoundConsent(selectedSyncshell.Group.GID).ConfigureAwait(false);
-            
-            if (hasValidConsent)
-            {
-                // Auto-join without showing consent UI
-                _logger.LogDebug("User has valid consent for syncshell {SyncshellId}, auto-joining", selectedSyncshell.Group.GID);
-                await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, true, selectedSyncshell.Settings.RulesVersion).ConfigureAwait(false);
-            }
-            else
-            {
-                // Check if user consent is required for new users
-                bool requiresRulesAcceptance = selectedSyncshell.Settings.RequireRulesAcceptance && 
-                                             !string.IsNullOrEmpty(selectedSyncshell.Settings.JoinRules);
-                
-                if (requiresRulesAcceptance)
-                {
-                    // Show consent UI for the selected syncshell
-                    var consentMessage = new AreaBoundSyncshellConsentRequestMessage(selectedSyncshell, requiresRulesAcceptance);
-                    Mediator.Publish(consentMessage);
-                }
-                else
-                {
-                    // Join directly without consent
-                    await _areaBoundService.JoinAreaBoundSyncshell(selectedSyncshell.Group.GID, false, 0).ConfigureAwait(false);
-                }
-            }
-            
-            _availableSyncshells = null;
-            IsOpen = false;
-            _errorMessage = string.Empty;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error joining selected area-bound syncshell");
-            _errorMessage = "Failed to join syncshell. Please try again.";
-        }
     }
 
     private async Task HandleJoinAll()
@@ -331,8 +179,7 @@ public class AreaBoundSyncshellSelectionUI : WindowMediatorSubscriberBase
                 _logger.LogDebug("Location changed while selection UI was open, closing popup (open for {seconds}s)", timeSinceOpened.TotalSeconds);
                 IsOpen = false;
                 _availableSyncshells = null;
-                _selectedIndex = -1;
-                _errorMessage = string.Empty;
+                        _errorMessage = string.Empty;
             }
             else
             {

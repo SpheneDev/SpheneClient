@@ -13,7 +13,7 @@ internal partial class CharaDataHubUi
     private void DrawNearbyPoses()
     {
         DrawPageTitle("Poses Nearby",
-            "Shared world poses detected around you — apply one or spawn its character.");
+            "Shared world poses detected around you · apply one or spawn its character.");
 
         if (!_uiSharedService.IsInGpose)
         {
@@ -100,7 +100,7 @@ internal partial class CharaDataHubUi
 
         if (_charaDataNearbyManager.NearbyData.Count == 0)
         {
-            SpheneUI.Layout.Callout("No shared world poses found nearby — they appear here when you get close to one.",
+            SpheneUI.Layout.Callout("No shared world poses found nearby · they appear here when you get close to one.",
                 FontAwesomeIcon.MapMarkedAlt, ImGuiColors.DalamudGrey);
             return;
         }
@@ -151,7 +151,7 @@ internal partial class CharaDataHubUi
                     SpheneUI.Text.Wrapped(pose.Key.Description, textRight);
                 }
 
-                // Line 3: world position descriptor — the location context of
+                // Line 3: world position descriptor · the location context of
                 // the pose, previously only visible in a tooltip.
                 using (ImRaii.PushColor(ImGuiCol.Text, ImGuiColors.DalamudGrey))
                     SpheneUI.Text.Wrapped(pose.Key.WorldDataDescriptor, textRight);
@@ -173,7 +173,7 @@ internal partial class CharaDataHubUi
                 {
                     GposePoseAction(() =>
                     {
-                        if (SpheneUI.Controls.SegmentButton("Apply Pose", FontAwesomeIcon.ArrowRight,
+                        if (SpheneUI.Controls.PrimaryButton("Apply Pose", FontAwesomeIcon.ArrowRight,
                                 accent: SpheneUI.Palette.EtherealPurple))
                         {
                             _charaDataManager.ApplyFullPoseDataToGposeTarget(pose.Key);
@@ -197,7 +197,7 @@ internal partial class CharaDataHubUi
             var drawList = ImGui.GetWindowDrawList();
             var circleRadius = circleDiameter / 2f;
             var windowPos = ImGui.GetWindowPos();
-            // GetCursorPos is already scroll-adjusted — subtracting scroll here
+            // GetCursorPos is already scroll-adjusted · subtracting scroll here
             // detached the circle from its card once the list scrolled.
             var circleCenter = new Vector2(windowPos.X + circleX + circleRadius, windowPos.Y + pos.Y + circleRadius + circleOffsetY);
             var rads = pose.Value.Direction * (Math.PI / 180);

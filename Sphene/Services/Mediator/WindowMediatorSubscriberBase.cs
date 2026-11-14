@@ -38,9 +38,17 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     public SpheneMediator Mediator { get; }
 
+    // The DI scope can run the dispose chain more than once (a shared instance
+    // is captured once per descriptor). The guard lives here - not in
+    // Dispose(bool) - so derived overrides are skipped on re-entry too.
+    private int _disposed;
+
     public void Dispose()
     {
-        Dispose(disposing: true);
+        if (System.Threading.Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            Dispose(disposing: true);
+        }
         GC.SuppressFinalize(this);
     }
 
@@ -52,8 +60,8 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     protected virtual bool AppliesOwnThemeScope => false;
 
     /// <summary>
-    /// Whether the window renders the design-system chrome — themed surface,
-    /// custom title bar with drag region and fold animation — instead of the
+    /// Whether the window renders the design-system chrome - themed surface,
+    /// custom title bar with drag region and fold animation - instead of the
     /// native ImGui frame. On by default; overlays and popup hosts opt out.
     /// </summary>
     protected virtual bool UseSpheneChrome => !AppliesOwnThemeScope;
@@ -64,14 +72,14 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     /// <summary>
     /// Whether the chrome draws its own title bar. Windows whose content
     /// begins with a full-width header band (e.g. the Sphene Hub) return
-    /// false — that band then acts as the drag region and owns the fold and
+    /// false - that band then acts as the drag region and owns the fold and
     /// close buttons itself.
     /// </summary>
     protected virtual bool ChromeHasTitleBar => true;
 
     /// <summary>
     /// Draws the star-chart backdrop over the window surface, under all
-    /// content. Opt-in per window — off by default so small overlays and
+    /// content. Opt-in per window - off by default so small overlays and
     /// helper windows stay clean.
     /// </summary>
     protected virtual bool ChromeWindowPattern => false;
@@ -80,11 +88,11 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     /// Whether <see cref="DrawCollapsedContent"/> replaces
     /// <see cref="DrawInternal"/> for the entire fold animation instead of the
     /// fading-content behavior. Only sensible when <see cref="ChromeHasTitleBar"/>
-    /// is false — pages with a chrome title bar keep the bar during the fold.
+    /// is false - pages with a chrome title bar keep the bar during the fold.
     /// </summary>
     protected virtual bool DrawCollapsedDuringFold => false;
 
-    /// <summary>Collapsed window height in unscaled units — defaults to the chrome title bar height.</summary>
+    /// <summary>Collapsed window height in unscaled units - defaults to the chrome title bar height.</summary>
     protected virtual float ChromeCollapsedHeight => SpheneUI.Chrome.TitleBarHeightUnscaled;
 
     /// <summary>Collapsed window width in unscaled units; 0 keeps the open width.</summary>
@@ -92,12 +100,12 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     /// <summary>
     /// Content drawn instead of <see cref="DrawInternal"/> while the window is
-    /// folded or folding — only used when <see cref="DrawCollapsedDuringFold"/>
+    /// folded or folding - only used when <see cref="DrawCollapsedDuringFold"/>
     /// is set.
     /// </summary>
     protected virtual void DrawCollapsedContent() { }
 
-    /// <summary>Title shown in the chrome title bar — defaults to the window name without its ###id suffix.</summary>
+    /// <summary>Title shown in the chrome title bar - defaults to the window name without its ###id suffix.</summary>
     protected virtual string ChromeTitle
     {
         get
@@ -116,7 +124,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     /// <summary>
     /// Optional content drawn in the title bar between the title and the
-    /// right-side buttons — receives the zone's min/max screen positions.
+    /// right-side buttons - receives the zone's min/max screen positions.
     /// </summary>
     protected virtual Action<Vector2, Vector2>? ChromeMiddleContent => null;
 
@@ -131,8 +139,17 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     private string ChromeId => WindowName;
 
+    /// <summary>
+    /// Density profile resolved inside <see cref="Draw"/> - PreDraw runs before
+    /// ImGui Begin so the real window size is unknown there; the previous
+    /// frame's profile rides the frame marker pushed below, keeping fold math
+    /// and token lookups consistent with the content pass.
+    /// </summary>
+    private SpheneUI.DensityProfile _resolvedDensity = SpheneUI.DensityProfile.Balanced;
+
     public override void PreDraw()
     {
+        SpheneUI.Density.PushFrame(_resolvedDensity);
         if (UseSpheneChrome)
         {
             Flags |= ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse
@@ -143,6 +160,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
                 SpheneUI.Chrome.UpdateCollapse(this, ChromeId,
                     ChromeCollapsedHeight, ChromeCollapsedWidth);
             }
+            SpheneUI.Chrome.FitToWorkArea(this);
 
             // Native resize grip stays hidden; the chrome draws its own frame.
             ImGui.PushStyleColor(ImGuiCol.ResizeGrip, Vector4.Zero);
@@ -154,11 +172,15 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     public override void PostDraw()
     {
+        // Overlay scrollbars paint here - after ImGui.End, so the strips land
+        // on the window's own draw list and can never overdraw foreign windows.
+        SpheneUI.Scrollbar.Flush(WindowName);
         if (UseSpheneChrome)
         {
             ImGui.PopStyleColor(3);
         }
         base.PostDraw();
+        SpheneUI.Density.PopFrame();
     }
 
     public override void Draw()
@@ -171,7 +193,8 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
                 return;
             }
             using var themeScope = SpheneUI.Theme.WindowScope();
-            // Blur is part of the chrome look — windows that opt out of the
+            using var densityScope = SpheneUI.Density.AutoWindowScope(out _resolvedDensity);
+            // Blur is part of the chrome look - windows that opt out of the
             // chrome (overlay hosts like PopupHandler, the draggable icon)
             // must not get a ghost blur rect either.
             if (UseSpheneChrome)
@@ -192,7 +215,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
 
     public override void OnOpen()
     {
-        // Reopening always lands maximized — a window closed while collapsed
+        // Reopening always lands maximized - a window closed while collapsed
         // must not come back as a strip.
         if (UseSpheneChrome && ChromeCollapsible)
         {
@@ -212,7 +235,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
         }
         else
         {
-            // Without a chrome title bar the content owns the window top —
+            // Without a chrome title bar the content owns the window top -
             // the themed surface and border ring still come from the chrome.
             var drawList = ImGui.GetWindowDrawList();
             var windowPos = ImGui.GetWindowPos();
@@ -246,18 +269,9 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     }
 
     // Windows are registered as both their concrete type and
-    // WindowMediatorSubscriberBase so embedded hosts can inject them — the DI
-    // scope captures the shared instance once per descriptor and would
-    // otherwise run the dispose chain twice. Overrides run before this
-    // guard, so their teardown must stay idempotent (CancelDispose et al.).
-    private int _disposed;
-
+    // WindowMediatorSubscriberBase so embedded hosts can inject them - the DI
     protected virtual void Dispose(bool disposing)
     {
-        if (System.Threading.Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
         _logger.LogTrace("Disposing {type}", GetType());
 
         Mediator.UnsubscribeAll(this);

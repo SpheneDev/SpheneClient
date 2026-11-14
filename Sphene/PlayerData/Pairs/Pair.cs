@@ -91,6 +91,27 @@ public class Pair : DisposableMediatorSubscriberBase, IPairAcknowledgment
     public DateTimeOffset? LastReceivedCharacterDataTime { get; private set; }
     public DateTimeOffset? LastReceivedCharacterDataChangeTime { get; private set; }
     public string? PlayerName => CachedPlayer?.PlayerName ?? string.Empty;
+
+    /// <summary>Home world name while the remote character is spawned ·
+    /// empty for offline users (no game object to read).</summary>
+    public string HomeWorldName
+    {
+        get
+        {
+            var ptr = CachedPlayer?.PlayerCharacter ?? nint.Zero;
+            if (ptr == nint.Zero)
+            {
+                return string.Empty;
+            }
+            var obj = _dalamudUtilService.CreateGameObject(ptr);
+            if (obj is not Dalamud.Game.ClientState.Objects.SubKinds.IPlayerCharacter ch)
+            {
+                return string.Empty;
+            }
+            return _dalamudUtilService.WorldData.Value.TryGetValue(
+                (ushort)ch.HomeWorld.RowId, out var w) ? w : string.Empty;
+        }
+    }
     public long LastAppliedDataBytes => CachedPlayer?.LastAppliedDataBytes ?? -1;
     public long LastAppliedDataTris { get; set; } = -1;
     public long LastAppliedApproximateVRAMBytes { get; set; } = -1;

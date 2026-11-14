@@ -16,18 +16,18 @@ internal sealed partial class CharaDataHubUi
     private void DrawGposeTogether()
     {
         DrawPageTitle("GPose Together",
-            "Multiplayer GPose sessions — create or join a lobby and pose together.");
+            "Multiplayer GPose sessions · create or join a lobby and pose together.");
 
         var brioReady = _charaDataManager.BrioAvailable;
         var connected = _uiSharedService.ApiController.IsConnected;
         if (!brioReady)
         {
-            SpheneUI.Layout.Callout("GPose Together runs on Brio — install and enable it to use lobbies.",
+            SpheneUI.Layout.Callout("GPose Together runs on Brio · install and enable it to use lobbies.",
                 FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed, "Brio required");
         }
         if (!connected)
         {
-            SpheneUI.Layout.Callout("Lobbies sync through the Sphene server — reconnect to use GPose Together.",
+            SpheneUI.Layout.Callout("Lobbies sync through the Sphene server · reconnect to use GPose Together.",
                 FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed, "Disconnected");
         }
         if (!brioReady || !connected)
@@ -64,7 +64,7 @@ internal sealed partial class CharaDataHubUi
             SpheneUI.Text.MutedWrapped("Start a fresh lobby for your group, or join an existing one with its lobby ID.");
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
-            if (SpheneUI.Controls.SegmentButton("Create New Lobby", FontAwesomeIcon.Plus, accent: accent))
+            if (SpheneUI.Controls.PrimaryButton("Create New Lobby", FontAwesomeIcon.Plus, accent: accent))
             {
                 _charaDataGposeTogetherManager.CreateNewLobby();
             }
@@ -77,7 +77,7 @@ internal sealed partial class CharaDataHubUi
             SpheneUI.Layout.ScaledNextItemWidth(250);
             SpheneUI.Controls.InputTextWithHint("##lobbyId", "GPose Lobby ID", ref _joinLobbyId, 30);
             ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-            if (SpheneUI.Controls.SegmentButton("Join", FontAwesomeIcon.ArrowRight,
+            if (SpheneUI.Controls.PrimaryButton("Join", FontAwesomeIcon.ArrowRight,
                     accent: accent, enabled: !string.IsNullOrWhiteSpace(_joinLobbyId)))
             {
                 _charaDataGposeTogetherManager.JoinGPoseLobby(_joinLobbyId);
@@ -115,7 +115,7 @@ internal sealed partial class CharaDataHubUi
 
             ImGui.SameLine();
             // SegAutoWidth accounts for the chevron zone + paddings that a
-            // bare text-size estimate misses — the button was clipping off
+            // bare text-size estimate misses · the button was clipping off
             // the card edge without it.
             var leaveW = SpheneUI.Controls.SegAutoWidth("Leave Lobby", null, ImGui.GetFrameHeight())
                 + ImGui.GetStyle().ItemInnerSpacing.X;
@@ -130,7 +130,7 @@ internal sealed partial class CharaDataHubUi
             SpheneUI.AttachTooltip("Leave the current GPose lobby." + SpheneUI.TooltipSeparator + "Hold CTRL and click to leave.");
 
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            if (SpheneUI.Controls.SegmentButton("Send Updated Character Data", FontAwesomeIcon.ArrowUp, accent: accent))
+            if (SpheneUI.Controls.PrimaryButton("Send Updated Character Data", FontAwesomeIcon.ArrowUp, accent: accent))
             {
                 _ = _charaDataGposeTogetherManager.PushCharacterDownloadDto();
             }
@@ -154,7 +154,8 @@ internal sealed partial class CharaDataHubUi
         {
             if (!users.Any())
             {
-                SpheneUI.Text.Muted("No other users in this lobby yet — share the lobby ID to invite them.");
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.UserFriends, "Lobby is empty",
+                    "Share the lobby ID to invite others.");
             }
             else
             {
@@ -201,7 +202,7 @@ internal sealed partial class CharaDataHubUi
             ImGui.SameLine();
             SpheneUI.Icons.Icon(FontAwesomeIcon.Globe, sameMapAndServer.SameServer ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed);
             SpheneUI.AttachTooltip((sameMapAndServer.SameServer ? "You are on the same server." : "You are not on the same server.")
-                + SpheneUI.TooltipSeparator + "Same server is not required — users on other servers must be spawned as actors.");
+                + SpheneUI.TooltipSeparator + "Same server is not required · users on other servers must be spawned as actors.");
 
             ImGui.SameLine();
             SpheneUI.Icons.Icon(FontAwesomeIcon.Running, sameMapAndServer.SameEverything ? ImGuiColors.ParsedGreen : ImGuiColors.DalamudRed);
@@ -232,7 +233,7 @@ internal sealed partial class CharaDataHubUi
             }
             var spawnDisabledReason = !_uiSharedService.IsInGpose ? "You are not in GPose."
                 : user.CharaData == null ? "The user has not sent character data yet."
-                : sameMapAndServer.SameEverything ? "You are on the same map, server and instance — assign a character instead."
+                : sameMapAndServer.SameEverything ? "You are on the same map, server and instance · assign a character instead."
                 : null;
             SpheneUI.AttachTooltip("Spawn a new actor, apply character data and assign it to this user."
                 + (spawnDisabledReason != null ? SpheneUI.TooltipSeparator + "Disabled: " + spawnDisabledReason : string.Empty));
@@ -242,23 +243,21 @@ internal sealed partial class CharaDataHubUi
             {
                 var unassigned = user.Address == nint.Zero;
                 var comboW = MathF.Min(240f * scale, ImGui.GetContentRegionAvail().X - iconBtn - spacingX * 2f - (unassigned ? iconW + spacingX : 0f));
-                ImGui.SetNextItemWidth(MathF.Max(80f * scale, comboW));
-                using (var ctl = SpheneUI.Controls.PushValueControlStyle())
-                using (var combo = ImRaii.Combo("##character", unassigned ? "No character assigned" : CharaName(user.AssociatedCharaName)))
+                if (SpheneUI.Controls.BeginComboBox("##character",
+                        unassigned ? "No character assigned" : CharaName(user.AssociatedCharaName),
+                        MathF.Max(80f * scale, comboW)))
                 {
-                    if (combo)
+                    foreach (var chara in gposeCharas)
                     {
-                        foreach (var chara in gposeCharas)
-                        {
-                            if (chara == null) continue;
+                        if (chara == null) continue;
 
-                            if (SpheneUI.Controls.Selectable(CharaName(chara.Name.TextValue), chara.Address == user.Address))
-                            {
-                                user.AssociatedCharaName = chara.Name.TextValue;
-                                user.Address = chara.Address;
-                            }
+                        if (SpheneUI.Controls.Selectable(CharaName(chara.Name.TextValue), chara.Address == user.Address))
+                        {
+                            user.AssociatedCharaName = chara.Name.TextValue;
+                            user.Address = chara.Address;
                         }
                     }
+                    SpheneUI.Controls.EndComboBox();
                 }
                 ImGui.SameLine();
                 using (ImRaii.Disabled(unassigned))
@@ -274,7 +273,7 @@ internal sealed partial class CharaDataHubUi
                 {
                     ImGui.SameLine();
                     SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudRed);
-                    SpheneUI.AttachTooltip("No valid character assigned for this user — pose data will not be applied.");
+                    SpheneUI.AttachTooltip("No valid character assigned for this user · pose data will not be applied.");
                 }
             }
         }, 5, width);
