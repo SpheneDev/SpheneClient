@@ -27,6 +27,10 @@ public partial class UiSharedService
     private bool _isDownloadFolderOneDrive = false;
     private bool _isDownloadFolderPenumbra = false;
 
+    /// <summary>Top-level directories Sphene owns inside the storage folder -
+    /// anything else marks a picked directory as foreign.</summary>
+    private static readonly string[] SpheneOwnedSubdirs = ["texture_backups", "community-media"];
+
     /// <summary>Checks whether a directory can be written to by creating a temporary file.</summary>
     public static bool IsDirectoryWritable(string dirPath, bool throwIfFails = false)
     {
@@ -89,7 +93,8 @@ public partial class UiSharedService
                     }
                 }
                 var dirs = Directory.GetDirectories(path);
-                var invalidDirs = dirs.Where(dir => !Path.GetFileName(dir).Equals("texture_backups", StringComparison.OrdinalIgnoreCase)).ToArray();
+                var invalidDirs = dirs.Where(dir => !SpheneOwnedSubdirs.Contains(
+                    Path.GetFileName(dir), StringComparer.OrdinalIgnoreCase)).ToArray();
                 if (invalidDirs.Any())
                 {
                     _cacheDirectoryHasOtherFilesThanCache = true;
