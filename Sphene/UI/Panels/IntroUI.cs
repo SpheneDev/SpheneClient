@@ -55,6 +55,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     private bool _resetTosScroll;
     private readonly ConfigBackupService _configBackupService;
     private readonly FileDialogManager _fileDialogManager;
+    private readonly ShrinkUHostService _shrinkuHostService;
     private readonly ShrinkUConfigService _shrinkUConfigService;
     private bool _showImportModal = false;
     private string _importPassword = string.Empty;
@@ -82,7 +83,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         _cacheMonitor = fileCacheManager;
         _serverConfigurationManager = serverConfigurationManager;
         _dalamudUtilService = dalamudUtilService;
-        _ = shrinkuHostService;
+        _shrinkuHostService = shrinkuHostService;
         _ = shrinkuConfig;
         _ = shrinkuConversion;
         _ = shrinkuFirstRun;
@@ -309,7 +310,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         });
     }
 
-    private static void DrawShrinkUPageContent()
+    private void DrawShrinkUPageContent()
     {
         SpheneUI.Layout.SectionCard(() =>
         {
@@ -317,11 +318,26 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Text.Wrapped("Manage texture backups and convert formats to keep your Penumbra-based mods healthy. ShrinkU is bundled with Sphene and integrates with the same Window System.");
 
             SpheneUI.Layout.VerticalSpace();
+            var shrinkuEnabled = _configService.Current.EnableShrinkUIntegration;
+            if (SpheneUI.Controls.Toggle("Enable ShrinkU integration", ref shrinkuEnabled))
+            {
+                _configService.Current.EnableShrinkUIntegration = shrinkuEnabled;
+                _configService.Save();
+                try { _shrinkuHostService.ApplyIntegrationEnabled(shrinkuEnabled, openWindow: false); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to apply ShrinkU integration setting"); }
+            }
+            SpheneUI.Text.ColoredWrapped(
+                shrinkuEnabled
+                    ? "ShrinkU windows and automatic texture optimization are active."
+                    : "ShrinkU windows stay hidden. You can still compress textures from the conversion button in the main panel.",
+                ImGuiColors.DalamudGrey3);
+
+            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Layout.Callout("Backups are stored under Sphene's cache in 'texture_backups'. First run will configure this automatically.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.HealerGreen, "Backup Location");
 
             SpheneUI.Layout.VerticalSpace();
-            SpheneUI.Layout.Callout("You can enable or disable ShrinkU integration anytime in Settings → Appearance.",
+            SpheneUI.Layout.Callout("You can change this anytime later in Settings → Plugins.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudGrey3, "Integration Toggle");
 
             SpheneUI.Layout.VerticalSpace();

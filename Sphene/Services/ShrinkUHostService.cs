@@ -465,7 +465,7 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
     }
 
     // Apply a runtime toggle to add or remove ShrinkU windows
-    public void ApplyIntegrationEnabled(bool enabled)
+    public void ApplyIntegrationEnabled(bool enabled, bool openWindow = true)
     {
         try
         {
@@ -474,12 +474,16 @@ public sealed class ShrinkUHostService : IHostedService, IDisposable
             {
                 RegisterWindows();
                 SetPenumbraIntegration(true);
+                try { _shrinkuConversionService.SetEnabled(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to enable ShrinkU conversion"); }
                 try
                 {
-                    if (_shrinkuConfigService.Current.FirstRunCompleted)
-                        _conversionUi.IsOpen = true;
-                    else
-                        _firstRunUi.IsOpen = true;
+                    if (openWindow)
+                    {
+                        if (_shrinkuConfigService.Current.FirstRunCompleted)
+                            _conversionUi.IsOpen = true;
+                        else
+                            _firstRunUi.IsOpen = true;
+                    }
                 }
                 catch (Exception ex) { _logger.LogDebug(ex, "Failed to open ShrinkU window on enable"); }
             }

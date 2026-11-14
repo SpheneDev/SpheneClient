@@ -2564,19 +2564,21 @@ public class SettingsUi : WindowMediatorSubscriberBase
 
             // 2. ShrinkU (Built-in)
             bool shrinkUEnabled = _configService.Current.EnableShrinkUIntegration;
-            DrawPluginListRow("ShrinkU", "Texture compression and optimization tool.", _shrinkUVersion, shrinkUEnabled, shrinkUEnabled,
-                onInstallAction: async () =>
+            DrawPluginListRow("ShrinkU", "Texture compression and optimization tool.", _shrinkUVersion, true, shrinkUEnabled,
+                onEnableAction: async () =>
                 {
                     _configService.Current.EnableShrinkUIntegration = true;
                     _configService.Save();
                     try { _shrinkUHostService.ApplyIntegrationEnabled(true); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to apply ShrinkU integration setting"); }
                     await Task.CompletedTask.ConfigureAwait(false);
                 },
-                onOpenSettings: () =>
+                onDisableAction: async () =>
                 {
-                    try { _shrinkUHostService.OpenReleaseNotes(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to open ShrinkU release notes"); }
-                },
-                settingsLabel: "Release Notes");
+                    _configService.Current.EnableShrinkUIntegration = false;
+                    _configService.Save();
+                    try { _shrinkUHostService.ApplyIntegrationEnabled(false); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to apply ShrinkU integration setting"); }
+                    await Task.CompletedTask.ConfigureAwait(false);
+                });
 
             SpheneUI.Layout.SectionSeparator("Required Plugins");
 

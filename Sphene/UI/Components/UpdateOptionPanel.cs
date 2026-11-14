@@ -66,7 +66,8 @@ public static class UpdateOptionPanel
         ChroniclesEditor,
         MarkdownRichText,
         DirectMessaging,
-        FollowedCommunities
+        FollowedCommunities,
+        ShrinkUIntegrationToggle
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -121,6 +122,7 @@ public static class UpdateOptionPanel
         new("v.1.1.41", [Link.ChroniclesEditor, Link.MarkdownRichText]),
         new("v.1.1.42", [Link.DirectMessaging]),
         new("v.1.1.43", [Link.FollowedCommunities]),
+        new("v.1.1.44", [Link.ShrinkUIntegrationToggle]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -178,7 +180,8 @@ public static class UpdateOptionPanel
         [Link.ChroniclesEditor] = "Chronicles: Dedicated editor, live preview, covers, author identity & Everyone/Friends/Only me visibility",
         [Link.MarkdownRichText] = "Markdown: Text sizes up to 32 pt, text colors, caret-aware formatting & selection wrapping",
         [Link.DirectMessaging] = "Social: Direct messages · unread badges, inbox entries & quick chat access",
-        [Link.FollowedCommunities] = "Communities: Follow syncshells, browse area-bound shells & see who is in the area"
+        [Link.FollowedCommunities] = "Communities: Follow syncshells, browse area-bound shells & see who is in the area",
+        [Link.ShrinkUIntegrationToggle] = "Plugins: ShrinkU integration toggle (intro setup + Settings → Plugins)"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -471,6 +474,11 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("Syncshell communities are now readable without membership: any listed or area-bound shell opens its community page for everyone, and a Follow button on the page (or the directory card) bookmarks it into a Followed Communities section on the Syncshells page. Followed shells feed their public events into your Home feed right next to joined ones, and the community page shows how many users follow the shell.");
             SpheneUI.Controls.HelpText("Area-bound shells show who is currently inside the area and only offer the join button while you actually stand inside it - outside the bounds the page stays open for browsing and following instead.");
+        },
+        [Link.ShrinkUIntegrationToggle] = (_, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("ShrinkU integration can now be switched on or off directly: the intro setup offers the choice on its ShrinkU step, and the Plugins page shows a real enable/disable switch on the ShrinkU row.");
+            SpheneUI.Controls.HelpText("Turning integration off hides ShrinkU's own windows and automatic optimization - you can still compress textures from the conversion button in the main panel.");
         }
     };
 
