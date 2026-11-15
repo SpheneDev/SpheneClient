@@ -2287,24 +2287,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
         }
     }
 
-    private static void DrawRotatingSpinner(Vector2 center, float radius, float thickness)
-    {
-        var drawList = ImGui.GetWindowDrawList();
-        var theme = SpheneTheme.Current;
-        var color = theme.TextPrimary;
-        var u32 = ImGui.ColorConvertFloat4ToU32(color);
-        var bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(color.X, color.Y, color.Z, 0.25f));
-        drawList.AddCircle(center, radius, bgColor, 48, thickness);
-
-        var t = (float)ImGui.GetTime();
-        var speed = 3.0f;
-        var baseAngle = t * speed;
-        var arcLen = 1.35f;
-        drawList.PathClear();
-        drawList.PathArcTo(center, radius, baseAngle, baseAngle + arcLen, 32);
-        drawList.PathStroke(u32, ImDrawFlags.None, thickness);
-    }
-
     private void DrawPluginListRow(string name, string description, string statusOrVersion, bool isInstalled, bool isEnabled, Func<Task>? onInstallAction = null, Func<Task>? onEnableAction = null, Func<Task>? onDisableAction = null, Action? onOpenSettings = null, string? settingsLabel = null)
     {
         using var id = ImRaii.PushId("PluginRow_" + name);
@@ -2430,7 +2412,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     var center = new Vector2(
                         rectMin.X + ImGui.GetStyle().FramePadding.X + spinnerAreaWidth * 0.5f,
                         rectMin.Y + (rectMax.Y - rectMin.Y) * 0.5f);
-                    DrawRotatingSpinner(center, radius, thickness);
+                    SpheneUI.Fx.RotatingSpinner(center, radius, thickness);
                 }
                 else if (!disableInstall)
                 {

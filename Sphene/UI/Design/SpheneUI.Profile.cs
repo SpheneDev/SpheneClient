@@ -429,6 +429,26 @@ public static partial class SpheneUI
             }
             if (editing && edit!.OnAvatarClicked != null)
             {
+                // persistent affordance: a camera badge sits on the avatar's
+                // rim so the editable spot reads at its landing position ·
+                // skipped when a presence dot already owns the corner
+                if (!presence.HasValue)
+                {
+                    var badgeR = 9f * scale;
+                    var badgeCenter = avatarPos + new Vector2(avatarSize * 0.82f);
+                    drawList.AddCircleFilled(badgeCenter, badgeR + 2f * scale,
+                        ColorUtils.ToU32(surface));
+                    drawList.AddCircleFilled(badgeCenter, badgeR,
+                        ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.85f)));
+                    using (Icons.PushFont())
+                    {
+                        var cam = FontAwesomeIcon.Camera.ToIconString();
+                        var camSize = ImGui.CalcTextSize(cam) * 0.7f;
+                        drawList.AddText(ImGui.GetFont(), ImGui.GetFontSize() * 0.7f,
+                            badgeCenter - camSize * 0.5f,
+                            ColorUtils.ToU32(Vector4.One), cam);
+                    }
+                }
                 ImGui.SetCursorScreenPos(avatarPos);
                 if (ImGui.InvisibleButton($"##hero-avatar-edit-{displayName}",
                         new Vector2(avatarSize)))
@@ -478,7 +498,23 @@ public static partial class SpheneUI
             var bubbleH = 0f;
             var statusTruncated = false;
             var thoughtBubble = false;
-            if (!editing && hasStatus)
+            var editBubble = false;
+            if (editing)
+            {
+                // edit mode parks the status input inside a bubble-shaped
+                // frame at the same spot it later lands · fixed height for
+                // a single-line field, width budgeted like the view bubble
+                bubbleInnerW = MathF.Min(220f * scale,
+                    textMaxX - 8f * scale - bubbleMin.X - bubblePad.X * 2f);
+                if (bubbleInnerW >= 96f * scale)
+                {
+                    bubbleH = ImGui.GetFrameHeight() + bubblePad.Y * 2f;
+                    bubbleMin.Y = MathF.Max(bannerMin.Y + 6f * scale,
+                        rim.Y - trailY - bubbleH * 0.78f);
+                    editBubble = true;
+                }
+            }
+            else if (hasStatus)
             {
                 var naturalW = ImGui.CalcTextSize(profile.StatusMessage).X;
                 bubbleInnerW = MathF.Min(240f * scale,
@@ -500,10 +536,13 @@ public static partial class SpheneUI
             // Bio panel on the right · the description leaves the identity
             // column for a bounded About-me card whenever the header is
             // wide enough to host it; narrow headers keep the inline preview.
+            // Bio panel on the right · the description leaves the identity
+            // column for a bounded About-me card whenever the header is
+            // wide enough to host it; narrow headers keep the inline preview.
             var bioGap = 16f * scale;
             var bioW = MathF.Min(300f * scale,
                 MathF.Max(180f * scale, (textMaxX - textMin.X) * 0.36f));
-            var bioPanel = !editing && hasDesc
+            var bioPanel = (editing || hasDesc)
                 && textMaxX - textMin.X - bioW - bioGap >= 190f * scale;
             var columnMaxX = bioPanel ? textMaxX - bioW - bioGap : textMaxX;
             // No child window here on purpose: a fixed-size frame keeps
@@ -527,8 +566,10 @@ public static partial class SpheneUI
                 DrawNsfwChip(isNsfw, nsfwClickable, scale,
                     () => onNsfw?.Invoke(!isNsfw));
             }
-            if (editing)
+            if (editing && !editBubble)
             {
+                // narrow header fallback · the bubble spot does not fit, so
+                // the status edit keeps the inline row
                 var statusBuf = edit!.StatusBuffer;
                 var statusCommit = Controls.InputTextWithHint("##hero-status",
                         "Set a status message…", ref statusBuf, 100,
@@ -549,15 +590,27 @@ public static partial class SpheneUI
             {
                 DrawHeroTags(profile.Tags, editing ? edit : null, accent, scale);
             }
-            if (editing)
+            if (editing && !bioPanel)
             {
+                // narrow header fallback · the About-me slot does not fit,
+                // so the bio edit keeps the inline block
                 var descBuf = edit!.DescriptionBuffer;
-                var descCommit = Controls.InputTextMultiline("##hero-desc",
-                        ref descBuf, 2000,
-                        new Vector2(inputWidth, lineH * 3f + 8f * scale))
-                    || ImGui.IsItemDeactivatedAfterEdit();
+                // Keystrokes only update the buffer - committing per char
+                // stages the draft early, pops the unsaved toast window into
+                // existence and that new window steals nav focus mid-typing.
+                _ = Controls.InputTextMultiline("##hero-desc",
+                    ref descBuf, 2000,
+                    new Vector2(inputWidth, lineH * 3f + 8f * scale));
+                if (descBuf.Length == 0 && !ImGui.IsItemActive())
+                {
+                    // multiline inputs carry no hint flag · painted placeholder
+                    drawList.AddText(ImGui.GetItemRectMin()
+                            + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
+                        ColorUtils.ToU32(Colors.TextMuted),
+                        "Your bio · tell others about yourself…");
+                }
                 edit.DescriptionBuffer = descBuf;
-                if (descCommit)
+                if (ImGui.IsItemDeactivatedAfterEdit())
                 {
                     edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
                 }
@@ -572,6 +625,65 @@ public static partial class SpheneUI
             var textActualBottom = ImGui.GetCursorScreenPos().Y;
             Layout.FlowUnindent(textIndent);
             ContentBounds.Pop();
+            var floatRestore = ImGui.GetCursorScreenPos();
+
+            // Right-side About-me panel + its anchored full-bio flyout. In
+            // edit mode the same frame hosts the bio input at the exact spot
+            // the text later renders - no jump when committing.
+            var bioPanelBottom = 0f;
+            var bioEditMin = Vector2.Zero;
+            var bioEditMax = Vector2.Zero;
+            var hasBioEditZone = false;
+            var bioFlyoutId = $"profile-bio-{displayName}";
+            if (bioPanel && editing)
+            {
+                var bMin = new Vector2(textMaxX - bioW,
+                    textMin.Y + heroTextPad.Y);
+                var bPad = 10f * scale;
+                var bGap = 6f * scale;
+                var bEditH = lineH * 3f + 8f * scale;
+                var bMax = bMin + new Vector2(bioW,
+                    bPad * 2f + lineH + bGap + bEditH);
+                var bRounding = 10f * scale;
+                drawList.AddRectFilled(bMin, bMax,
+                    ColorUtils.ToU32(Layout.NavRailBandColor()), bRounding);
+                drawList.AddRect(bMin, bMax,
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.30f)),
+                    bRounding);
+                drawList.AddText(bMin + new Vector2(bPad, bPad),
+                    ColorUtils.ToU32(Colors.TextMuted), "About me");
+                var bInputMin = bMin + new Vector2(bPad, bPad + lineH + bGap);
+                ImGui.SetCursorScreenPos(bInputMin);
+                var bIndent = Layout.FlowIndentTo(bInputMin.X);
+                var descBuf = edit!.DescriptionBuffer;
+                _ = Controls.InputTextMultiline("##hero-desc",
+                    ref descBuf, 2000,
+                    new Vector2(bioW - bPad * 2f, bEditH));
+                if (descBuf.Length == 0 && !ImGui.IsItemActive())
+                {
+                    drawList.AddText(ImGui.GetItemRectMin()
+                            + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
+                        ColorUtils.ToU32(Colors.TextMuted),
+                        "Your bio · tell others about yourself…");
+                }
+                edit.DescriptionBuffer = descBuf;
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                {
+                    edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
+                }
+                Layout.FlowUnindent(bIndent);
+                bioPanelBottom = bMax.Y;
+                bioEditMin = bMin;
+                bioEditMax = bMax;
+                hasBioEditZone = true;
+            }
+            else if (bioPanel)
+            {
+                bioPanelBottom = DrawBioPanel(drawList, profile.Description,
+                    new Vector2(textMaxX - bioW, textMin.Y + heroTextPad.Y),
+                    bioW, accent, scale, bioFlyoutId);
+            }
+            ImGui.SetCursorScreenPos(floatRestore);
 
             // Thought bubble - drawn after the identity flow so its dots
             // and text sit above the avatar edge and banner art.
@@ -581,30 +693,67 @@ public static partial class SpheneUI
                     bubbleMin, bubbleInnerW + bubblePad.X * 2f, bubbleH,
                     bubblePad, accent, scale, statusTruncated);
             }
-            // Right-side About-me panel + its anchored full-bio flyout.
-            var bioPanelBottom = 0f;
-            var bioFlyoutId = $"profile-bio-{displayName}";
-            if (bioPanel)
+            var statusEditMin = Vector2.Zero;
+            var statusEditMax = Vector2.Zero;
+            var hasStatusEditZone = false;
+            if (editBubble)
             {
-                bioPanelBottom = DrawBioPanel(drawList, profile.Description,
-                    new Vector2(textMaxX - bioW, textMin.Y + heroTextPad.Y),
-                    bioW, accent, scale, bioFlyoutId);
+                // the status edit rides the same bubble shape it lands in ·
+                // chrome + dots by the shared helper, input inside the pad
+                var bubbleMax = bubbleMin + new Vector2(
+                    bubbleInnerW + bubblePad.X * 2f, bubbleH);
+                DrawThoughtBubbleChrome(drawList, rim, bubbleMin,
+                    bubbleMax, accent, scale);
+                var statusMin = bubbleMin + bubblePad;
+                ImGui.SetCursorScreenPos(statusMin);
+                var statusIndent = Layout.FlowIndentTo(statusMin.X);
+                var statusBuf = edit!.StatusBuffer;
+                var statusCommit = Controls.InputTextWithHint("##hero-status",
+                        "Set a status message…", ref statusBuf, 100,
+                        ImGuiInputTextFlags.EnterReturnsTrue,
+                        preferredWidth: bubbleInnerW)
+                    || ImGui.IsItemDeactivatedAfterEdit();
+                edit.StatusBuffer = statusBuf;
+                if (statusCommit)
+                {
+                    edit.OnStatusCommitted?.Invoke(statusBuf.Trim());
+                }
+                Layout.FlowUnindent(statusIndent);
+                statusEditMin = bubbleMin;
+                statusEditMax = bubbleMax;
+                hasStatusEditZone = true;
             }
 
-            // Action buttons - docked under the bio panel when it exists,
-            // otherwise along the banner's bottom-right edge. Their
-            // bounding box is remembered so the banner edit zone can
-            // exclude it geometrically · HoveredId arbitration alone still
-            // lets the banner overlay bleed through under the buttons.
+            ImGui.SetCursorScreenPos(floatRestore);
+
+            // Action buttons dock to the banner's top-right corner on a dark
+            // translucent plate, same language as the window's title-bar
+            // controls. Their bounding box is remembered so the banner edit
+            // zone can exclude it geometrically · HoveredId arbitration alone
+            // still lets the banner overlay bleed through under the buttons.
             var hasActionsZone = false;
             var actionsZoneMin = Vector2.Zero;
             var actionsZoneMax = Vector2.Zero;
             if (actions != null && actions.Count > 0)
             {
+                var actionTop = bannerMin.Y + 8f * scale;
+                var rowW = 0f;
+                for (var i = 0; i < actions.Count; i++)
+                {
+                    rowW += Icons.TextButtonWidth(actions[i].Icon, actions[i].Label)
+                        + 4f * scale;
+                }
+                rowW += ImGui.GetStyle().ItemSpacing.X * (actions.Count - 1);
+                actionsZoneMin = new Vector2(textMaxX - rowW - 4f * scale,
+                    actionTop - 3.2f * scale);
+                actionsZoneMax = new Vector2(textMaxX + 4f * scale,
+                    actionTop + ImGui.GetFrameHeight() + 3.2f * scale);
+                drawList.AddRectFilled(actionsZoneMin, actionsZoneMax,
+                    ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.45f)), 8f * scale);
+                drawList.AddRect(actionsZoneMin, actionsZoneMax,
+                    ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.12f)), 8f * scale);
+
                 var x = textMaxX;
-                var actionTop = bioPanel
-                    ? bioPanelBottom + 6f * scale
-                    : bannerMax.Y - ImGui.GetFrameHeight() - 6f * scale;
                 foreach (var action in actions)
                 {
                     var w = Icons.TextButtonWidth(action.Icon, action.Label) + 4f * scale;
@@ -620,10 +769,6 @@ public static partial class SpheneUI
                     }
                     x -= ImGui.GetStyle().ItemSpacing.X;
                 }
-                actionsZoneMin = new Vector2(
-                    x + ImGui.GetStyle().ItemSpacing.X - 2f * scale, actionTop - 2f * scale);
-                actionsZoneMax = new Vector2(textMaxX + 2f * scale,
-                    actionTop + ImGui.GetFrameHeight() + 2f * scale);
                 hasActionsZone = true;
             }
 
@@ -639,7 +784,11 @@ public static partial class SpheneUI
                     (edit!.OnAvatarClicked != null && ImGui.IsMouseHoveringRect(
                         avatarPos, avatarPos + new Vector2(avatarSize)))
                     || (hasActionsZone && ImGui.IsMouseHoveringRect(
-                        actionsZoneMin, actionsZoneMax));
+                        actionsZoneMin, actionsZoneMax))
+                    || (hasStatusEditZone && ImGui.IsMouseHoveringRect(
+                        statusEditMin, statusEditMax))
+                    || (hasBioEditZone && ImGui.IsMouseHoveringRect(
+                        bioEditMin, bioEditMax));
                 if (clicked && !overInteractables)
                 {
                     edit.OnBannerClicked();
@@ -659,6 +808,38 @@ public static partial class SpheneUI
                         ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.60f)), 6f * scale);
                     drawList.AddText(chipMin + new Vector2(8f * scale, 0f),
                         ColorUtils.ToU32(Vector4.One), changeLabel);
+                }
+                else
+                {
+                    // persistent affordance: a small pill marks the banner's
+                    // own edit spot instead of relying on hover discovery
+                    var pillText = "Change banner";
+                    var pillTextSize = ImGui.CalcTextSize(pillText);
+                    var iconGlyph = FontAwesomeIcon.Image.ToIconString();
+                    float iconW;
+                    using (Icons.PushFont())
+                    {
+                        iconW = ImGui.CalcTextSize(iconGlyph).X;
+                    }
+                    var pillW = iconW + 4f * scale + pillTextSize.X + 16f * scale;
+                    var pillH = ImGui.GetTextLineHeight() + 8f * scale;
+                    // stacks under the top-right action row (Done/Style) so
+                    // every edit affordance clusters in the banner corner
+                    var pillMin = new Vector2(bannerMax.X - pillW - 10f * scale,
+                        hasActionsZone ? actionsZoneMax.Y + 6f * scale
+                            : bannerMin.Y + 10f * scale);
+                    drawList.AddRectFilled(pillMin, pillMin + new Vector2(pillW, pillH),
+                        ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.55f)), pillH * 0.5f);
+                    using (Icons.PushFont())
+                    {
+                        var iconSize = ImGui.CalcTextSize(iconGlyph);
+                        drawList.AddText(pillMin + new Vector2(8f * scale,
+                                (pillH - iconSize.Y) * 0.5f),
+                            ColorUtils.ToU32(Vector4.One), iconGlyph);
+                    }
+                    drawList.AddText(pillMin + new Vector2(8f * scale + iconW + 4f * scale,
+                            (pillH - pillTextSize.Y) * 0.5f),
+                        ColorUtils.ToU32(Vector4.One), pillText);
                 }
             }
 
@@ -945,14 +1126,19 @@ public static partial class SpheneUI
         /// the design spec (~3-6px) at any UI scale. Pure decoration: the
         /// caller's flow cursor and line origin are restored untouched.
         /// </summary>
-        private static void DrawThoughtBubble(ImDrawListPtr drawList,
-            string status, Vector2 rim, Vector2 bubbleMin, float bubbleW,
-            float bubbleH, Vector2 pad, Vector4 accent, float scale,
-            bool truncated)
+        /// <summary>
+        /// Thought-bubble chrome only: the rising dot trail plus the rounded
+        /// bubble frame, without any contents. Shared by the view bubble and
+        /// the edit-mode status field, which hosts an input instead of text.
+        /// </summary>
+        private static void DrawThoughtBubbleChrome(ImDrawListPtr drawList,
+            Vector2 rim, Vector2 bubbleMin, Vector2 bubbleMax,
+            Vector4 accent, float scale)
         {
             var fillU32 = ColorUtils.ToU32(
                 ColorUtils.WithAlpha(Colors.Surface, 0.96f));
             var borderU32 = ColorUtils.ToU32(ColorUtils.WithAlpha(accent, 0.45f));
+            var bubbleH = bubbleMax.Y - bubbleMin.Y;
             var entry = new Vector2(bubbleMin.X,
                 bubbleMin.Y + bubbleH * 0.75f);
             // Control point high above the rim · the trail rises steeply off
@@ -995,11 +1181,20 @@ public static partial class SpheneUI
                 drawList.AddCircle(entry, radius[dot], borderU32);
             }
 
-            var bubbleMax = bubbleMin + new Vector2(bubbleW, bubbleH);
             var rounding = MathF.Min(14f * scale, bubbleH * 0.3f);
             drawList.AddRectFilled(bubbleMin, bubbleMax, fillU32, rounding);
             drawList.AddRect(bubbleMin, bubbleMax, borderU32, rounding,
                 ImDrawFlags.RoundCornersAll, MathF.Max(1f, scale));
+        }
+
+        private static void DrawThoughtBubble(ImDrawListPtr drawList,
+            string status, Vector2 rim, Vector2 bubbleMin, float bubbleW,
+            float bubbleH, Vector2 pad, Vector4 accent, float scale,
+            bool truncated)
+        {
+            var bubbleMax = bubbleMin + new Vector2(bubbleW, bubbleH);
+            DrawThoughtBubbleChrome(drawList, rim, bubbleMin, bubbleMax,
+                accent, scale);
             // Wrapped text rides the window flow (AddText cannot wrap): park
             // the cursor inside the padding, re-anchor the line origin so
             // wrapped lines stay in the bubble, clip to the bubble, then
@@ -1239,7 +1434,9 @@ public static partial class SpheneUI
                 }
                 if (!string.IsNullOrEmpty(edit.HandleHint))
                 {
-                    Text.Muted(edit.HandleHint);
+                    ImGui.SameLine(0f, 6f * scale);
+                    Icons.Icon(FontAwesomeIcon.InfoCircle, Colors.TextMuted);
+                    AttachTooltip(edit.HandleHint);
                 }
             }
             else if (metaLine.Length > 0)
@@ -1272,18 +1469,17 @@ public static partial class SpheneUI
                             edit.HandleFocusPending = true;
                         }
                     }
+                    if (!string.IsNullOrEmpty(edit!.HandleHint))
+                    {
+                        ImGui.SameLine(0f, 4f * scale);
+                        Icons.Icon(FontAwesomeIcon.InfoCircle, Colors.TextMuted);
+                    }
                     AttachTooltip(edit!.HandleHint ?? "Click to rename your handle");
                 }
                 else if (handleLine)
                 {
                     AttachTooltip("Handle · used for pair requests and profile lookup");
                 }
-            }
-
-            if (editing && canEditHandle && !edit!.EditingHandle && !edit.HandleLocked
-                && !string.IsNullOrEmpty(edit.HandleHint))
-            {
-                Text.Muted(edit.HandleHint);
             }
             if (!string.IsNullOrEmpty(edit?.Feedback))
             {

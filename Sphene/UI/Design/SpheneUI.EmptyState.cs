@@ -66,8 +66,8 @@ public static partial class SpheneUI
                 var hintW = MathF.Min(availX, 260f * scale);
                 var hintPos = new Vector2(cx - hintW * 0.5f, ImGui.GetCursorScreenPos().Y);
                 ImGui.SetCursorScreenPos(hintPos);
-                ImGui.PushTextWrapPos(hintPos.X + hintW);
-                ColoredCenteredWrapped(hint!, Colors.TextMuted);
+                ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + hintW);
+                ColoredCenteredWrapped(hint!, Colors.TextMuted, hintW);
                 ImGui.PopTextWrapPos();
                 ImGui.SetCursorScreenPos(new Vector2(blockMin.X, hintPos.Y + hintH));
             }
@@ -105,15 +105,14 @@ public static partial class SpheneUI
             }
         }
 
-        private static void ColoredCenteredWrapped(string text, Vector4 color)
+        private static void ColoredCenteredWrapped(string text, Vector4 color, float width)
         {
             using var pushed = ImRaii.PushColor(ImGuiCol.Text, color);
-            var lines = text.Split('\n');
-            foreach (var line in lines)
+            var startX = ImGui.GetCursorPosX();
+            foreach (var line in text.Split('\n'))
             {
-                var w = ImGui.CalcTextSize(line, false, ImGui.GetContentRegionAvail().X).X;
-                var avail = ImGui.GetContentRegionAvail().X;
-                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + MathF.Max(0f, (avail - w) * 0.5f));
+                var w = ImGui.CalcTextSize(line, false, width).X;
+                ImGui.SetCursorPosX(startX + MathF.Max(0f, (width - w) * 0.5f));
                 ImGui.TextWrapped(line);
             }
         }

@@ -724,16 +724,21 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         {
             roots.Add(new FolderNode { Path = shots, Name = "FFXIV Screenshots" });
         }
-        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-        if (Directory.Exists(pictures))
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var downloads = Path.Combine(home, "Downloads");
+        if (Directory.Exists(downloads))
         {
-            roots.Add(new FolderNode { Path = pictures, Name = "Pictures" });
+            roots.Add(new FolderNode { Path = downloads, Name = "Downloads" });
         }
         if (Directory.Exists(docs))
         {
             roots.Add(new FolderNode { Path = docs, Name = "Documents" });
         }
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        if (Directory.Exists(pictures))
+        {
+            roots.Add(new FolderNode { Path = pictures, Name = "Pictures" });
+        }
         if (Directory.Exists(home))
         {
             roots.Add(new FolderNode { Path = home, Name = "Home" });
@@ -745,11 +750,18 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
     }
 
     private Task<List<FolderNode>>? _driveRootsTask;
+    private bool _drivesMerged;
 
     /// <summary>Probes drive letters off-thread · merged into the tree once
-    /// ready so a stalling drive can never hitch the UI.</summary>
+    /// ready so a stalling drive can never hitch the UI. Runs exactly once -
+    /// without the <see cref="_drivesMerged"/> guard every completed probe
+    /// would re-append the same drives forever.</summary>
     private void MergeDriveRoots()
     {
+        if (_drivesMerged)
+        {
+            return;
+        }
         _driveRootsTask ??= Task.Run(() =>
         {
             var drives = new List<FolderNode>();
@@ -780,6 +792,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         });
         if (_driveRootsTask.IsCompletedSuccessfully)
         {
+            _drivesMerged = true;
             _treeRoots?.AddRange(_driveRootsTask.Result);
             _driveRootsTask = null;
         }

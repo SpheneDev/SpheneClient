@@ -66,6 +66,17 @@ public partial class LodestoneAvatarService : DisposableMediatorSubscriberBase, 
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>True once a prefetch attempt settled - success or failure.</summary>
+    public bool PrefetchSettled => _prefetchTask?.IsCompleted == true;
+
+    /// <summary>Kicks the portrait prefetch for preview purposes - unlike
+    /// <see cref="StartPrefetch"/> it ignores the applied-seed flag, since a
+    /// preview fetch never applies anything.</summary>
+    public void EnsurePrefetch()
+    {
+        _prefetchTask ??= FetchPreparedAvatarAsync();
+    }
+
     /// <summary>Game login - the portrait fetch needs no server connection.</summary>
     private void StartPrefetch()
     {

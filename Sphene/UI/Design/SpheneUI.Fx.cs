@@ -24,6 +24,27 @@ public static partial class SpheneUI
         /// </summary>
         private static readonly Dictionary<uint, float> TweenStates = new();
 
+        /// <summary>Rotating arc spinner - inline loading indicator for spots
+        /// that cannot take a full skeleton (avatar slots, install buttons,
+        /// busy thumbnails).</summary>
+        public static void RotatingSpinner(Vector2 center, float radius, float thickness,
+            Vector4? color = null)
+        {
+            var drawList = ImGui.GetWindowDrawList();
+            var c = color ?? Colors.TextPrimary;
+            var u32 = ImGui.ColorConvertFloat4ToU32(c);
+            var bgColor = ImGui.ColorConvertFloat4ToU32(new Vector4(c.X, c.Y, c.Z, 0.25f));
+            drawList.AddCircle(center, radius, bgColor, 48, thickness);
+
+            var t = (float)ImGui.GetTime();
+            var speed = 3.0f;
+            var baseAngle = t * speed;
+            var arcLen = 1.35f;
+            drawList.PathClear();
+            drawList.PathArcTo(center, radius, baseAngle, baseAngle + arcLen, 32);
+            drawList.PathStroke(u32, ImDrawFlags.None, thickness);
+        }
+
         /// <summary>String-keyed overload · call sites stay consistent even
         /// when the ImGui id stack differs between window contexts.</summary>
         public static float Tween(string key, float target, float speed = 14f)

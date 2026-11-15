@@ -450,6 +450,15 @@ public class CompactUi : WindowMediatorSubscriberBase
     }
 
 #if IS_TEST_BUILD
+    /// <summary>First-connect hub hint - dismissed permanently once the user
+    /// opened the hub via the card or tapped the chip's close.</summary>
+    private void MarkHubHintSeen()
+    {
+        if (_configService.Current.HubOnboardingHintSeen) return;
+        _configService.Current.HubOnboardingHintSeen = true;
+        _configService.Save();
+    }
+
     private void DrawTestServerToggleButton()
     {
         if (SpheneUI.Icons.Button(FontAwesomeIcon.Bug, null, null, null, null, ButtonStyleKeys.Compact_TestServer))
@@ -2101,7 +2110,8 @@ public class CompactUi : WindowMediatorSubscriberBase
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
-                Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Profile));
+                MarkHubHintSeen();
+                Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Home));
             }
         }
 
@@ -2346,12 +2356,87 @@ public class CompactUi : WindowMediatorSubscriberBase
             _titleBarPressed = false;
             if (inCard && ImGui.GetIO().MouseDragMaxDistanceSqr[(int)ImGuiMouseButton.Left] < 64f)
             {
-                Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Profile));
+                MarkHubHintSeen();
+                Mediator.Publish(new OpenSpheneHubMessage(SpheneHubPage.Home));
             }
+        }
+
+        // first-connect onboarding: radar ping around the identity card plus
+        // a pill callout underneath until the user opened the hub once. Pure
+        // overlay - nothing on screen is blocked or disabled.
+        var showHubHint = _apiController.IsConnected
+            && !_configService.Current.HubOnboardingHintSeen;
+        var hintT = (float)ImGui.GetTime();
+        if (showHubHint)
+        {
+            var inset = 2f * scale;
+
+            // expanding ping rings - three phased waves radiating off the card
+            for (var ring = 0; ring < 3; ring++)
+            {
+                var phase = (hintT * 0.8f + ring * (1f / 3f)) % 1f;
+                var pad = inset + phase * 16f * scale;
+                drawList.AddRect(idRect.Min - new Vector2(pad), idRect.Max + new Vector2(pad),
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, (1f - phase) * 0.55f)),
+                    rounding + pad, ImDrawFlags.None, MathF.Max(1f, (2.5f - phase) * scale));
+            }
+
+            // accent wash + bright steady ring so the card stays lit
+            // between pings
+            var pulse = 0.5f + 0.5f * MathF.Sin(hintT * 4f);
+            drawList.AddRectFilled(idRect.Min, idRect.Max,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.04f + 0.05f * pulse)), rounding);
+            drawList.AddRect(idRect.Min - new Vector2(inset), idRect.Max + new Vector2(inset),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.6f + 0.4f * pulse)),
+                rounding + inset, ImDrawFlags.None, 2f * scale);
         }
 
         ImGui.SetCursorScreenPos(new Vector2(
             windowPos.X + style.WindowPadding.X, barMax.Y + 6f * scale));
+
+        if (showHubHint && !SpheneUI.Chrome.FoldCollapsed(ProfileFoldId))
+        {
+            var chipMin = new Vector2(idRect.Min.X, barMax.Y + 6f * scale);
+            ImGui.SetCursorScreenPos(chipMin);
+            var chipH = ImGui.GetFrameHeight() + 4f * scale;
+            var chipW = ImGui.GetContentRegionAvail().X;
+            var chipMax = new Vector2(chipMin.X + chipW, chipMin.Y + chipH);
+            var chipRound = chipH * 0.5f;
+            var chipPulse = 0.7f + 0.3f * MathF.Sin(hintT * 4f);
+            drawList.AddRectFilled(chipMin, chipMax,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.16f + 0.10f * chipPulse)),
+                chipRound);
+            drawList.AddRect(chipMin, chipMax,
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(accent, 0.5f + 0.3f * chipPulse)),
+                chipRound);
+
+            // bouncing arrow - drawlist decoration, eats no layout space
+            var arrowW = ImGui.GetFrameHeight();
+            using (SpheneUI.Icons.PushFont())
+            {
+                var arrow = FontAwesomeIcon.ArrowUp.ToIconString();
+                var arrowSize = ImGui.CalcTextSize(arrow);
+                var bounce = -MathF.Abs(MathF.Sin(hintT * 4f)) * 3f * scale;
+                drawList.AddText(new Vector2(chipMin.X + 8f * scale,
+                        chipMin.Y + (chipH - arrowSize.Y) * 0.5f + bounce),
+                    SpheneUI.ColorUtils.ToU32(accent), arrow);
+            }
+
+            ImGui.SetCursorScreenPos(new Vector2(chipMin.X + 8f * scale + arrowW,
+                chipMin.Y + (chipH - ImGui.GetTextLineHeight()) * 0.5f));
+            SpheneUI.Text.Colored("Tap your card to open the Sphene Hub", SpheneUI.Colors.TextPrimary);
+
+            var closeW = 22f;
+            ImGui.SetCursorScreenPos(new Vector2(chipMax.X - closeW - 4f * scale, chipMin.Y));
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Times, null, null, null, null, ButtonStyleKeys.Compact_Close))
+            {
+                MarkHubHintSeen();
+            }
+            SpheneUI.AttachTooltip("Got it");
+
+            ImGui.SetCursorScreenPos(new Vector2(
+                windowPos.X + style.WindowPadding.X, chipMax.Y + 4f * scale));
+        }
     }
 
     /// <summary>Right-aligned title-bar buttons; returns the leftmost occupied X.</summary>

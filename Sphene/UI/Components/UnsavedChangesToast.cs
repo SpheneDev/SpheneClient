@@ -78,7 +78,8 @@ public sealed class UnsavedChangesToast
             ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
             | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar
             | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse
-            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoBackground);
+            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoBackground
+            | ImGuiWindowFlags.NoFocusOnAppearing);
         ImGui.End();
 
         // foreground drawlist so the bar floats above every window fade -

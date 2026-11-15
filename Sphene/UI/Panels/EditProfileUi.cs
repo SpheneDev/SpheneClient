@@ -53,9 +53,9 @@ public class EditProfileUi
         {
             SeedLinks(profile);
         }
+        DrawProfileRules();
         DrawLinksCard();
         DrawPrivacyCard();
-        DrawProfileRules();
     }
 
     private void SeedLinks(SpheneProfileData profile)

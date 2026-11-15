@@ -101,6 +101,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private string? _galleryUploadPhase;
     // Scratch · remapped extras DTOs for the shared gallery grid/viewer.
     private readonly List<SyncshellGalleryImageDto> _profileGalleryScratch = [];
+    /// <summary>Overview previews · 3-tile grid list (refilled per frame) and the
+    /// full-gallery payload handed to the viewer on click.</summary>
+    private readonly List<SyncshellGalleryImageDto> _overviewGridScratch = [];
+    private readonly List<SyncshellGalleryImageDto> _overviewViewerScratch = [];
     private float _profileTabSwitchT = 1f;
     private float _friendTabSwitchT = 1f;
     private bool _styleUseAccent, _styleUseTop, _styleUseBottom;
@@ -387,6 +391,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 SeedHeroEditBuffers(_spheneProfileManager.GetSpheneProfile(
                     new UserData(_apiController.UID)));
             }
+            // Already-open-but-folded must expand too - OnOpen only fires on
+            // the closed->open transition, so reset the fold explicitly.
+            SpheneUI.Chrome.ResetFold(this, WindowName);
             IsOpen = true;
         });
         // A follow/unfollow from any community page reloads the Followed
@@ -448,6 +455,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     public override void OnOpen()
     {
         base.OnOpen();
+        // Any way of reaching the hub must land it usable - reopening a
+        // folded window expands it instead of leaving a dead strip.
+        SpheneUI.Chrome.ResetFold(this, WindowName);
         if (_suppressOpenStatePersist)
         {
             _suppressOpenStatePersist = false;
@@ -1390,7 +1400,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // mirror it on the right · one row, one height.
         var btnSize = 34f * scale;
         var btnY = bandMin.Y + (bandHeight - btnSize) * 0.5f;
-        var bellX = bandMax.X - 14f * scale - btnSize * 4f - 8f * scale * 3f;
+        var bellX = bandMax.X - 8f * scale - btnSize * 4f - 8f * scale * 3f;
         DrawHeaderProfileCard(bandMin, bandHeight, railRightX, profile, accent);
         DrawHeaderNavCluster(new Vector2(railRightX + 12f * scale, btnY),
             btnSize, bellX);
@@ -1447,6 +1457,26 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f)),
             SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f)),
             railBgU32);
+
+        // The blend must stop short of the corner column or it would repaint
+        // the notch the image just gave back · so the remaining sliver gets
+        // the gradient's edge tone in the same arc instead of the raw
+        // artwork. Bottom row joins in only once the band sits on the
+        // window's bottom edge (the collapsed strip).
+        if (imgRounding > 0f)
+        {
+            var edgeColor = SpheneUI.ColorUtils.ToU32(
+                SpheneUI.ColorUtils.WithAlpha(railBg, 0.5f));
+            if (reachesBottom)
+            {
+                drawList.AddRectFilledMultiColor(
+                    new Vector2(imgMin.X, overlayMax.Y),
+                    new Vector2(overlayMax.X, imgMax.Y),
+                    railBgU32, edgeColor, edgeColor, railBgU32);
+            }
+            drawList.AddRectFilled(new Vector2(overlayMax.X, imgMin.Y), imgMax,
+                edgeColor, imgRounding, imgCorners);
+        }
     }
 
     /// <summary>
@@ -1507,7 +1537,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var gap = 8f * scale;
         // Window controls live on the far right · fold, then close, matching
         // the order the chrome title bar used.
-        var closeX = bandMax.X - 14f * scale - btnSize;
+        var closeX = bandMax.X - gap - btnSize;
         var foldX = closeX - gap - btnSize;
         var burgerX = foldX - gap - btnSize;
         var bellX = burgerX - gap - btnSize;
@@ -1517,7 +1547,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var btnY = bandMin.Y + (bandHeight - btnSize) * 0.5f;
 
         // brand icons + window controls share one dark translucent container -
-        // keeps everything readable over any banner backdrop
+        // keeps everything readable over any banner backdrop. The pill hugs
+        // the window's right edge with a small, even margin on both sides.
         var headerDl = ImGui.GetWindowDrawList();
         var trioMin = new Vector2(discordX - gap * 0.5f, btnY - gap * 0.4f);
         var trioMax = new Vector2(closeX + btnSize + gap * 0.5f,
@@ -1697,9 +1728,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         var btnSize = 34f * scale;
         var btnY = windowPos.Y + (bandH - btnSize) * 0.5f;
-        var closeX = windowPos.X + windowSize.X - 14f * scale - btnSize;
-        var foldX = closeX - 8f * scale - btnSize;
+        var gap = 8f * scale;
+        var closeX = bandMax.X - gap - btnSize;
+        var foldX = closeX - gap - btnSize;
         var folded = SpheneUI.Chrome.FoldCollapsed(WindowName);
+
+        // same pill the open band's actions zone uses · keeps the controls
+        // readable over the backdrop, hugging the window's right edge
+        var plateMin = new Vector2(foldX - gap * 0.5f, btnY - gap * 0.4f);
+        var plateMax = new Vector2(closeX + btnSize + gap * 0.5f,
+            btnY + btnSize + gap * 0.4f);
+        drawList.AddRectFilled(plateMin, plateMax,
+            SpheneUI.ColorUtils.ToU32(new Vector4(0f, 0f, 0f, 0.45f)), 8f * scale);
+        drawList.AddRect(plateMin, plateMax,
+            SpheneUI.ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.12f)), 8f * scale);
 
         ImGui.SetCursorScreenPos(new Vector2(foldX, btnY));
         if (SpheneUI.Icons.Button(
@@ -2097,15 +2139,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 DrawOwnProfileBlog(accent);
                 break;
             default:
+                DrawProfileAboutMe(renderProfile, accent, canEdit: true);
                 if (_profileEditMode)
                 {
                     _editProfileUi.DrawEmbedded();
                 }
                 else
                 {
-                    DrawOwnProfileLinks(renderProfile, accent);
-                    SpheneUI.Controls.HelpText(
-                        "This is how your profile looks to others · hit Edit in the banner to restyle it, or add photos and Chronicles on the other tabs.");
+                    DrawOwnProfileOverview(renderProfile, accent);
                 }
                 break;
         }
@@ -2169,6 +2210,165 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     SyncshellCommunityView.DrawLinkCard(link.Label, link.Url, link.Icon, accent, i));
             });
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+    }
+
+    /// <summary>Own Profile overview under the About-me section · recent
+    /// Chronicles, recent photos, then the existing links and the hint.</summary>
+    private void DrawOwnProfileOverview(SpheneProfileData renderProfile, Vector4 accent)
+    {
+        var me = new UserData(_apiController.UID);
+        var extras = _spheneProfileManager.GetProfileExtras(me);
+        DrawChroniclePreviewSection(extras, accent, isOwn: true,
+            () => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
+                SubPage: 2)),
+            id =>
+            {
+                _expandedChronicles.Add(id);
+                NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
+                    SubPage: 2));
+            });
+        DrawPhotoPreviewSection(extras, _apiController.UID, $"own:{me.UID}",
+            accent, isOwn: true,
+            () => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
+                SubPage: 1)));
+        DrawOwnProfileLinks(renderProfile, accent);
+        SpheneUI.Controls.HelpText(
+            "This is how your profile looks to others · hit Edit in the banner to restyle it, or add photos and Chronicles on the other tabs.");
+    }
+
+    /// <summary>About-me card · the full bio as markdown, or a compact prompt.
+    /// Editing lives in the hero's About-me panel (same field) - the pen here
+    /// just enters that edit flow. Same card chrome as the community widgets.</summary>
+    private void DrawProfileAboutMe(SpheneProfileData? profile, Vector4 accent,
+        bool canEdit)
+    {
+        var bio = profile?.Description;
+        var hasBio = !string.IsNullOrWhiteSpace(bio)
+            && !string.Equals(bio, SpheneProfileManager.NoDescriptionPlaceholder,
+                StringComparison.Ordinal);
+        var actions = canEdit && !_profileEditMode && profile is { IsFlagged: false }
+            ? new (FontAwesomeIcon, string, Action)?[]
+            { (FontAwesomeIcon.Pen, "Edit your bio", EnterProfileEditMode) }
+            : [];
+        SyncshellCommunityView.Widget("profile-about-me", "About me",
+            FontAwesomeIcon.User, null, accent, () =>
+            {
+                if (hasBio)
+                {
+                    MarkdownRenderer.RenderMarkdown(bio!);
+                }
+                else
+                {
+                    SpheneUI.Text.MutedWrapped(canEdit
+                        ? "Tell others a little about yourself."
+                        : "No introduction yet.");
+                }
+            }, null, actions);
+    }
+
+    /// <summary>Up to two recent Chronicles as compact nav rows · the same
+    /// extras the full tab shows (privacy already applied server-side).
+    /// A row lands on the full tab with the entry expanded.</summary>
+    private static void DrawChroniclePreviewSection(UserProfileExtrasDto? extras,
+        Vector4 accent, bool isOwn, Action onViewAll, Action<long> onOpenPost)
+    {
+        var blog = extras?.Blog;
+        if (!isOwn && extras != null && blog is not { Count: > 0 })
+        {
+            return;
+        }
+        SyncshellCommunityView.Widget("profile-recent-chronicles",
+            "Recent Chronicles", FontAwesomeIcon.FeatherAlt, null, accent, () =>
+            {
+                if (extras == null)
+                {
+                    SpheneUI.Fx.SkeletonLine();
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Fx.SkeletonLine(0.6f);
+                }
+                else if (blog is not { Count: > 0 })
+                {
+                    SpheneUI.Text.MutedWrapped(
+                        "No Chronicles yet · the first entry could be a story hook or just a hello.");
+                }
+                else
+                {
+                    var shown = Math.Min(2, blog.Count);
+                    for (var i = 0; i < shown; i++)
+                    {
+                        if (i > 0)
+                        {
+                            SpheneUI.Layout.Separator();
+                        }
+                        var post = blog[i];
+                        // Compact nav row · title + date only, the full
+                        // entry lives on the Chronicles tab.
+                        var title = string.IsNullOrWhiteSpace(post.Title)
+                            ? "Untitled Chronicle"
+                            : post.Title;
+                        SpheneUI.Rows.Nav(title,
+                            SpheneUI.Text.FormatDate(post.CreatedAt),
+                            () => onOpenPost(post.Id), FontAwesomeIcon.FeatherAlt);
+                    }
+                }
+            }, null,
+            (FontAwesomeIcon.ArrowRight, "View all Chronicles", onViewAll));
+    }
+
+    /// <summary>Up to three recent gallery photos through the established grid
+    /// · click opens the shared viewer on the FULL gallery collection at the
+    /// clicked image's index.</summary>
+    private void DrawPhotoPreviewSection(UserProfileExtrasDto? extras,
+        string gridGid, string ownerKey, Vector4 accent, bool isOwn,
+        Action onViewAll)
+    {
+        var gallery = extras?.Gallery;
+        if (!isOwn && extras != null && gallery is not { Count: > 0 })
+        {
+            return;
+        }
+        SyncshellCommunityView.Widget("profile-recent-photos", "Recent photos",
+            FontAwesomeIcon.Images, null, accent, () =>
+            {
+                if (extras == null)
+                {
+                    SpheneUI.Fx.SkeletonLine(1f, 88f * SpheneUI.Scale);
+                }
+                else if (gallery is not { Count: > 0 })
+                {
+                    SpheneUI.Text.MutedWrapped(
+                        "No photos yet · venue shots, glamours or event posters make a profile come alive.");
+                }
+                else
+                {
+                    var top = gallery.OrderByDescending(g => g.CreatedAt)
+                        .Take(3).ToList();
+                    ToViewerImages(top, _overviewGridScratch, ownerKey);
+                    SyncshellCommunityView.DrawGalleryGrid(_overviewGridScratch,
+                        "hubov:", gridGid, onClick: i =>
+                        {
+                            var img = top[i];
+                            ToViewerImages(gallery, _overviewViewerScratch,
+                                ownerKey);
+                            var idx = gallery.FindIndex(g => g.Id == img.Id);
+                            OpenProfileViewer(_overviewViewerScratch,
+                                Math.Max(0, idx), ownerKey);
+                        });
+                }
+            }, null,
+            (FontAwesomeIcon.ArrowRight, "Open gallery", onViewAll));
+    }
+
+    /// <summary>Enters the profile edit flow the banner Edit button drives ·
+    /// used by the About-me pen so the bio is editable from its own section.</summary>
+    private void EnterProfileEditMode()
+    {
+        _profileEditMode = true;
+        _heroEdit.AddingTag = false;
+        _heroEdit.EditingDisplayName = false;
+        _heroEdit.EditingHandle = false;
+        SeedHeroEditBuffers(_spheneProfileManager.GetSpheneProfile(
+            new UserData(_apiController.UID)));
     }
 
     private void SeedStyleBuffers(SpheneProfileTheme theme)
@@ -6409,6 +6609,26 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted;
         var note = pair.GetNote();
         var editingNote = string.Equals(_noteEditUid, pair.UserData.UID, StringComparison.Ordinal);
+
+        // Personal overview first - bio, recent Chronicles and photos answer
+        // "who is this" before the connection meta below. All content rides
+        // the same server-gated extras the dedicated tabs use.
+        var friendProfile = _spheneProfileManager.GetSpheneProfile(pair.UserData);
+        var friendExtras = _spheneProfileManager.GetProfileExtras(pair.UserData);
+        DrawProfileAboutMe(friendProfile, accent, canEdit: false);
+        DrawChroniclePreviewSection(friendExtras, accent, isOwn: false,
+            () => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
+                SubPage: 2)),
+            id =>
+            {
+                _expandedChronicles.Add(id);
+                NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
+                    SubPage: 2));
+            });
+        DrawPhotoPreviewSection(friendExtras, pair.UserData.UID,
+            $"friend:{pair.UserData.UID}", accent, isOwn: false,
+            () => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
+                SubPage: 1)));
 
         SyncshellCommunityView.Widget("friend-connection", "Connection",
             FontAwesomeIcon.Link, null, accent, () =>
