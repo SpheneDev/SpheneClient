@@ -760,8 +760,7 @@ public static partial class SpheneUI
             var pad = padding?.Scaled ?? Spacing.CardPadding.Scaled;
 
             var drawList = ImGui.GetWindowDrawList();
-            drawList.ChannelsSplit(2);
-            Layout.ChannelSplitEnter();
+            using var splitScope = new Layout.ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(pos + new Vector2(pad, pad));
@@ -791,8 +790,6 @@ public static partial class SpheneUI
             {
                 PlaceholderInRect(drawList, pos, max, r, border: true);
             }
-            drawList.ChannelsMerge();
-            Layout.ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(pos + new Vector2(0f, size.Y));
         }

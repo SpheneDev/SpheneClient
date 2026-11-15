@@ -178,6 +178,27 @@ public static partial class SpheneUI
         internal static void ChannelSplitExit() => _channelSplitDepth--;
         internal static void ChannelSplitReset() => _channelSplitDepth = 0;
 
+        /// <summary>RAII channel split · the ctor splits + enters, Dispose
+        /// merges + exits, so a throw inside the split region can never
+        /// strand the depth counter or leave the draw list unmerged.</summary>
+        internal readonly struct ChannelSplitGuard : IDisposable
+        {
+            private readonly ImDrawListPtr _drawList;
+
+            public ChannelSplitGuard(ImDrawListPtr drawList)
+            {
+                _drawList = drawList;
+                _drawList.ChannelsSplit(2);
+                ChannelSplitEnter();
+            }
+
+            public void Dispose()
+            {
+                _drawList.ChannelsMerge();
+                ChannelSplitExit();
+            }
+        }
+
         /// <summary>
         /// Channel-free degrade for a nested surface call: same padding,
         /// bounded content region and card bounds, but only a hollow outline
@@ -257,8 +278,7 @@ public static partial class SpheneUI
             var cardRightX = SurfaceRightBound(cardMin, scale);
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
 
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
@@ -320,8 +340,6 @@ public static partial class SpheneUI
                 Fx.HoverLift(drawList, cardMin, cardMax,
                     Fx.HoverLiftT(hoverId, cardMin, cardMax), radius, accentColor);
             }
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
             ImGui.Dummy(Vector2.Zero);
@@ -351,8 +369,7 @@ public static partial class SpheneUI
             var cardRightX = SurfaceRightBound(cardMin, scale);
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
 
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
@@ -383,8 +400,6 @@ public static partial class SpheneUI
                     ColorUtils.ToU32(ColorUtils.WithAlpha(accentColor.Value, 0.18f)),
                     radius, ImDrawFlags.RoundCornersAll, MathF.Max(1f, scale));
             }
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
             ImGui.Dummy(Vector2.Zero);
@@ -414,8 +429,7 @@ public static partial class SpheneUI
             var cardRightX = SurfaceRightBound(cardMin, scale);
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padX * 2f);
 
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
@@ -437,8 +451,6 @@ public static partial class SpheneUI
             Fx.SoftShadow(drawList, cardMin, cardMax, radius);
             drawList.AddRectFilled(cardMin, cardMax,
                 ColorUtils.ToU32(NavRailBandColor()), radius);
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
             ImGui.Dummy(Vector2.Zero);

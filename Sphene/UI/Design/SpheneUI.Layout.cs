@@ -170,8 +170,7 @@ public static partial class SpheneUI
                 cardRightX = MathF.Min(cardRightX, bound);
             }
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
@@ -220,8 +219,6 @@ public static partial class SpheneUI
                 Profile.RowFx(drawList, cardMin, cardMax, accent,
                     fxHovered, fxT, fxHover, fxIdle, rounding);
             }
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
             ImGui.Dummy(Vector2.Zero);
@@ -262,8 +259,7 @@ public static partial class SpheneUI
                 cardRightX = MathF.Min(cardRightX, bound);
             }
             var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
@@ -325,8 +321,6 @@ public static partial class SpheneUI
                     new Vector2(cardMax.X - seamInset, seamMin.Y + seamH),
                     seamCol, seamFade, seamFade, seamCol);
             }
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0, cardMax.Y - cardMin.Y));
             ImGui.Dummy(Vector2.Zero);
@@ -533,8 +527,7 @@ public static partial class SpheneUI
                 cardRightX - cardMin.X - padX * 2f);
             var innerRight = cardRightX - padX;
 
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
@@ -576,8 +569,6 @@ public static partial class SpheneUI
             drawList.AddLine(new Vector2(cardMin.X, bandBottom),
                 new Vector2(cardRightX, bandBottom),
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.5f)));
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0,
                 cardMax.Y - cardMin.Y));
@@ -611,8 +602,7 @@ public static partial class SpheneUI
                 cardRightX - cardMin.X - padding * 2f);
             var innerRight = cardRightX - padding;
 
-            drawList.ChannelsSplit(2);
-            ChannelSplitEnter();
+            using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
@@ -647,8 +637,6 @@ public static partial class SpheneUI
             drawList.AddLine(new Vector2(cardMin.X, bandBottom),
                 new Vector2(cardRightX, bandBottom),
                 ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.5f)));
-            drawList.ChannelsMerge();
-            ChannelSplitExit();
 
             ImGui.SetCursorScreenPos(cardMin + new Vector2(0,
                 cardMax.Y - cardMin.Y));

@@ -401,11 +401,28 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         return _supporterNameCache.Contains(characterName);
     }
 
+    private static readonly ResolvedStyle NoStyle = new(
+        IndicatorsEnabled: false, SymbolEnabled: false, Symbol: string.Empty,
+        TextEnabled: false, LabelText: string.Empty,
+        LabelOrder: SupporterLabelOrder.SymbolThenText,
+        Position: SupporterSymbolPosition.Left,
+        SymbolColorKey: 0, LabelColorKey: 0,
+        SymbolGlowEnabled: false, SymbolGlowKey: 0,
+        LabelGlowEnabled: false, LabelGlowKey: 0,
+        IconEnabled: false, IconId: string.Empty,
+        IconLabelEnabled: false, IconLabelText: string.Empty,
+        IconLabelColor: 0, IconLabelEdgeEnabled: false,
+        IconLabelEdgeColor: 0, FxId: string.Empty);
+
     private ResolvedStyle ResolveStyle(string name, bool isLocalPlayer)
     {
-        if (!isLocalPlayer && _supporterStyleMap.TryGetValue(name, out var synced))
-            return FromDto(synced);
-        return FromConfig();
+        if (isLocalPlayer)
+        {
+            return FromConfig();
+        }
+        return _supporterStyleMap.TryGetValue(name, out var synced)
+            ? FromDto(synced)
+            : NoStyle;
     }
 
     private ResolvedStyle FromConfig()

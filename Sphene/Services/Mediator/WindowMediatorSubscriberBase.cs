@@ -187,6 +187,9 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     {
         try
         {
+            // A throw mid-surface would otherwise strand the split depth for
+            // the rest of the session - every card after would draw chrome-less.
+            SpheneUI.Layout.ChannelSplitReset();
             if (AppliesOwnThemeScope)
             {
                 _performanceCollectorService.LogPerformance(this, $"Draw", DrawInternal);
