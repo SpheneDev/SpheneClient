@@ -1021,14 +1021,14 @@ public sealed class SupporterNameplateService : IDisposable, IHostedService
         var current = _configService.Current;
         var key = $"{current.ShowSupporterNameplate}|{current.SupporterSymbolChar}|{current.SupporterTextEnabled}|{current.SupporterLabelText}|{current.SupporterLabelOrder}|{current.SupporterSymbolPosition}|{current.SupporterColorKey}|{current.SupporterLabelColorKey}|{current.SupporterSymbolGlowEnabled}|{current.SupporterSymbolGlowKey}|{current.SupporterLabelGlowEnabled}|{current.SupporterLabelGlowKey}|{current.SupporterIconEnabled}|{current.SupporterIconId}|{current.SupporterIconLabelEnabled}|{current.SupporterIconLabelText}|{current.SupporterIconLabelColor}|{current.SupporterIconLabelEdgeEnabled}|{current.SupporterIconLabelEdgeColor}|{current.SupporterNameplateFxId}|{_apiController.SupporterFeaturesEnabled}|{string.Join(",", _supporterNameCache.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))}|{_supporterStyleFingerprint}";
 
-        var publishKey = _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
+        var publishKey = _apiController.IsConnected && _apiController.IsSupporterEffective && _apiController.SupporterFeaturesEnabled
             ? key
             : "unavailable";
         if (!string.Equals(publishKey, _lastPublishedStyleKey, StringComparison.Ordinal))
         {
             _lastPublishedStyleKey = publishKey;
             _ = _apiController.UserUpdateSupporterStyle(
-                _apiController.IsConnected && _apiController.IsSupporter && _apiController.SupporterFeaturesEnabled
+                _apiController.IsConnected && _apiController.IsSupporterEffective && _apiController.SupporterFeaturesEnabled
                     ? BuildOwnStyle()
                     : null);
         }
