@@ -935,7 +935,7 @@ public static partial class SpheneUI
         internal static void ScrollFades(Vector2 min, Vector2 max, float scrollY,
             float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
             Vector4? fadeBaseColor, float edgePaddingX = -1f, Vector2? fadeSpanX = null,
-            float? fadeMinY = null)
+            float? fadeMinY = null, float strength = 1f)
         {
             var scale = SpheneUI.Scale;
             // A child whose scrollable range is shorter than a line of text has
@@ -947,9 +947,11 @@ public static partial class SpheneUI
             }
             // Fade strength: 1 while far from the end, shrinks to 0 as the edge
             // approaches so the band narrows and its opaque lip dissolves softly.
+            // The external strength factor lets callers keep the hints hidden
+            // while the content they would hint at is not revealed yet.
             var fadeRange = ScrollFadeHeight * scale;
-            var upStrength = Math.Clamp(scrollY / fadeRange, 0f, 1f);
-            var downStrength = Math.Clamp((scrollMaxY - scrollY) / fadeRange, 0f, 1f);
+            var upStrength = Math.Clamp(scrollY / fadeRange, 0f, 1f) * strength;
+            var downStrength = Math.Clamp((scrollMaxY - scrollY) / fadeRange, 0f, 1f) * strength;
             if (upStrength <= 0f && downStrength <= 0f)
             {
                 return;

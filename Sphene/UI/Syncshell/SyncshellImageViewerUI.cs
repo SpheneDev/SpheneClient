@@ -35,7 +35,7 @@ public sealed class SyncshellImageViewerUI : WindowMediatorSubscriberBase
             _images = msg.Images;
             _index = msg.StartIndex;
             _gid = msg.GroupGid;
-            WindowName = $"{msg.GroupGid} · Gallery###SyncshellImageViewer";
+            WindowName = $"{msg.Title ?? $"{msg.GroupGid} · Gallery"}###SyncshellImageViewer";
             IsOpen = true;
             BringToFront();
         });
@@ -49,11 +49,10 @@ public sealed class SyncshellImageViewerUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        SpheneUI.Layout.PageHeader("Gallery", "gallery", () =>
-        {
-            SpheneUI.Text.MutedWrapped("Community gallery of this syncshell - browse and open full-size.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
-        });
-
+        // No PageHeader here: the viewer paints its own close into the same
+        // top-right zone the "?" help dock occupies, and first-submitted-wins
+        // makes those hits ambiguous. The window title already names the
+        // gallery; the help text adds nothing inside a dedicated viewer.
         if (_images.Count == 0)
         {
             SpheneUI.Layout.EmptyState(FontAwesomeIcon.Images, "No photos",

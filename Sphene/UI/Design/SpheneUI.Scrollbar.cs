@@ -68,6 +68,12 @@ public static partial class SpheneUI
         /// <summary>Active drag: pointer offset inside the pill at grab time.</summary>
         private static float _dragGrabOffset;
 
+        /// <summary>Frame of the last pill grab, drag or track page. The strip
+        /// writes <c>ImGuiWindow.Scroll</c> directly and bypasses
+        /// <c>ScrollTarget</c>, so scroll-follow logic cannot see the user's
+        /// steering through ImGui - it yields to this stamp instead.</summary>
+        internal static int LastInteractionFrame { get; private set; } = -1;
+
         /// <summary>
         /// Called inside a theme scope while the host window is current (or
         /// resolvable through <paramref name="hostWindowName"/> for scopes
@@ -285,6 +291,7 @@ public static partial class SpheneUI
                 else
                 {
                     ApplyDrag(dragWin, mouse);
+                    LastInteractionFrame = ImGui.GetFrameCount();
                     hot = true;
                 }
             }
@@ -355,6 +362,7 @@ public static partial class SpheneUI
 
             if (clicked)
             {
+                LastInteractionFrame = ImGui.GetFrameCount();
                 var trackLen = cMax - cMin;
                 var pillLen = PillLength(trackLen);
                 var (scroll, scrollMax) = AxisScroll(w, vert);

@@ -87,7 +87,7 @@ public record DownloadStartedMessage(GameObjectHandler DownloadId, Dictionary<st
 public record DownloadFinishedMessage(GameObjectHandler DownloadId) : MessageBase;
 public record UiToggleMessage(Type UiType) : MessageBase;
 public record QueryWindowOpenStateMessage(Type UiType, Action<bool> Respond) : SameThreadMessage;
-public record OpenSyncshellImageViewerMessage(List<SyncshellGalleryImageDto> Images, int StartIndex, string GroupGid) : MessageBase;
+public record OpenSyncshellImageViewerMessage(List<SyncshellGalleryImageDto> Images, int StartIndex, string GroupGid, string? Title = null) : MessageBase;
 
 /// <summary>What the photo studio is editing for - fixes crop aspect, hints and defaults.</summary>
 public enum PhotoStudioTarget

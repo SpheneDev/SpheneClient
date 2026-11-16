@@ -116,6 +116,12 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
 
     public bool HasUnread(string uid) => _unread.ContainsKey(uid);
 
+    /// <summary>True once the conversation's first history page was fetched
+    /// this session - the chat intro waits on this so the reveal shows the
+    /// settled scroll position instead of a visible jump when the page
+    /// lands.</summary>
+    public bool IsLoaded(string uid) => _loaded.ContainsKey(uid);
+
     /// <summary>Snapshot for Draw - the live list is mutated on other
     /// threads, so callers get a stable copy.</summary>
     public IReadOnlyList<ChatEntry> History(string uid)

@@ -1003,9 +1003,13 @@ public static partial class SpheneUI
         /// <paramref name="edgePaddingX"/>. <paramref name="fadeMinY"/> lets the
         /// top fade start above the child bounds.
         /// <paramref name="bottomInset"/> adds extra spacing below the last item.
+        /// <paramref name="fadeStrength"/> scales the edge-fade visibility ·
+        /// 0 hides the hints entirely while still-unrevealed content is
+        /// loading, 1 is the default behavior.
         /// </summary>
         public static void EndScrollArea(Vector4? fadeBaseColor = null, float edgePaddingX = -1f,
-            Vector2? fadeSpanX = null, float? fadeMinY = null, float bottomInset = 0f)
+            Vector2? fadeSpanX = null, float? fadeMinY = null, float bottomInset = 0f,
+            float fadeStrength = 1f)
         {
             var state = ScrollAreaStack.Count > 0 ? ScrollAreaStack.Pop() : new ScrollAreaState();
 
@@ -1101,7 +1105,8 @@ public static partial class SpheneUI
                         MathF.Max(ImGui.GetStyle().ChildBorderSize, 1f), openTop: state.HideTopBorder);
                 }
                 Chrome.ScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
-                    state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX, fadeMinY);
+                    state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX, fadeMinY,
+                    fadeStrength);
                 var styleVars = ImGui.GetStyle();
                 var cornerReach = MathF.Max(styleVars.WindowBorderSize,
                         MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))

@@ -4369,11 +4369,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair));
         }
         // DM shortcut as the first overlay action - an accent dot marks
-        // unread conversations so the list itself signals pending chats
+        // unread conversations so the list itself signals pending chats.
+        // Icons.Button seeds its widget id from the glyph alone, so the whole
+        // strip runs under the friend's UID scope - without it every row
+        // shares the same ids and only the topmost buttons respond.
         var hasUnreadChat = _chatService.HasUnread(pair.UserData.UID);
+        using var actionScope = ImRaii.PushId($"friend-actions-{pair.UserData.UID}");
         ImGui.SetCursorScreenPos(new Vector2(pos.X + width - actPad - actBtn * 3f - actGap * 2f,
             pos.Y + (rowH - actBtn) * 0.5f));
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.CommentDots))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.CommentDots,
+                height: actBtn, width: actBtn))
         {
             NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
                 (int)FriendHubSubPage.Chat));
@@ -4422,7 +4427,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             : $"Whitelist {pair.UserData.AliasOrUID} - ignores performance warnings and auto-pause");
         ImGui.SetCursorScreenPos(new Vector2(pos.X + width - actPad - banH,
             pos.Y + (rowH - banH) * 0.5f));
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.Ban))
+        if (SpheneUI.Icons.Button(FontAwesomeIcon.Ban,
+                height: actBtn, width: actBtn))
         {
             _configService.Current.BlockedUserUids.Add(pair.UserData.UID);
             _configService.Save();
@@ -6332,10 +6338,21 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>A friend's profile rendered inside the hub with their theme and banner.</summary>
+    private const double ChatIntroMaxHiddenSeconds = 0.8;
+    private const float ChatIntroFadeSeconds = 0.2f;
     private string _chatInput = string.Empty;
     private string? _chatScrollUid;
     private int _chatScrollCount = -1;
+    private int _chatScrollFrame;
+    private bool _chatScrollPending;
+    private float _chatScrollLastMax = -1f;
+    private int _chatScrollSettle;
+    private float _chatScrollPrevMax = -1f;
+    private float _chatScrollDistance;
     private bool _chatWasAtBottom = true;
+    private bool _chatIntroActive;
+    private double _chatIntroStart;
+    private double _chatRevealStart = -1.0;
     private readonly ConcurrentDictionary<string, (Task<bool> Task, DateTime At)>
         _chatSealChecks = new(StringComparer.Ordinal);
     private readonly HashSet<string> _chatKeyWarnDismissed = new(StringComparer.Ordinal);
@@ -6387,6 +6404,125 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             // the strip/composer whenever the content or window resizes.
             var dl = ImGui.GetWindowDrawList();
             var items = _chatService.History(uid);
+
+            // Snap to the newest message on first open, and on new arrivals
+            // only while the view already sits at the bottom - scrolling up
+            // to read history must not be yanked back every frame/message.
+            // Reopening the SAME uid counts as an open too: the child keeps
+            // its previous scroll offset, and _chatScrollUid still matches,
+            // so without the frame-gap check the view restores mid-history.
+            // ScrollMax trails the items drawn this frame by one Begin pass,
+            // and EndScrollArea's bottom spacer grows it a frame later still -
+            // it is gated on LAST frame's scrollMax, so the range can grow
+            // once more AFTER it first looked stable. The snap therefore
+            // holds until the view sits at the bottom and the range has not
+            // moved for two consecutive frames; releasing earlier strands a
+            // few pixels of scroll and keeps the bottom fade lit.
+            var frame = ImGui.GetFrameCount();
+            var scrollY = ImGui.GetScrollY();
+            var scrollMax = ImGui.GetScrollMaxY();
+            var now = ImGui.GetTime();
+            var switched = !string.Equals(_chatScrollUid, uid, StringComparison.Ordinal)
+                || frame != _chatScrollFrame + 1;
+            if (switched)
+            {
+                // A freshly opened conversation stays invisible while the
+                // scroll snap converges, then reveals through a fade.
+                _chatIntroActive = true;
+                _chatIntroStart = now;
+                _chatRevealStart = -1.0;
+                _chatScrollDistance = 0f;
+            }
+            if (switched || (items.Count != _chatScrollCount && _chatWasAtBottom))
+            {
+                _chatScrollPending = true;
+                _chatScrollSettle = 0;
+                // A stale max from another conversation or an earlier snap
+                // must never satisfy the settle check on the first frame.
+                _chatScrollLastMax = -1f;
+            }
+            var userSteers = (ImGui.IsWindowHovered()
+                    && MathF.Abs(ImGui.GetIO().MouseWheel) > 0f)
+                || (SpheneUI.Scrollbar.LastInteractionFrame >= 0
+                    && frame - SpheneUI.Scrollbar.LastInteractionFrame <= 1);
+            if (userSteers)
+            {
+                _chatScrollPending = false;
+            }
+            if (_chatScrollPending)
+            {
+                ImGui.SetScrollY(scrollMax);
+                if (scrollY >= scrollMax - 1f
+                    && MathF.Abs(scrollMax - _chatScrollLastMax) < 0.01f)
+                {
+                    if (++_chatScrollSettle >= 2)
+                    {
+                        _chatScrollPending = false;
+                    }
+                }
+                else
+                {
+                    _chatScrollSettle = 0;
+                }
+                _chatScrollLastMax = scrollMax;
+            }
+            else if (!switched && MathF.Abs(scrollMax - _chatScrollPrevMax) > 0.5f)
+            {
+                // The scrollable range moved without a snap running - window
+                // resize, reflowed bubble wraps or the bottom spacer toggling.
+                // ImGui anchors scroll at the content TOP, so shrinking the
+                // view would dump the messages below the composer edge.
+                // Restoring the saved distance from the bottom re-applies
+                // every frame the range keeps moving, so an interactive
+                // resize drag stays pinned to the same bottom-edge message.
+                ImGui.SetScrollY(scrollMax - _chatScrollDistance);
+            }
+            else
+            {
+                // Remember where the user left the view: the distance from
+                // the bottom edge is the anchor a later resize restores.
+                _chatScrollDistance = Math.Clamp(scrollMax - scrollY, 0f, scrollMax);
+            }
+            _chatScrollPrevMax = scrollMax;
+            _chatWasAtBottom = _chatScrollPending
+                || scrollY >= scrollMax - 8f;
+            _chatScrollUid = uid;
+            _chatScrollCount = items.Count;
+            _chatScrollFrame = frame;
+
+            // Intro reveal: the conversation stays hidden until the scroll
+            // has snapped to the bottom AND the first history page landed,
+            // then fades in - the user sees the settled chat instead of the
+            // scroll jump. The alpha only dims the paint: item layout stays
+            // identical, so the scroll range converges while still hidden.
+            // The wait cap keeps a stalled load from hiding it forever.
+            if (_chatIntroActive && _chatRevealStart < 0.0
+                && ((!_chatScrollPending && _chatService.IsLoaded(uid))
+                    || now - _chatIntroStart > ChatIntroMaxHiddenSeconds))
+            {
+                _chatRevealStart = now;
+            }
+            var chatAlpha = 1f;
+            if (_chatIntroActive)
+            {
+                chatAlpha = _chatRevealStart < 0.0
+                    ? 0f
+                    : Math.Clamp(
+                        (float)(now - _chatRevealStart) / ChatIntroFadeSeconds,
+                        0f, 1f);
+                if (chatAlpha >= 1f)
+                {
+                    _chatIntroActive = false;
+                }
+            }
+            var alphaPushed = chatAlpha < 0.999f;
+            if (alphaPushed)
+            {
+                // Widget-resolved colors (empty state, body text) ride the
+                // global alpha; the explicit draw-list colors are dimmed
+                // through chatAlpha below.
+                ImGui.PushStyleVar(ImGuiStyleVar.Alpha, chatAlpha);
+            }
             if (items.Count == 0)
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.CommentDots,
@@ -6400,15 +6536,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             var wrapW = MathF.Max(40f, bwMax - padX * 2f);
             var round = 10f * scale;
             var ownCol = SpheneUI.ColorUtils.ToU32(
-                SpheneUI.ColorUtils.WithAlpha(accent, 0.35f));
+                SpheneUI.ColorUtils.WithAlpha(accent, 0.35f * chatAlpha));
+            var peerBase = SpheneUI.Layout.NavRailBandColor();
             var peerCol = SpheneUI.ColorUtils.ToU32(
-                SpheneUI.Layout.NavRailBandColor());
+                SpheneUI.ColorUtils.WithAlpha(peerBase, peerBase.W * chatAlpha));
             // Meta line runs ~22% smaller and dimmer than the body text -
             // present but never competing with the message itself.
             var metaRatio = 0.78f;
             var metaSize = ImGui.GetFontSize() * metaRatio;
             var metaCol = SpheneUI.ColorUtils.ToU32(
-                SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.TextMuted, 0.65f));
+                SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.TextMuted,
+                    0.65f * chatAlpha));
             // WhatsApp-style state ticks: single check = sent, double check =
             // delivered to the peer's client, blue double = read.
             var checkGlyph = FontAwesomeIcon.Check.ToIconString();
@@ -6433,7 +6571,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 var local = m.Dto.SentAt.ToLocalTime();
                 if (lastDay != local.Date)
                 {
-                    DrawChatDaySeparator(dl, w, local.Date, margin, scale);
+                    DrawChatDaySeparator(dl, w, local.Date, margin, scale,
+                        chatAlpha);
                     lastDay = local.Date;
                 }
                 var time = SpheneUI.Text.FormatTime(local);
@@ -6471,11 +6610,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     metaCol, time);
                 if (mine)
                 {
-                    var tickCol = SpheneUI.ColorUtils.ToU32(isRead
+                    var tickBase = isRead
                         ? SpheneUI.Palette.CrystalBlue
                         : SpheneUI.ColorUtils.WithAlpha(
                             SpheneUI.Colors.TextMuted,
-                            isDelivered ? 0.7f : 0.45f));
+                            isDelivered ? 0.7f : 0.45f);
+                    var tickCol = SpheneUI.ColorUtils.ToU32(
+                        SpheneUI.ColorUtils.WithAlpha(
+                            tickBase, tickBase.W * chatAlpha));
                     using (SpheneUI.Icons.PushFont())
                     {
                         dl.AddText(ImGui.GetFont(), metaSize,
@@ -6486,16 +6628,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
                 ImGui.SetCursorPos(next);
             }
-            // Snap to the newest message on first open, and on new arrivals
-            // only while the view already sits at the bottom - scrolling up
-            // to read history must not be yanked back every frame/message.
-            bool switched = !string.Equals(_chatScrollUid, uid, StringComparison.Ordinal);
-            if (switched || (items.Count != _chatScrollCount && _chatWasAtBottom))
-                ImGui.SetScrollHereY(1f);
-            _chatWasAtBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 8f;
-            _chatScrollUid = uid;
-            _chatScrollCount = items.Count;
-            SpheneUI.Layout.EndScrollArea();
+            if (alphaPushed)
+            {
+                ImGui.PopStyleVar();
+            }
+            // The edge fades ride the same reveal as the bubbles - while the
+            // conversation is still hidden they would only glow over empty
+            // space.
+            SpheneUI.Layout.EndScrollArea(fadeStrength: chatAlpha);
         }
 
         DrawChatSecurityStrip(pair, uid);
@@ -6521,6 +6661,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 _ = SendChatAsync(uid, _chatInput.Trim());
                 _chatInput = string.Empty;
+                // An own send always returns the view to the newest message,
+                // even while the user was reading older history.
+                _chatScrollPending = true;
+                _chatScrollSettle = 0;
+                _chatScrollLastMax = -1f;
             }
         }
         if (sealedBlocked)
@@ -6533,9 +6678,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     /// <summary>Centered day pill between message groups (WhatsApp-style):
     /// "Today"/"Yesterday" for the last two local days, otherwise the
-    /// canonical date. Drawn inside the chat scroll area's child.</summary>
+    /// canonical date. Drawn inside the chat scroll area's child. The label
+    /// and rules are draw-list primitives, so the intro fade reaches them
+    /// through <paramref name="alpha"/> rather than the global style alpha.</summary>
     private static void DrawChatDaySeparator(ImDrawListPtr dl, float w,
-        DateTime day, float margin, float scale)
+        DateTime day, float margin, float scale, float alpha)
     {
         var today = DateTime.Now.Date;
         var label = day == today ? "Today"
@@ -6548,9 +6695,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var ts = ImGui.CalcTextSize(label);
         var cx = pos.X + w * 0.5f;
         var cy = pos.Y + padY + th * 0.5f;
-        var muted = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
+        var mutedBase = SpheneUI.Colors.TextMuted;
+        var ruleBase = SpheneUI.ColorUtils.WithAlpha(mutedBase, 0.28f);
+        var muted = SpheneUI.ColorUtils.ToU32(
+            SpheneUI.ColorUtils.WithAlpha(mutedBase, mutedBase.W * alpha));
         var rule = SpheneUI.ColorUtils.ToU32(
-            SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.TextMuted, 0.28f));
+            SpheneUI.ColorUtils.WithAlpha(ruleBase, ruleBase.W * alpha));
         var rulePad = 8f * scale;
         dl.AddLine(new Vector2(pos.X + margin, cy),
             new Vector2(cx - ts.X * 0.5f - rulePad, cy), rule);
@@ -7079,7 +7229,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     _photoEditImageId = 0;
                     _photoEditError = null;
                 },
-                onPopOut: null, openT: _profileViewerOpenT,
+                onPopOut: () =>
+                {
+                    // The popped-out window keeps the list it receives, so
+                    // hand it a copy before clearing the overlay's field.
+                    Mediator.Publish(new OpenSyncshellImageViewerMessage(
+                        new List<SyncshellGalleryImageDto>(_profileViewerImages),
+                        _profileViewerIndex, _profileViewerKey ?? string.Empty,
+                        ProfileViewerTitle()));
+                    _profileViewerImages.Clear();
+                    _photoEditOpen = false;
+                    _photoEditImageId = 0;
+                    _photoEditError = null;
+                },
+                openT: _profileViewerOpenT,
                 onLike: i => _ = ToggleProfileImageLike(i),
                 editOpen: isOwnViewer && _photoEditOpen,
                 onEditToggle: isOwnViewer ? () =>
@@ -7108,6 +7271,19 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
         }
         ImGui.End();
+    }
+
+    /// <summary>Display title for the profile-gallery popout window - a real
+    /// name, never the raw owner key the viewer uses internally.</summary>
+    private string ProfileViewerTitle()
+    {
+        var key = _profileViewerKey ?? string.Empty;
+        if (key.StartsWith("friend:", StringComparison.Ordinal))
+        {
+            var pair = _pairManager.GetPairByUID(key["friend:".Length..]);
+            return pair != null ? $"{pair.UserData.PreferredName} · Gallery" : "Gallery";
+        }
+        return "My Gallery";
     }
 
     /// <summary>
