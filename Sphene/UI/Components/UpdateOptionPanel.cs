@@ -67,7 +67,8 @@ public static class UpdateOptionPanel
         MarkdownRichText,
         DirectMessaging,
         FollowedCommunities,
-        ShrinkUIntegrationToggle
+        ShrinkUIntegrationToggle,
+        DirectMessagingE2ee
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -123,6 +124,7 @@ public static class UpdateOptionPanel
         new("v.1.1.42", [Link.DirectMessaging]),
         new("v.1.1.43", [Link.FollowedCommunities]),
         new("v.1.1.44", [Link.ShrinkUIntegrationToggle]),
+        new("v.1.1.45", [Link.DirectMessagingE2ee]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -181,7 +183,8 @@ public static class UpdateOptionPanel
         [Link.MarkdownRichText] = "Markdown: Text sizes up to 32 pt, text colors, caret-aware formatting & selection wrapping",
         [Link.DirectMessaging] = "Social: Direct messages · unread badges, inbox entries & quick chat access",
         [Link.FollowedCommunities] = "Communities: Follow syncshells, browse area-bound shells & see who is in the area",
-        [Link.ShrinkUIntegrationToggle] = "Plugins: ShrinkU integration toggle (intro setup + Settings → Plugins)"
+        [Link.ShrinkUIntegrationToggle] = "Plugins: ShrinkU integration toggle (intro setup + Settings → Plugins)",
+        [Link.DirectMessagingE2ee] = "Social: End-to-end encrypted direct messages · sealed history & key verification"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -479,6 +482,11 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("ShrinkU integration can now be switched on or off directly: the intro setup offers the choice on its ShrinkU step, and the Plugins page shows a real enable/disable switch on the ShrinkU row.");
             SpheneUI.Controls.HelpText("Turning integration off hides ShrinkU's own windows and automatic optimization - you can still compress textures from the conversion button in the main panel.");
+        },
+        [Link.DirectMessagingE2ee] = (_, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("Direct messages are now end-to-end encrypted: text is sealed on your device with keys that never leave it, the server only ever stores and forwards ciphertext, and each installation gets its own device key. A lock banner in the chat shows the encryption status - use Verify there to compare safety numbers with your contact.");
+            SpheneUI.Controls.HelpText("Older history stays readable and is upgraded to encrypted storage gradually when both sides have keys - it keeps an honest 'still plaintext' marker until then. Chats with contacts on older versions can't send until they update.");
         }
     };
 

@@ -236,6 +236,50 @@ public partial class ApiController
             .ConfigureAwait(false);
     }
 
+    /// <summary>Publishes/renews this installation's chat E2EE public key.</summary>
+    public async Task UserPublishChatDeviceKey(string deviceId, byte[] publicKey)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserPublishChatDeviceKey), deviceId,
+            publicKey).ConfigureAwait(false);
+    }
+
+    public async Task UserRevokeChatDeviceKey(string deviceId)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserRevokeChatDeviceKey), deviceId)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Active device keys for the caller plus the given paired UIDs.</summary>
+    public async Task<List<ChatDeviceKeyDto>> UserGetChatDeviceKeys(List<string> uids)
+    {
+        if (!IsConnected) return [];
+        return await _spheneHub!.InvokeAsync<List<ChatDeviceKeyDto>>(
+            nameof(UserGetChatDeviceKeys), uids).ConfigureAwait(false);
+    }
+
+    /// <summary>Sends an end-to-end sealed message - the server only ever
+    /// stores/forwards the opaque cipher copies. <paramref name="sentAtUtc"/>
+    /// must be the exact timestamp sealed into the envelopes' metadata.</summary>
+    public async Task UserSendSealedChatMessage(UserDto recipient, Guid messageId,
+        List<ChatCipherCopyDto> copies, DateTime sentAtUtc)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserSendSealedChatMessage), recipient,
+            messageId, copies, sentAtUtc).ConfigureAwait(false);
+    }
+
+    /// <summary>Atomically replaces a plaintext history row with sealed copies;
+    /// idempotent - returns false when the row cannot be claimed.</summary>
+    public async Task<bool> UserMigrateChatMessage(Guid messageId,
+        List<ChatCipherCopyDto> copies)
+    {
+        if (!IsConnected) return false;
+        return await _spheneHub!.InvokeAsync<bool>(
+            nameof(UserMigrateChatMessage), messageId, copies).ConfigureAwait(false);
+    }
+
     /// <summary>Newest-first durable notifications for the signed-in user.</summary>
     public async Task<List<UserNotificationDto>> UserGetNotifications(int take = 50)
     {

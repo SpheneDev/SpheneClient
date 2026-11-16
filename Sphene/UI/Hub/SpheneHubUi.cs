@@ -6333,6 +6333,26 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     /// <summary>A friend's profile rendered inside the hub with their theme and banner.</summary>
     private string _chatInput = string.Empty;
+    private string? _chatScrollUid;
+    private int _chatScrollCount = -1;
+    private readonly ConcurrentDictionary<string, (Task<bool> Task, DateTime At)>
+        _chatSealChecks = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _chatKeyWarnDismissed = new(StringComparer.Ordinal);
+
+    /// <summary>Cached per-peer "can we seal for this conversation" probe;
+    /// refreshed at most every 30s so a peer that just published keys isn't
+    /// locked out for the session. Null while the first check is in flight.</summary>
+    private bool? ChatSealReady(string uid)
+    {
+        if (_chatSealChecks.TryGetValue(uid, out var check)
+            && DateTime.UtcNow - check.At < TimeSpan.FromSeconds(30))
+        {
+            return check.Task.IsCompletedSuccessfully ? check.Task.Result : null;
+        }
+        var task = _chatService.CanSealForAsync(uid);
+        _chatSealChecks[uid] = (task, DateTime.UtcNow);
+        return null;
+    }
 
     /// <summary>
     /// Direct messages with this friend - history bubbles (own right,
@@ -6347,13 +6367,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _chatService.MarkOpen(uid);
         ImGui.SetNextFrameWantCaptureKeyboard(true);
 
+        var own = _apiController.UID ?? string.Empty;
+        var canSeal = ChatSealReady(uid);
+
         var w = SpheneUI.Controls.BoundedAvailX();
         var inputH = ImGui.GetFrameHeight() + SpheneUI.Spacing.X4.Scaled;
         var listH = MathF.Max(120f * scale,
             ImGui.GetContentRegionAvail().Y - inputH
             - SpheneUI.Spacing.X8.Scaled * 3f);
         var dl = ImGui.GetWindowDrawList();
-        var own = _apiController.UID ?? string.Empty;
 
         if (SpheneUI.Layout.BeginScrollArea("chat-scroll",
                 new Vector2(w, listH)))
@@ -6367,9 +6389,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             for (var i = 0; i < items.Count; i++)
             {
                 var m = items[i];
-                var mine = string.Equals(m.Sender.UID, own,
+                var undecryptable = m.State == ChatEntryState.Undecryptable;
+                var text = undecryptable
+                    ? "[encrypted message - cannot be decrypted on this device]"
+                    : m.Text ?? string.Empty;
+                var mine = string.Equals(m.Dto.Sender.UID, own,
                     StringComparison.Ordinal);
-                var bw = ImGui.CalcTextSize(m.Message).X + 20f * scale;
+                var bw = ImGui.CalcTextSize(text).X + 20f * scale;
                 var bwMax = w * 0.62f;
                 if (bw > bwMax)
                 {
@@ -6389,31 +6415,195 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     new Vector2(pos.X + bx + bw - 6f * scale, pos.Y + bh), true);
                 dl.AddText(new Vector2(pos.X + bx + 10f * scale,
                         pos.Y + 7f * scale),
-                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextPrimary),
-                    m.Message);
+                    SpheneUI.ColorUtils.ToU32(undecryptable
+                        ? SpheneUI.Colors.TextMuted
+                        : SpheneUI.Colors.TextPrimary),
+                    text);
                 dl.PopClipRect();
             }
-            ImGui.SetScrollHereY(1f);
+            // Snap to the newest message only when the content actually
+            // changed (first open or a new arrival) - an unconditional
+            // SetScrollHereY every frame makes manual scrolling impossible.
+            if (!string.Equals(_chatScrollUid, uid, StringComparison.Ordinal)
+                || items.Count != _chatScrollCount)
+            {
+                ImGui.SetScrollHereY(1f);
+                _chatScrollUid = uid;
+                _chatScrollCount = items.Count;
+            }
             SpheneUI.Layout.EndScrollArea();
         }
 
+        DrawChatSecurityStrip(pair, uid);
+
+        var sealedBlocked = canSeal == false;
         var sendW = 72f * scale;
         ImGui.SetNextItemWidth(w - sendW - SpheneUI.Spacing.X8.Scaled);
-        var send = ImGui.InputTextWithHint("##chatinput",
-            "Message…", ref _chatInput, 500,
-            ImGuiInputTextFlags.EnterReturnsTrue);
-        ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-        var btnW = ImGui.GetContentRegionAvail().X;
-        if (SpheneUI.Controls.SegmentButton("Send##chatsend",
-                size: new Vector2(MathF.Min(sendW, btnW), ImGui.GetFrameHeight()),
-                accent: accent, active: true))
+        using (ImRaii.Disabled(sealedBlocked))
         {
-            send = true;
+            var send = ImGui.InputTextWithHint("##chatinput",
+                sealedBlocked ? "Encryption unavailable…" : "Message…",
+                ref _chatInput, 500,
+                ImGuiInputTextFlags.EnterReturnsTrue);
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+            var btnW = ImGui.GetContentRegionAvail().X;
+            if (SpheneUI.Controls.SegmentButton("Send##chatsend",
+                    size: new Vector2(MathF.Min(sendW, btnW), ImGui.GetFrameHeight()),
+                    accent: accent, active: true))
+            {
+                send = true;
+            }
+            if (send && !string.IsNullOrWhiteSpace(_chatInput) && !sealedBlocked)
+            {
+                _ = SendChatAsync(uid, _chatInput.Trim());
+                _chatInput = string.Empty;
+            }
         }
-        if (send && !string.IsNullOrWhiteSpace(_chatInput))
+        if (sealedBlocked)
         {
-            _ = _chatService.Send(uid, _chatInput.Trim());
-            _chatInput = string.Empty;
+            SpheneUI.Text.Muted(
+                $"Encryption keys are not available for {pair.UserData.AliasOrUID} yet " +
+                "(they may need to update Sphene). Messages can't be sent without encryption.");
+        }
+    }
+
+    /// <summary>Sends a sealed message; seal failures surface as a warning
+    /// notification instead of silently dropping the text.</summary>
+    private async Task SendChatAsync(string uid, string text)
+    {
+        var failure = await _chatService.Send(uid, text).ConfigureAwait(false);
+        if (failure == Services.E2ee.ChatSealFailure.None)
+        {
+            return;
+        }
+        var detail = failure switch
+        {
+            Services.E2ee.ChatSealFailure.NoRecipientDevices
+                => "the recipient has not published encryption keys yet",
+            Services.E2ee.ChatSealFailure.NoSelfDevices
+                => "your encryption identity is not available",
+            Services.E2ee.ChatSealFailure.NotConnected
+                => "you are not connected to the server",
+            _ => "sealing failed",
+        };
+        Mediator.Publish(new NotificationMessage("Message not sent",
+            $"Could not encrypt the message: {detail}.",
+            SpheneConfiguration.Models.NotificationType.Warning,
+            TimeSpan.FromSeconds(6)));
+    }
+
+    /// <summary>
+    /// One-line encryption status for the conversation plus a verify affordance.
+    /// Honest about mixed history: legacy plaintext rows are not E2EE even
+    /// though new sends are sealed, and undecryptable rows are called out.
+    /// </summary>
+    private void DrawChatSecurityStrip(Pair pair, string uid)
+    {
+        var items = _chatService.History(uid);
+        var hasPlain = false;
+        var hasSealed = false;
+        var hasLocked = false;
+        for (var i = 0; i < items.Count; i++)
+        {
+            hasPlain |= items[i].IsPlaintext;
+            hasSealed |= items[i].IsSealed;
+            hasLocked |= items[i].State == ChatEntryState.Undecryptable;
+        }
+
+        if (!_chatService.PeerKeyChanged(uid))
+        {
+            // Re-arm the dismiss set: the flag cleared, so the NEXT change
+            // must warn again instead of staying hidden by the old dismissal.
+            _chatKeyWarnDismissed.Remove(uid);
+        }
+        else if (!_chatKeyWarnDismissed.Contains(uid))
+        {
+            using (ImRaii.PushColor(ImGuiCol.Text, SpheneUI.Palette.NetworkWarning))
+            {
+                SpheneUI.Icons.Icon(FontAwesomeIcon.ExclamationTriangle);
+            }
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            SpheneUI.Text.Muted("Encryption key changed - verify before trusting.");
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Dismiss##keywarn"))
+            {
+                _chatKeyWarnDismissed.Add(uid);
+                _chatService.DismissPeerKeyChange(uid);
+            }
+        }
+
+        var (icon, label, color) = hasPlain
+            ? (FontAwesomeIcon.LockOpen,
+               "New messages are end-to-end encrypted · older history is still plaintext",
+               SpheneUI.Palette.NetworkWarning)
+            : (FontAwesomeIcon.Lock,
+               "End-to-end encrypted",
+               SpheneUI.Palette.NetworkActive);
+        using (ImRaii.PushColor(ImGuiCol.Text, color))
+        {
+            SpheneUI.Icons.Icon(icon);
+        }
+        ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+        SpheneUI.Text.Muted(label + (hasLocked
+            ? " · some messages can't be decrypted here"
+            : string.Empty));
+        ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Key, "Verify##chatverify"))
+        {
+            ImGui.OpenPopup("chat-verify##" + uid);
+        }
+        DrawChatVerifyPopup(pair, uid);
+    }
+
+    private readonly ConcurrentDictionary<string, (Task<string?> Task, DateTime At)>
+        _chatSafetyNumbers = new(StringComparer.Ordinal);
+
+    /// <summary>Verification popup: pairwise safety number plus the peer's
+    /// newest key fingerprint for out-of-band comparison. The number is
+    /// recomputed at most every 30s so a rotated peer key does not leave a
+    /// stale value on screen.</summary>
+    private void DrawChatVerifyPopup(Pair pair, string uid)
+    {
+        var popupId = "chat-verify##" + uid;
+        if (!SpheneUI.Popups.BeginStyled(popupId))
+        {
+            return;
+        }
+        try
+        {
+            if (!_chatSafetyNumbers.TryGetValue(uid, out var cached)
+                || DateTime.UtcNow - cached.At > TimeSpan.FromSeconds(30))
+            {
+                cached = (_chatService.SafetyNumberFor(uid), DateTime.UtcNow);
+                _chatSafetyNumbers[uid] = cached;
+            }
+            var task = cached.Task;
+            var number = task.IsCompletedSuccessfully ? task.Result : null;
+            var fingerprint = _chatService.PeerFingerprintFor(uid);
+            SpheneUI.Text.Muted($"Verify {pair.UserData.AliasOrUID}");
+            if (!task.IsCompleted)
+            {
+                SpheneUI.Text.Muted("Resolving encryption keys…");
+            }
+            else if (number == null)
+            {
+                SpheneUI.Text.Muted("Encryption keys for this contact are not known yet.");
+            }
+            else
+            {
+                SpheneUI.Text.Muted("Compare this safety number with your contact -");
+                SpheneUI.Text.Muted("if it matches on both sides, messages can't be");
+                SpheneUI.Text.Muted("intercepted by the server.");
+                SpheneUI.Text.Muted(number);
+                if (fingerprint != null)
+                {
+                    SpheneUI.Text.Muted($"Key: {fingerprint}");
+                }
+            }
+        }
+        finally
+        {
+            SpheneUI.Popups.EndStyled();
         }
     }
 

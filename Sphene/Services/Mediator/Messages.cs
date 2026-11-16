@@ -151,6 +151,15 @@ public enum ModSharingTab
 public record OpenModSharingWindow(ModSharingTab Tab) : MessageBase;
 public record ChatMessageReceivedMessage(ChatMessageDto Message) : MessageBase;
 
+/// <summary>A chat entry is display-ready (plaintext or successfully opened
+/// copy). <paramref name="OtherUid"/> keys the conversation; the entry
+/// carries the resolved text for previews.</summary>
+public record ChatMessageReadyMessage(string OtherUid, Services.ChatEntry Entry) : MessageBase;
+
+/// <summary>A peer's published chat encryption key material changed after the
+/// client first learned it - the conversation UI surfaces a warning.</summary>
+public record ChatPeerKeyChangedMessage(string OtherUid) : MessageBase;
+
 public enum SpheneHubPage
 {
     Profile = 0,

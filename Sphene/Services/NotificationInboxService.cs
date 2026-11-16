@@ -46,7 +46,7 @@ public class NotificationInboxService : DisposableMediatorSubscriberBase, IHoste
         Mediator.Subscribe<NotificationMessage>(this, OnNotification);
         Mediator.Subscribe<AreaBoundSyncshellConsentRequestMessage>(this, OnAreaBoundConsent);
         Mediator.Subscribe<UserNotificationReceivedMessage>(this, OnServerNotification);
-        Mediator.Subscribe<ChatMessageReceivedMessage>(this, OnChatMessage);
+        Mediator.Subscribe<ChatMessageReadyMessage>(this, OnChatMessage);
         Mediator.Subscribe<ChatConversationOpenedMessage>(this, OnChatOpened);
         Mediator.Subscribe<HubReconnectedMessage>(this, (m) => _ = SyncServerNotificationsAsync());
     }
@@ -179,10 +179,11 @@ public class NotificationInboxService : DisposableMediatorSubscriberBase, IHoste
 
     /// <summary>One row per unread conversation (stable chat:{uid} id) - the
     /// title stays "New message from X", the detail refreshes to the latest
-    /// preview. Skipped while that conversation is on screen.</summary>
-    private void OnChatMessage(ChatMessageReceivedMessage msg)
+    /// preview. Uses the locally resolved text (post-decryption) and is
+    /// skipped while that conversation is on screen.</summary>
+    private void OnChatMessage(ChatMessageReadyMessage msg)
     {
-        var dto = msg.Message;
+        var dto = msg.Entry.Dto;
         var own = _apiController.UID ?? string.Empty;
         if (string.Equals(dto.Sender.UID, own, StringComparison.Ordinal)) return;
         var id = $"chat:{dto.Sender.UID}";
@@ -192,9 +193,10 @@ public class NotificationInboxService : DisposableMediatorSubscriberBase, IHoste
             return;
         }
         var name = dto.Sender.DisplayName ?? dto.Sender.Alias ?? "Someone";
-        var preview = dto.Message.Length > 80
-            ? string.Concat(dto.Message.AsSpan(0, 80), "…")
-            : dto.Message;
+        var text = msg.Entry.Text ?? "[encrypted message]";
+        var preview = text.Length > 80
+            ? string.Concat(text.AsSpan(0, 80), "…")
+            : text;
         Add(new InboxItem(id, InboxKind.Chat, $"New message from {name}",
             preview, DateTimeOffset.UtcNow,
             _pairManager.GetPairByUID(dto.Sender.UID)));
