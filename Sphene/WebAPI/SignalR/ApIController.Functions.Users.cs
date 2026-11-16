@@ -236,6 +236,26 @@ public partial class ApiController
             .ConfigureAwait(false);
     }
 
+    /// <summary>Acknowledges delivery of the conversation's incoming rows -
+    /// the sender's client turns "sent" into "delivered" (peer may still be
+    /// offline-in-chat; read is a separate, later receipt).</summary>
+    public async Task UserMarkChatDelivered(UserDto other)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserMarkChatDelivered), other)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>Unread counts per conversation for connect-time discovery -
+    /// empty when disconnected or when the server does not know the method
+    /// yet (older deployment).</summary>
+    public async Task<List<ChatUnreadDto>> UserGetChatUnread()
+    {
+        if (!IsConnected) return [];
+        return await _spheneHub!.InvokeAsync<List<ChatUnreadDto>>(
+            nameof(UserGetChatUnread)).ConfigureAwait(false);
+    }
+
     /// <summary>Publishes/renews this installation's chat E2EE public key.</summary>
     public async Task UserPublishChatDeviceKey(string deviceId, byte[] publicKey)
     {

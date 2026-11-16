@@ -6373,20 +6373,54 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         var w = SpheneUI.Controls.BoundedAvailX();
         var inputH = ImGui.GetFrameHeight() + SpheneUI.Spacing.X4.Scaled;
-        var listH = MathF.Max(120f * scale,
-            ImGui.GetContentRegionAvail().Y - inputH
-            - SpheneUI.Spacing.X8.Scaled * 3f);
-        var dl = ImGui.GetWindowDrawList();
+        // The scroll area fills everything above strip + composer - reserving
+        // too little pushes them past the view, too much wastes a row.
+        var bottomReserve = inputH + ImGui.GetTextLineHeightWithSpacing() * 2f
+            + SpheneUI.Spacing.X8.Scaled * 2f;
+        var listH = SpheneUI.Layout.FillToViewBottomHeight(bottomReserve);
 
         if (SpheneUI.Layout.BeginScrollArea("chat-scroll",
                 new Vector2(w, listH)))
         {
+            // Draw through the CHILD's draw list - the parent list is not
+            // clipped by the scroll area, so bubbles painted there overdraw
+            // the strip/composer whenever the content or window resizes.
+            var dl = ImGui.GetWindowDrawList();
             var items = _chatService.History(uid);
             if (items.Count == 0)
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.CommentDots,
                     "No messages yet", $"Say hi to {pair.UserData.AliasOrUID}.");
             }
+            var padX = 10f * scale;
+            var padY = 7f * scale;
+            var gap = 4f * scale;
+            var margin = 8f * scale;
+            var bwMax = w * 0.62f;
+            var wrapW = MathF.Max(40f, bwMax - padX * 2f);
+            var round = 10f * scale;
+            var ownCol = SpheneUI.ColorUtils.ToU32(
+                SpheneUI.ColorUtils.WithAlpha(accent, 0.35f));
+            var peerCol = SpheneUI.ColorUtils.ToU32(
+                SpheneUI.Layout.NavRailBandColor());
+            // Meta line runs ~22% smaller and dimmer than the body text -
+            // present but never competing with the message itself.
+            var metaRatio = 0.78f;
+            var metaSize = ImGui.GetFontSize() * metaRatio;
+            var metaCol = SpheneUI.ColorUtils.ToU32(
+                SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.TextMuted, 0.65f));
+            // WhatsApp-style state ticks: single check = sent, double check =
+            // delivered to the peer's client, blue double = read.
+            var checkGlyph = FontAwesomeIcon.Check.ToIconString();
+            var checkDoubleGlyph = FontAwesomeIcon.CheckDouble.ToIconString();
+            float checkW, checkDoubleW;
+            using (SpheneUI.Icons.PushFont())
+            {
+                checkW = ImGui.CalcTextSize(checkGlyph).X * metaRatio;
+                checkDoubleW = ImGui.CalcTextSize(checkDoubleGlyph).X * metaRatio;
+            }
+            var font = ImGui.GetFont();
+            DateTime? lastDay = null;
             for (var i = 0; i < items.Count; i++)
             {
                 var m = items[i];
@@ -6396,31 +6430,61 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     : m.Text ?? string.Empty;
                 var mine = string.Equals(m.Dto.Sender.UID, own,
                     StringComparison.Ordinal);
-                var bw = ImGui.CalcTextSize(text).X + 20f * scale;
-                var bwMax = w * 0.62f;
-                if (bw > bwMax)
+                var local = m.Dto.SentAt.ToLocalTime();
+                if (lastDay != local.Date)
                 {
-                    bw = bwMax;
+                    DrawChatDaySeparator(dl, w, local.Date, margin, scale);
+                    lastDay = local.Date;
                 }
-                var bx = mine ? w - bw - 8f * scale : 8f * scale;
+                var time = SpheneUI.Text.FormatTime(local);
+                var timeW = ImGui.CalcTextSize(time).X * metaRatio;
+                var isRead = m.Dto.Read;
+                var isDelivered = m.Dto.Delivered || isRead;
+                var tickW = mine
+                    ? (isDelivered ? checkDoubleW : checkW) : 0f;
+                var metaW = timeW + (mine ? tickW + 3f * scale : 0f);
+                var ts = ImGui.CalcTextSize(text, false, wrapW);
+                var bw = MathF.Min(bwMax,
+                    MathF.Max(ts.X, metaW) + padX * 2f);
+                var bh = ts.Y + padY * 2f + metaSize + 4f * scale;
+                var bx = mine ? w - bw - margin : margin;
                 var pos = ImGui.GetCursorScreenPos();
-                var bh = ImGui.GetTextLineHeight() + 14f * scale;
-                ImGui.Dummy(new Vector2(w, bh + 4f * scale));
+                ImGui.Dummy(new Vector2(w, bh + gap));
+                var next = ImGui.GetCursorPos();
                 dl.AddRectFilled(new Vector2(pos.X + bx, pos.Y),
                     new Vector2(pos.X + bx + bw, pos.Y + bh),
-                    SpheneUI.ColorUtils.ToU32(mine
-                        ? SpheneUI.ColorUtils.WithAlpha(accent, 0.35f)
-                        : SpheneUI.Layout.NavRailBandColor()),
-                    10f * scale);
-                dl.PushClipRect(new Vector2(pos.X + bx + 6f * scale, pos.Y),
-                    new Vector2(pos.X + bx + bw - 6f * scale, pos.Y + bh), true);
-                dl.AddText(new Vector2(pos.X + bx + 10f * scale,
-                        pos.Y + 7f * scale),
-                    SpheneUI.ColorUtils.ToU32(undecryptable
+                    mine ? ownCol : peerCol, round);
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + bx + padX,
+                    pos.Y + padY));
+                using (ImRaii.PushColor(ImGuiCol.Text, undecryptable
                         ? SpheneUI.Colors.TextMuted
-                        : SpheneUI.Colors.TextPrimary),
-                    text);
-                dl.PopClipRect();
+                        : SpheneUI.Colors.TextPrimary))
+                {
+                    ImGui.PushTextWrapPos(
+                        ImGui.GetCursorPosX() + bw - padX * 2f);
+                    ImGui.TextUnformatted(text);
+                    ImGui.PopTextWrapPos();
+                }
+                var metaX = pos.X + bx + bw - padX - metaW;
+                var metaY = pos.Y + padY + ts.Y + 4f * scale;
+                dl.AddText(font, metaSize, new Vector2(metaX, metaY),
+                    metaCol, time);
+                if (mine)
+                {
+                    var tickCol = SpheneUI.ColorUtils.ToU32(isRead
+                        ? SpheneUI.Palette.CrystalBlue
+                        : SpheneUI.ColorUtils.WithAlpha(
+                            SpheneUI.Colors.TextMuted,
+                            isDelivered ? 0.7f : 0.45f));
+                    using (SpheneUI.Icons.PushFont())
+                    {
+                        dl.AddText(ImGui.GetFont(), metaSize,
+                            new Vector2(metaX + timeW + 3f * scale, metaY),
+                            tickCol,
+                            isDelivered ? checkDoubleGlyph : checkGlyph);
+                    }
+                }
+                ImGui.SetCursorPos(next);
             }
             // Snap to the newest message on first open, and on new arrivals
             // only while the view already sits at the bottom - scrolling up
@@ -6465,6 +6529,34 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 $"Encryption keys are not available for {pair.UserData.AliasOrUID} yet " +
                 "(they may need to update Sphene). Messages can't be sent without encryption.");
         }
+    }
+
+    /// <summary>Centered day pill between message groups (WhatsApp-style):
+    /// "Today"/"Yesterday" for the last two local days, otherwise the
+    /// canonical date. Drawn inside the chat scroll area's child.</summary>
+    private static void DrawChatDaySeparator(ImDrawListPtr dl, float w,
+        DateTime day, float margin, float scale)
+    {
+        var today = DateTime.Now.Date;
+        var label = day == today ? "Today"
+            : day == today.AddDays(-1) ? "Yesterday"
+            : SpheneUI.Text.FormatDate(day);
+        var th = ImGui.GetTextLineHeight();
+        var padY = 9f * scale;
+        var pos = ImGui.GetCursorScreenPos();
+        ImGui.Dummy(new Vector2(w, th + padY * 2f));
+        var ts = ImGui.CalcTextSize(label);
+        var cx = pos.X + w * 0.5f;
+        var cy = pos.Y + padY + th * 0.5f;
+        var muted = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
+        var rule = SpheneUI.ColorUtils.ToU32(
+            SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.TextMuted, 0.28f));
+        var rulePad = 8f * scale;
+        dl.AddLine(new Vector2(pos.X + margin, cy),
+            new Vector2(cx - ts.X * 0.5f - rulePad, cy), rule);
+        dl.AddText(new Vector2(cx - ts.X * 0.5f, pos.Y + padY), muted, label);
+        dl.AddLine(new Vector2(cx + ts.X * 0.5f + rulePad, cy),
+            new Vector2(pos.X + w - margin, cy), rule);
     }
 
     /// <summary>Sends a sealed message; seal failures surface as a warning

@@ -217,6 +217,14 @@ public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid 
 /// badges) for that peer should clear.</summary>
 public record ChatConversationOpenedMessage(string OtherUid) : MessageBase;
 
+/// <summary>The peer's client acknowledged delivery of the caller's
+/// messages - sent-state flips to delivered on their own-sent rows.</summary>
+public record ChatPeerDeliveredMessage(UserData User) : MessageBase;
+
+/// <summary>The peer marked the caller's messages read - sent/delivered
+/// state flips to read on their own-sent rows.</summary>
+public record ChatPeerReadMessage(UserData User) : MessageBase;
+
 /// <summary>The caller's syncshell bookmarks changed - the Followed surface
 /// reloads instead of holding a stale list.</summary>
 public record SyncshellFavoritesChangedMessage : MessageBase;

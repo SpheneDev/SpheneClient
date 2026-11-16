@@ -57,6 +57,12 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
         // reconnects/server restarts that auto-reconnect never fires for.
         Mediator.Subscribe<HubReconnectedMessage>(this, _ => RefreshLoadedConversations());
         Mediator.Subscribe<ConnectedMessage>(this, _ => RefreshLoadedConversations());
+        // Server-pushed receipts: the peer's client acknowledged delivery /
+        // read of our own messages - flip the ticks on our sent rows.
+        Mediator.Subscribe<ChatPeerDeliveredMessage>(this,
+            msg => UpdateOwnReceipts(msg.User.UID, delivered: true, read: false));
+        Mediator.Subscribe<ChatPeerReadMessage>(this,
+            msg => UpdateOwnReceipts(msg.User.UID, delivered: true, read: true));
         Mediator.Subscribe<ChatMessageReceivedMessage>(this, msg =>
         {
             var dto = msg.Message;
@@ -74,6 +80,11 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
             var firstUnread = false;
             if (fromOther)
             {
+                // Delivery receipt: the row reached this client - the
+                // sender's tick flips to "delivered" even while the chat
+                // stays unread.
+                _ = _apiController.UserMarkChatDelivered(
+                    new UserDto(new UserData(other)));
                 if (ConversationIsOnScreen(other))
                 {
                     // the conversation is on screen - keep the server's read
@@ -139,6 +150,7 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
                 var page = await _apiController.UserGetChatHistory(
                     new UserDto(new UserData(uid)), take: 50).ConfigureAwait(false);
                 page.Reverse();
+                AcknowledgeDelivered(uid, page);
                 MergePage(uid, page);
                 _loaded[uid] = 0;
             }
@@ -152,6 +164,54 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
             }
             MigrateConversationInBackground(uid);
         });
+    }
+
+    /// <summary>Flips the tick state on our own-sent rows of a conversation
+    /// when a delivery or read receipt arrives. Read implies delivered.</summary>
+    private void UpdateOwnReceipts(string otherUid, bool delivered, bool read)
+    {
+        if (!_history.TryGetValue(otherUid, out var list))
+        {
+            return;
+        }
+        var own = _apiController.UID ?? string.Empty;
+        lock (list)
+        {
+            for (var i = 0; i < list.Count; i++)
+            {
+                var dto = list[i].Dto;
+                if (!string.Equals(dto.Sender.UID, own, StringComparison.Ordinal)
+                    || dto.Read && !read)
+                {
+                    continue;
+                }
+                list[i] = list[i] with
+                {
+                    Dto = dto with
+                    {
+                        Delivered = delivered || dto.Delivered || dto.Read,
+                        Read = read || dto.Read,
+                    },
+                };
+            }
+        }
+    }
+
+    /// <summary>Acks delivery for fetched rows that carry no delivered flag
+    /// yet - history retrieval IS the receipt (the row reached this client).</summary>
+    private void AcknowledgeDelivered(string uid, List<ChatMessageDto> page)
+    {
+        var own = _apiController.UID ?? string.Empty;
+        for (var i = 0; i < page.Count; i++)
+        {
+            if (!string.Equals(page[i].Sender.UID, own, StringComparison.Ordinal)
+                && !page[i].Delivered)
+            {
+                _ = _apiController.UserMarkChatDelivered(
+                    new UserDto(new UserData(uid)));
+                return;
+            }
+        }
     }
 
     /// <summary>Merges a fetched (ascending) page into the conversation list:
@@ -173,10 +233,75 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
 
     private void RefreshLoadedConversations()
     {
+        _ = SyncUnreadAsync();
         foreach (var uid in _history.Keys)
         {
             RefreshConversationInBackground(uid);
         }
+    }
+
+    /// <summary>Server-authoritative unread resync. Messages delivered while
+    /// offline only exist in history - without this the client would not
+    /// know they are there until each conversation is opened by hand.
+    /// Reconciles the local flags (also drops them when another device read
+    /// the messages) and republishes the newest row of each freshly
+    /// discovered conversation through the live-push path, so the inbox row
+    /// and the friend-list pip look identical to a message just arrived.</summary>
+    private async Task SyncUnreadAsync()
+    {
+        try
+        {
+            if (_cts.IsCancellationRequested || !_apiController.IsConnected)
+            {
+                return;
+            }
+            var rows = await _apiController.UserGetChatUnread().ConfigureAwait(false);
+            var fresh = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var row in rows)
+            {
+                fresh.Add(row.User.UID);
+            }
+            foreach (var uid in _unread.Keys)
+            {
+                if (!fresh.Contains(uid) && !ConversationIsOnScreen(uid))
+                {
+                    _unread.TryRemove(uid, out _);
+                }
+            }
+            foreach (var row in rows)
+            {
+                var uid = row.User.UID;
+                if (ConversationIsOnScreen(uid) || !_unread.TryAdd(uid, 0))
+                {
+                    continue;
+                }
+                await PublishUnreadPreviewAsync(uid).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Chat unread sync failed");
+        }
+    }
+
+    /// <summary>Fetches the newest row of a newly discovered unread
+    /// conversation and republishes it - the inbox row gets its real
+    /// decrypted preview instead of a placeholder.</summary>
+    private async Task PublishUnreadPreviewAsync(string uid)
+    {
+        var page = await _apiController.UserGetChatHistory(
+            new UserDto(new UserData(uid)), take: 1).ConfigureAwait(false);
+        if (page.Count == 0)
+        {
+            return;
+        }
+        var entry = Resolve(page[0]);
+        if (string.Equals(entry.Dto.Sender.UID, _apiController.UID,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+        Mediator.Publish(new ChatMessageReadyMessage(uid, entry));
     }
 
     /// <summary>Marks the conversation as on screen: clears the local unread
@@ -272,6 +397,7 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
                     new UserDto(new UserData(uid)), take: 50).ConfigureAwait(false);
                 page.Reverse();
                 if (!_history.ContainsKey(uid)) return;
+                AcknowledgeDelivered(uid, page);
                 // Keep live rows that are not in the page (newest arrivals
                 // racing the fetch) and re-resolve the page's entries.
                 MergePage(uid, page);

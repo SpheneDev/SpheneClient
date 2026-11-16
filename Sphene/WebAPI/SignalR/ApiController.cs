@@ -677,6 +677,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnUserRemoveClientPair(dto => _ = Client_UserRemoveClientPair(dto));
         OnUserSendOnline(dto => _ = Client_UserSendOnline(dto));
         OnUserReceiveChatMessage(dto => _ = Client_UserReceiveChatMessage(dto));
+        OnUserChatDelivered(dto => _ = Client_UserChatDelivered(dto));
+        OnUserChatRead(dto => _ = Client_UserChatRead(dto));
         OnUserUpdateOtherPairPermissions(dto => _ = Client_UserUpdateOtherPairPermissions(dto));
         OnUserUpdateSelfPairPermissions(dto => _ = Client_UserUpdateSelfPairPermissions(dto));
         OnUserAckYouUpdate(dto => _ = Client_UserAckYouUpdate(dto));
@@ -744,6 +746,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _spheneHub.Remove(nameof(Client_UserRemoveClientPair));
         _spheneHub.Remove(nameof(Client_UserSendOnline));
         _spheneHub.Remove(nameof(Client_UserReceiveChatMessage));
+        _spheneHub.Remove(nameof(Client_UserChatDelivered));
+        _spheneHub.Remove(nameof(Client_UserChatRead));
         _spheneHub.Remove(nameof(Client_UserUpdateOtherPairPermissions));
         _spheneHub.Remove(nameof(Client_UserUpdateSelfPairPermissions));
         _spheneHub.Remove(nameof(Client_UserAckYouUpdate));

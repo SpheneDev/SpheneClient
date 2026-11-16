@@ -212,6 +212,20 @@ public partial class ApiController
         return Task.CompletedTask;
     }
 
+    public Task Client_UserChatDelivered(UserDto reader)
+    {
+        Logger.LogDebug("Client_UserChatDelivered: {dto}", reader);
+        ExecuteSafely(() => Mediator.Publish(new ChatPeerDeliveredMessage(reader.User)));
+        return Task.CompletedTask;
+    }
+
+    public Task Client_UserChatRead(UserDto reader)
+    {
+        Logger.LogDebug("Client_UserChatRead: {dto}", reader);
+        ExecuteSafely(() => Mediator.Publish(new ChatPeerReadMessage(reader.User)));
+        return Task.CompletedTask;
+    }
+
     public Task Client_UserUpdateOtherPairPermissions(UserPermissionsDto dto)
     {
         Logger.LogDebug("Client_UserUpdateOtherPairPermissions: {dto}", dto);
@@ -472,6 +486,18 @@ public partial class ApiController
     {
         if (_initialized) return;
         _spheneHub!.On(nameof(Client_UserReceiveChatMessage), act);
+    }
+
+    public void OnUserChatDelivered(Action<UserDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserChatDelivered), act);
+    }
+
+    public void OnUserChatRead(Action<UserDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserChatRead), act);
     }
 
     public void OnUserSendOnline(Action<OnlineUserIdentDto> act)

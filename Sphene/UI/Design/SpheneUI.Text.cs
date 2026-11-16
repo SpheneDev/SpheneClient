@@ -163,6 +163,15 @@ public static partial class SpheneUI
                 bool includeSeconds = false)
             => FormatDateTime(date.DateTime, includeSeconds);
 
+        /// <summary>"14:30" · bare local time for dense meta rows
+        /// (chat bubbles, feed items).</summary>
+        public static string FormatTime(DateTime date)
+            => date.ToString("HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture);
+
+        public static string FormatTime(DateTimeOffset date)
+            => FormatTime(date.DateTime);
+
         /// <summary>"Jun 12" · short form for dense lists.</summary>
         public static string FormatShortDate(DateTime date)
             => date.ToString("MMM d",
