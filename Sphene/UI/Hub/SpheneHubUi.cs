@@ -6335,6 +6335,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private string _chatInput = string.Empty;
     private string? _chatScrollUid;
     private int _chatScrollCount = -1;
+    private bool _chatWasAtBottom = true;
     private readonly ConcurrentDictionary<string, (Task<bool> Task, DateTime At)>
         _chatSealChecks = new(StringComparer.Ordinal);
     private readonly HashSet<string> _chatKeyWarnDismissed = new(StringComparer.Ordinal);
@@ -6421,16 +6422,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     text);
                 dl.PopClipRect();
             }
-            // Snap to the newest message only when the content actually
-            // changed (first open or a new arrival) - an unconditional
-            // SetScrollHereY every frame makes manual scrolling impossible.
-            if (!string.Equals(_chatScrollUid, uid, StringComparison.Ordinal)
-                || items.Count != _chatScrollCount)
-            {
+            // Snap to the newest message on first open, and on new arrivals
+            // only while the view already sits at the bottom - scrolling up
+            // to read history must not be yanked back every frame/message.
+            bool switched = !string.Equals(_chatScrollUid, uid, StringComparison.Ordinal);
+            if (switched || (items.Count != _chatScrollCount && _chatWasAtBottom))
                 ImGui.SetScrollHereY(1f);
-                _chatScrollUid = uid;
-                _chatScrollCount = items.Count;
-            }
+            _chatWasAtBottom = ImGui.GetScrollY() >= ImGui.GetScrollMaxY() - 8f;
+            _chatScrollUid = uid;
+            _chatScrollCount = items.Count;
             SpheneUI.Layout.EndScrollArea();
         }
 
