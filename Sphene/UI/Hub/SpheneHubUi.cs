@@ -6207,6 +6207,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private int _chatScrollSettle;
     private float _chatScrollPrevMax = -1f;
     private float _chatScrollDistance;
+    private Guid _chatScrollFirstId;
+    private Guid _chatScrollLastId;
+    private float _chatPrevScrollY;
+    private int _chatWheelUpFrame = -1;
     private bool _chatWasAtBottom = true;
     private bool _chatIntroActive;
     private double _chatIntroStart;
@@ -6255,7 +6259,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var listH = SpheneUI.Layout.FillToViewBottomHeight(bottomReserve);
 
         if (SpheneUI.Layout.BeginScrollArea("chat-scroll",
-                new Vector2(w, listH)))
+                new Vector2(w, listH), chainWheel: false))
         {
             // Draw through the CHILD's draw list - the parent list is not
             // clipped by the scroll area, so bubbles painted there overdraw
@@ -6284,12 +6288,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 || frame != _chatScrollFrame + 1;
             if (switched)
             {
+                // ChatScroll telemetry: Debug level, gated by the
+                // Settings > Diagnostics "Log Level" option (the
+                // DalamudLogger drops Debug before it reaches /xllog).
+                _logger.LogDebug(
+                    "ChatScroll telemetry active - switch uid={Uid} f={Frame} y={Y:0.0} max={Max:0.0}",
+                    uid, frame, scrollY, scrollMax);
                 // A freshly opened conversation stays invisible while the
                 // scroll snap converges, then reveals through a fade.
                 _chatIntroActive = true;
                 _chatIntroStart = now;
                 _chatRevealStart = -1.0;
                 _chatScrollDistance = 0f;
+                _chatPrevScrollY = scrollY;
+                _chatWheelUpFrame = -1;
                 // Animated atlases for the previous conversation free their
                 // GPU memory through the deferred media eviction queue.
                 foreach (var key in _chatGifAnimKeys)
@@ -6300,31 +6312,89 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _chatGifMeta.Clear();
                 _chatGifBytes.Clear();
             }
-            if (switched || (items.Count != _chatScrollCount && _chatWasAtBottom))
+            // ImGui wheel scrolling is animated: a wheel tick writes
+            // ScrollTarget once and Scroll eases toward it over many
+            // frames. MouseWheel is nonzero on the tick frame only, so
+            // steering detection must cover the whole sweep - an upward
+            // scrollY delta means the user's wheel animation is still in
+            // flight. Without that coverage a message arriving mid-sweep
+            // re-arms the bottom snap, clobbers the in-flight target and
+            // the view visibly sweeps back toward the newest message
+            // ("springs back" while wheeling up from the bottom).
+            var wheel = ImGui.GetIO().MouseWheel;
+            var childHovered = ImGui.IsWindowHovered();
+            if (childHovered && wheel > 0f)
+            {
+                _chatWheelUpFrame = frame;
+            }
+            if (MathF.Abs(wheel) > 0f)
+            {
+                // Unconditional: when the wheel visibly scrolls but no line
+                // appears here, the input never reaches io.MouseWheel at
+                // all; when lines appear with childHovered=false or a
+                // foreign hovered window, something else eats the input.
+                string hoveredName;
+                unsafe
+                {
+                    var ctx = new ImGuiContextPtr(ImGuiNative.GetCurrentContext());
+                    hoveredName = ctx.HoveredWindow.Handle == null
+                        ? "-"
+                        : System.Runtime.InteropServices.Marshal.PtrToStringUTF8(
+                            (IntPtr)ctx.HoveredWindow.Name) ?? "?";
+                }
+                _logger.LogDebug(
+                    "ChatScroll wheel uid={Uid} f={Frame} y={Y:0.0} max={Max:0.0} ch={CH:0.0} wheel={Wheel:0.00} hover={Hover} childHov={ChildHov} pend={Pend} bottom={Bottom}",
+                    uid, frame, scrollY, scrollMax, ImGui.GetWindowSize().Y,
+                    wheel, hoveredName, childHovered,
+                    _chatScrollPending, _chatWasAtBottom);
+            }
+            var steeringUp = frame - _chatWheelUpFrame <= 1
+                || (scrollMax > 0f && scrollY < _chatPrevScrollY - 0.05f);
+            var userSteers = steeringUp
+                || (ImGui.IsWindowHovered() && MathF.Abs(wheel) > 0f)
+                || (SpheneUI.Scrollbar.LastInteractionFrame >= 0
+                    && frame - SpheneUI.Scrollbar.LastInteractionFrame <= 1);
+            var wasPending = _chatScrollPending;
+            var armReason = switched ? "switch"
+                : items.Count != _chatScrollCount && _chatWasAtBottom ? "count"
+                : null;
+            if (armReason != null && (switched || !userSteers))
             {
                 _chatScrollPending = true;
                 _chatScrollSettle = 0;
                 // A stale max from another conversation or an earlier snap
                 // must never satisfy the settle check on the first frame.
                 _chatScrollLastMax = -1f;
+                _logger.LogDebug(
+                    "ChatScroll arm({Reason}) uid={Uid} f={Frame} y={Y:0.0} max={Max:0.0} count={Old}->{New} steer={Steer}",
+                    armReason, uid, frame, scrollY, scrollMax,
+                    _chatScrollCount, items.Count, userSteers);
             }
-            var userSteers = (ImGui.IsWindowHovered()
-                    && MathF.Abs(ImGui.GetIO().MouseWheel) > 0f)
-                || (SpheneUI.Scrollbar.LastInteractionFrame >= 0
-                    && frame - SpheneUI.Scrollbar.LastInteractionFrame <= 1);
             if (userSteers)
             {
+                if (wasPending && _chatScrollPending)
+                {
+                    _logger.LogDebug(
+                        "ChatScroll disarm-steer uid={Uid} f={Frame} y={Y:0.0} max={Max:0.0} wheel={Wheel:0.0} up={Up}",
+                        uid, frame, scrollY, scrollMax, wheel, steeringUp);
+                }
                 _chatScrollPending = false;
             }
             if (_chatScrollPending)
             {
                 ImGui.SetScrollY(scrollMax);
+                _logger.LogDebug(
+                    "ChatScroll snap uid={Uid} f={Frame} y={Y:0.0}->max={Max:0.0} settle={Settle} steer={Steer}",
+                    uid, frame, scrollY, scrollMax, _chatScrollSettle, userSteers);
                 if (scrollY >= scrollMax - 1f
                     && MathF.Abs(scrollMax - _chatScrollLastMax) < 0.01f)
                 {
                     if (++_chatScrollSettle >= 2)
                     {
                         _chatScrollPending = false;
+                        _logger.LogDebug(
+                            "ChatScroll settled uid={Uid} f={Frame} y={Y:0.0} max={Max:0.0}",
+                            uid, frame, scrollY, scrollMax);
                     }
                 }
                 else
@@ -6342,7 +6412,47 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 // Restoring the saved distance from the bottom re-applies
                 // every frame the range keeps moving, so an interactive
                 // resize drag stays pinned to the same bottom-edge message.
-                ImGui.SetScrollY(scrollMax - _chatScrollDistance);
+                // A pure bottom APPEND (new message while reading history)
+                // is the exception: restoring bottom-distance would yank the
+                // view down by the new bubble's height every arrival, so the
+                // top-anchored scrollY must hold instead.
+                // A scroll sweep still moving (either direction) means the
+                // user's wheel/drag animation is in flight. Restoring here
+                // would clobber its target every frame - and scrollMax
+                // drifts by ~1px while scrolling (content-size noise), so
+                // the restore used to fire on virtually every frame and
+                // yank the view back ("springs back while scrolling").
+                // Prepends are structural: a history page landing above
+                // must keep the bottom-distance anchor even mid-sweep.
+                var sweepInFlight = userSteers
+                    || (scrollMax > 0f
+                        && MathF.Abs(scrollY - _chatPrevScrollY) > 0.05f);
+                var appended = items.Count > 0
+                    && items[^1].Dto.Id != _chatScrollLastId;
+                var prepended = items.Count > 0
+                    && items[0].Dto.Id != _chatScrollFirstId;
+                if (prepended || (!appended && !sweepInFlight))
+                {
+                    var target = scrollMax - _chatScrollDistance;
+                    ImGui.SetScrollY(target);
+                    _logger.LogDebug(
+                        "ChatScroll restore uid={Uid} f={Frame} y={Y:0.0}->{T:0.0} max={Max:0.0} dmax={DMax:0.0} dist={Dist:0.0} app={App} pre={Pre} sweep={Sweep}",
+                        uid, frame, scrollY, target, scrollMax,
+                        scrollMax - _chatScrollPrevMax, _chatScrollDistance,
+                        appended, prepended, sweepInFlight);
+                }
+                else
+                {
+                    // Top anchor holds for pure appends; during a sweep the
+                    // noise restore is skipped - but the distance must stay
+                    // current so a later real resize still pins correctly.
+                    _chatScrollDistance = Math.Clamp(scrollMax - scrollY, 0f, scrollMax);
+                    _logger.LogDebug(
+                        "ChatScroll hold uid={Uid} f={Frame} y={Y:0.0} max={Max:0.0} dmax={DMax:0.0} app={App} pre={Pre} sweep={Sweep}",
+                        uid, frame, scrollY, scrollMax,
+                        scrollMax - _chatScrollPrevMax, appended, prepended,
+                        sweepInFlight);
+                }
             }
             else
             {
@@ -6351,11 +6461,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _chatScrollDistance = Math.Clamp(scrollMax - scrollY, 0f, scrollMax);
             }
             _chatScrollPrevMax = scrollMax;
+            // While the user steers the position latches only after the
+            // sweep ends: a wheel-up sweep may still sit within the 8px
+            // bottom window for its first frames and must not re-arm
+            // stick-to-bottom during that approach.
             _chatWasAtBottom = _chatScrollPending
-                || scrollY >= scrollMax - 8f;
+                || (!userSteers && scrollY >= scrollMax - 8f);
+            _chatPrevScrollY = scrollY;
             _chatScrollUid = uid;
             _chatScrollCount = items.Count;
             _chatScrollFrame = frame;
+            _chatScrollFirstId = items.Count > 0 ? items[0].Dto.Id : Guid.Empty;
+            _chatScrollLastId = items.Count > 0 ? items[^1].Dto.Id : Guid.Empty;
 
             // Intro reveal: the conversation stays hidden until the scroll
             // has snapped to the bottom AND the first history page landed,

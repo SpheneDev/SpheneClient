@@ -649,6 +649,7 @@ public static partial class SpheneUI
             public bool Begun;
             public bool ClipPushed;
             public bool Border;
+            public bool ChainWheel = true;
             public bool GripHeld;
             public float GripAnim;
             public Vector2 ParentMin;
@@ -681,16 +682,21 @@ public static partial class SpheneUI
         /// noPadding behavior. <paramref name="edgeToEdge"/> widens the
         /// horizontal clip to the full parent window rect · for surfaces that
         /// must cover the window's side borders like the title bar does.
+        /// <paramref name="chainWheel"/> controls whether wheel input past
+        /// the child's scroll edges is forwarded to the parent window -
+        /// disable it for self-managed scroll views (like the chat history)
+        /// whose own snap logic would fight the resulting page slide.
         /// </summary>
         public static bool BeginScrollArea(string id, Vector2 size, bool border = false,
             ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None, bool noPadding = false,
             bool hideTopBorder = false, float topInset = 0f, float contentInset = -1f,
-            Vector2? contentPadding = null, bool edgeToEdge = false)
+            Vector2? contentPadding = null, bool edgeToEdge = false, bool chainWheel = true)
         {
             var state = new ScrollAreaState
             {
                 Id = id,
                 Border = border,
+                ChainWheel = chainWheel,
                 HideTopBorder = hideTopBorder,
                 TopInset = topInset,
                 ParentMin = ImGui.GetWindowPos(),
@@ -1062,8 +1068,9 @@ public static partial class SpheneUI
                 // edge-to-edge by design, so any scroll range it reports is
                 // incidental overflow, and programmatic SetScrollY would slide
                 // the whole embedded layout out of the window even though the
-                // host is NoScrollWithMouse.
-                if (childHovered)
+                // host is NoScrollWithMouse. chainWheel=false opts the child
+                // out entirely (self-managed scroll like the chat history).
+                if (childHovered && state.ChainWheel)
                 {
                     var wheel = ImGui.GetIO().MouseWheel;
                     var atTop = scrollY <= 0.5f;
