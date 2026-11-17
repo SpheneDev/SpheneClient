@@ -1971,7 +1971,20 @@ public static partial class SpheneUI
                 if (leftAvail > 0f)
                 {
                     ImGui.SetCursorScreenPos(lineMin);
-                    drawLeft(leftAvail);
+                    // Left content owns only leftAvail · right-docking
+                    // controls (Toggle, HelpText) must see that bound or a
+                    // switch lands on top of the docked button and its late
+                    // hit box swallows the button's clicks.
+                    ContentBounds.Push(new Vector2(lineMin.X,
+                        dockMin.X - Spacing.Inline.Scaled));
+                    try
+                    {
+                        drawLeft(leftAvail);
+                    }
+                    finally
+                    {
+                        ContentBounds.Pop();
+                    }
                     rowMaxY = MathF.Max(rowMaxY, ImGui.GetItemRectMax().Y);
                 }
             }

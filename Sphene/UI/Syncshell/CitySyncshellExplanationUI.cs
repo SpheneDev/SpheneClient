@@ -71,12 +71,45 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
             return;
         }
 
-        if (SpheneUI.Layout.BeginScrollArea("city-explanation", ImGui.GetContentRegionAvail(),
+        var spacing = ImGui.GetStyle().ItemSpacing.Y;
+        var frameH = ImGui.GetFrameHeight();
+        // Pinned footer: the settings toggle and the dialog buttons must stay
+        // reachable - a fixed-size window would otherwise fold them under the
+        // scroll area's bottom edge.
+        var footerHeight = SpheneUI.Metrics.Gap * 2f + SpheneUI.Scale
+            + ImGui.GetTextLineHeightWithSpacing()
+            + spacing * 3f
+            + frameH + spacing
+            + SpheneUI.Metrics.ControlHeight + spacing
+            + frameH + spacing * 2f;
+
+        if (SpheneUI.Layout.BeginFillToBottomScrollArea("city-explanation", footerHeight,
                 contentPadding: Vector2.Zero))
         {
             DrawExplanationContent();
         }
         SpheneUI.Layout.EndScrollArea();
+
+        SpheneUI.Layout.Separator();
+        SpheneUI.Layout.Section("Settings", () =>
+        {
+            if (SpheneUI.Controls.Toggle("Enable city syncshell join requests", ref _enableCitySyncshells))
+            {
+                _configService.Current.EnableCitySyncshellJoinRequests = _enableCitySyncshells;
+                _configService.Save();
+            }
+            SpheneUI.Controls.HelpText("When enabled, you will receive prompts to join city syncshells when entering major cities. You can change this setting later in the Sphene settings.");
+        });
+
+        var clicked = SpheneUI.Controls.DialogButtons("citySyncshellActions", "Join This Time", "Close");
+        if (clicked == 1)
+        {
+            HandleJoinThisTime();
+        }
+        else if (clicked == 2)
+        {
+            HandleClose();
+        }
     }
 
     private void DrawExplanationContent()
@@ -99,27 +132,7 @@ public class CitySyncshellExplanationUI : WindowMediatorSubscriberBase
         SpheneUI.Layout.VerticalSpace();
         SpheneUI.Layout.Callout("City Syncshells are public spaces. Please be respectful and follow community guidelines.", Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
 
-        SpheneUI.Layout.Section("Settings", () =>
-        {
-            if (SpheneUI.Controls.Toggle("Enable city syncshell join requests", ref _enableCitySyncshells))
-            {
-                _configService.Current.EnableCitySyncshellJoinRequests = _enableCitySyncshells;
-                _configService.Save();
-            }
-            SpheneUI.Controls.HelpText("When enabled, you will receive prompts to join city syncshells when entering major cities. You can change this setting later in the Sphene settings.");
-        });
-
-        // Buttons
-        var clicked = SpheneUI.Controls.DialogButtons("citySyncshellActions", "Join This Time", "Close");
-        if (clicked == 1)
-        {
-            HandleJoinThisTime();
-        }
-        else if (clicked == 2)
-        {
-            HandleClose();
-        }
-
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Text.MutedWrapped("This explanation will only be shown once. You can always change your city syncshell preferences in the Sphene settings under 'City Syncshell Settings'.");
     }
 

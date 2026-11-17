@@ -127,7 +127,15 @@ public sealed class SyncshellCommunityUI : WindowMediatorSubscriberBase
         // Captured before the scroll child opens · this is the real window
         // rect, so the hero can bleed over the title bar.
         var heroRect = (ImGui.GetWindowPos(), ImGui.GetWindowSize());
-        var footerReserve = _joinPopup ? 104f * SpheneUI.Scale : 0f;
+        // Footer reserve must match what the join-popup footer really draws
+        // (separator + thin gap + one ActionBar row) - a generous flat value
+        // left a dead quarter of the window under the controls.
+        var footerReserve = _joinPopup
+            ? SpheneUI.Metrics.Gap * 2f + SpheneUI.Scale
+                + SpheneUI.Spacing.X2.Scaled
+                + ImGui.GetFrameHeight()
+                + ImGui.GetStyle().ItemSpacing.Y * 2f
+            : 0f;
 
         // Full-bleed body like the chrome title bar: the scroll child starts
         // at the window's left edge and spans the whole width · the border

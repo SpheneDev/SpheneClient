@@ -112,6 +112,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         Acknowledgment,
         Supporter,
         SupporterNameplate,
+        SupporterListRow,
         ReleaseNotes,
         Debug
     }
@@ -1995,7 +1996,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             if (!_apiController.SupporterFeaturesEnabled
                 || _embeddedSettingsPage is not (SettingsPage.Supporter
-                    or SettingsPage.SupporterNameplate))
+                    or SettingsPage.SupporterNameplate
+                    or SettingsPage.SupporterListRow))
             {
                 _embeddedSettingsPage = SettingsPage.Supporter;
             }
@@ -2052,6 +2054,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
             SettingsPage.Acknowledgment => ("Sync & Data", "Acknowledgment"),
             SettingsPage.Supporter => ("General", "Supporter"),
             SettingsPage.SupporterNameplate => ("Supporter", "Nameplate"),
+            SettingsPage.SupporterListRow => ("Supporter", "List Row"),
             SettingsPage.ReleaseNotes => ("General", "Update"),
             SettingsPage.Debug => ("Advanced", diagnosticsPageLabel),
             _ => ("General", "Home")
@@ -2143,6 +2146,9 @@ public class SettingsUi : WindowMediatorSubscriberBase
                     break;
                 case SettingsPage.SupporterNameplate:
                     _supporterStudio.DrawStudioPage();
+                    break;
+                case SettingsPage.SupporterListRow:
+                    _supporterStudio.DrawListRowStudioPage();
                     break;
                 case SettingsPage.ReleaseNotes:
                     _releaseChangelogUi.DrawEmbedded();
@@ -2717,6 +2723,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             _supporterStudio.DrawSummaryCard(() => SetSettingsPage(SettingsPage.SupporterNameplate));
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            _supporterStudio.DrawListRowCard(() => SetSettingsPage(SettingsPage.SupporterListRow));
 
         }
         else
@@ -2726,6 +2734,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
             // for - perks and linking info sit collapsed below so they fit on
             // minimal window heights
             _supporterStudio.DrawTeaserCard(() => SetSettingsPage(SettingsPage.SupporterNameplate));
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            _supporterStudio.DrawListRowCard(() => SetSettingsPage(SettingsPage.SupporterListRow));
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             DrawSupporterSection(() =>
             {

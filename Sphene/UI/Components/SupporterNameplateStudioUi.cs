@@ -7,11 +7,15 @@ using Dalamud.Interface.Utility;
 using Dalamud.Interface.Utility.Raii;
 using Dalamud.Utility;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Data;
+using Sphene.API.Dto.User;
 using Sphene.Services;
+using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
 using Sphene.SpheneConfiguration.Configurations;
 using Sphene.UI.Design;
 using Sphene.WebAPI;
+using System.Linq;
 using System.Numerics;
 
 namespace Sphene.UI.Components;
@@ -56,6 +60,8 @@ public sealed class SupporterNameplateStudioUi
     private readonly SupporterNameplateService _nameplateService;
     private readonly UiSharedService _uiShared;
     private readonly ApiController _apiController;
+    private readonly SpheneMediator _mediator;
+    private readonly SpheneProfileManager _profileManager;
 
     /// <summary>Effect staged by a card click · the stage previews it without
     /// touching config until Apply. <see cref="string.Empty"/> is the None
@@ -284,7 +290,8 @@ public sealed class SupporterNameplateStudioUi
         SpheneConfigService configService,
         SupporterIconService iconService, SupporterNameplateService nameplateService,
         UiSharedService uiShared, ApiController apiController,
-        LodestoneAvatarService lodestoneAvatarService)
+        LodestoneAvatarService lodestoneAvatarService,
+        SpheneMediator mediator, SpheneProfileManager profileManager)
     {
         _logger = logger;
         _configService = configService;
@@ -293,6 +300,8 @@ public sealed class SupporterNameplateStudioUi
         _uiShared = uiShared;
         _apiController = apiController;
         _lodestoneAvatarService = lodestoneAvatarService;
+        _mediator = mediator;
+        _profileManager = profileManager;
     }
 
     /// <summary>Unindents to the shared card edge · settings content sits
@@ -421,6 +430,439 @@ public sealed class SupporterNameplateStudioUi
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             SpheneUI.Rows.Note("Animated nameplate effects and icons are a supporter perk · the gallery is open to browse.");
         });
+    }
+
+    private byte[] _ownAvatarBytes = [];
+    private byte[] _ownRowBytes = [];
+    private Vector4 _rowCustomFrom = new(0.05f, 0.45f, 0.55f, 1f);
+    private Vector4 _rowCustomTo = new(0.02f, 0.05f, 0.20f, 1f);
+    private bool _rowCustomReverse;
+    private bool _rowUseAccent;
+    private Vector4 _rowAccent = new(0.55f, 0.45f, 0.95f, 1f);
+    private ProfileRowFx _rowHoverFx;
+    private ProfileRowFx _rowIdleFx;
+    private string _rowThemeSeed = string.Empty;
+    private string? _rowAppliedTheme;
+    /// <summary>Staged row backdrop · null = untouched, empty = cleared,
+    /// base64 = a preset, generated fade or uploaded strip.</summary>
+    private string? _stagedRowImage;
+
+    /// <summary>
+    /// The list-row summary card on the Supporter page: the real friends-list
+    /// row renderer bound to the owner's live profile with the action capsule
+    /// parked beside it - Customize for supporters, trial/Ko-fi CTA otherwise.
+    /// </summary>
+    public void DrawListRowCard(Action openStudio)
+    {
+        FullWidth(() =>
+        {
+            var supporter = _apiController.IsSupporterEffective;
+            SpheneUI.Text.SectionHeader("Your List Row",
+                supporter
+                    ? "How your entry looks in friends' lists · backdrop, fades and effects."
+                    : "Supporter perk · animated backdrops and effects behind your entry.",
+                icon: FontAwesomeIcon.Bars, accent: SpheneUI.Palette.LuminousGold);
+            var profile = _profileManager.GetSpheneProfile(new UserData(_apiController.UID));
+
+            var scale = SpheneUI.Scale;
+            var gap = SpheneUI.Metrics.Gap;
+            var rowH = 46f * scale;
+            var trialOpen = !_apiController.SupporterTrialUsed;
+            var label = supporter ? "Customize" : trialOpen ? "Try free day" : "Become a supporter";
+            var icon = supporter ? FontAwesomeIcon.Pen
+                : trialOpen ? FontAwesomeIcon.Gift : FontAwesomeIcon.Heart;
+            var color = supporter ? SpheneUI.Palette.LuminousGold
+                : trialOpen ? SpheneUI.Palette.SpheneGold
+                : SpheneBrandIcons.GetBrandColor(SpheneBrandIcons.Brand.Kofi);
+            var buttonW = UnsavedChangesToast.CapsuleButtonWidth(rowH, icon, label);
+            var min = ImGui.GetCursorScreenPos();
+            var rowW = MathF.Max(60f * scale,
+                SpheneUI.Controls.BoundedAvailX() - buttonW - gap);
+            DrawOwnRowPreview(profile, profile.ProfileTheme.Value,
+                profile.RowImageData.Value, "##suprowprev", rowW);
+            var clicked = UnsavedChangesToast.DrawCapsuleButton(
+                new Vector2(min.X + rowW + gap, min.Y),
+                new Vector2(buttonW, rowH), label, icon, color,
+                supporter
+                    ? "Open the list row studio · effects, fades, presets and uploads."
+                    : trialOpen
+                        ? "Start your free 1-day supporter trial · one-time, then supporter only."
+                        : "Support Sphene on Ko-fi to unlock supporter perks.");
+            ImGui.SetCursorScreenPos(new Vector2(min.X, min.Y + rowH));
+            if (clicked)
+            {
+                if (supporter) openStudio();
+                else if (trialOpen) StartRowTrial();
+                else Util.OpenLink("https://ko-fi.com/sphenedev");
+            }
+            SpheneUI.Text.Muted("Hover the row · this is exactly how your entry renders for viewers.");
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            SpheneUI.Rows.Note(supporter
+                ? "Effects, preset fades, custom fades and uploads live in the list row studio."
+                : "Row backdrops and effects are a supporter perk · a free 1-day trial unlocks them.");
+        });
+    }
+
+    /// <summary>
+    /// The list-row studio sub-page (Supporter › List Row): the live row
+    /// preview stays pinned on top while the setting cards scroll beneath —
+    /// every control only stages (theme buffers + <see cref="_stagedRowImage"/>)
+    /// and the staged look rides the preview until Apply commits it in a
+    /// single profile write. Same contract as the nameplate studio.
+    /// </summary>
+    public void DrawListRowStudioPage()
+    {
+        var supporter = _apiController.IsSupporterEffective;
+        var accent = SpheneUI.Palette.LuminousGold;
+        var profile = _profileManager.GetSpheneProfile(new UserData(_apiController.UID));
+        var theme = profile.ProfileTheme.Value;
+        EnsureRowThemeSeeded(profile);
+        var stagedTheme = RowThemeFromBuffers(theme);
+        var rowBytes = StagedRowBytes(profile);
+        var pinMin = ImGui.GetCursorScreenPos();
+
+        // the preview stage stays pinned while the setting cards scroll
+        // beneath - same contract as the nameplate studio
+        FullWidth(() =>
+        {
+            SpheneUI.Text.SectionHeader("Your List Row",
+                supporter
+                    ? "Stage effects, fades and a backdrop below · Apply commits them together."
+                    : "Supporter perk · the preview is live, styling needs supporter status.",
+                icon: FontAwesomeIcon.Bars, accent: accent);
+            DrawOwnRowPreview(profile, stagedTheme, rowBytes, "##suprowstudio");
+            SpheneUI.Text.Muted("Hover the row · this is the staged look your friends get on Apply.");
+            if (!supporter)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                if (!_apiController.SupporterTrialUsed)
+                {
+                    if (SpheneUI.Controls.PrimaryButton("Try free day", FontAwesomeIcon.Gift))
+                    {
+                        StartRowTrial();
+                    }
+                    SpheneUI.AttachTooltip(
+                        "Start your free 1-day supporter trial · one-time, then supporter only.");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Rows.Note("The free trial unlocks every supporter surface - nameplate and list row alike.");
+                }
+                else
+                {
+                    SpheneUI.Rows.Note("Row backdrops are a supporter perk · support Sphene on Ko-fi to unlock them.");
+                }
+            }
+        });
+        if (!supporter)
+        {
+            return;
+        }
+
+        DrawStageSeparator();
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        var pinMax = new Vector2(pinMin.X + SpheneUI.Controls.BoundedAvailX(),
+            ImGui.GetCursorScreenPos().Y);
+        var wheel = ImGui.GetIO().MouseWheel;
+        if (MathF.Abs(wheel) > 0.001f && ImGui.IsWindowHovered()
+            && ImGui.IsMouseHoveringRect(
+                pinMin - new Vector2(SpheneUI.Spacing.X12.Scaled, 0f), pinMax))
+        {
+            _scrollNudge = wheel;
+        }
+        var bottomReserve = ImGui.GetStyle().ItemSpacing.Y
+            + SpheneUI.Layout.ScrollAreaContentInset * SpheneUI.Scale;
+        var catalogTop = ImGui.GetCursorScreenPos().Y;
+        var catalogH = SpheneUI.Layout.FillToViewBottomHeight(bottomReserve);
+        var viewBottom = catalogTop + catalogH + bottomReserve;
+        var catalogInset = SpheneUI.Spacing.X12.Scaled;
+        ImGui.SetCursorScreenPos(new Vector2(pinMin.X - catalogInset,
+            ImGui.GetCursorScreenPos().Y));
+        if (SpheneUI.Layout.BeginScrollArea("##rowstudio-cards",
+                new Vector2(pinMax.X - pinMin.X + catalogInset, catalogH),
+                windowFlags: ImGuiWindowFlags.NoBackground, contentPadding: Vector2.Zero))
+        {
+            ImGui.Indent(catalogInset);
+            if (MathF.Abs(_scrollNudge) > 0.001f)
+            {
+                var target = ImGui.GetScrollY()
+                    - _scrollNudge * ImGui.GetTextLineHeightWithSpacing() * 4f;
+                ImGui.SetScrollY(Math.Clamp(target, 0f, ImGui.GetScrollMaxY()));
+            }
+            _scrollNudge = 0f;
+            FullWidth(() =>
+            {
+                SpheneUI.Layout.SectionCard(() =>
+                {
+                    SpheneUI.Profile.ThemeColorRow("Custom accent color",
+                        ref _rowUseAccent, ref _rowAccent);
+                    SpheneUI.Text.Muted("Glow + Pulse are always on - add more below.");
+                    SpheneUI.Profile.FxChips("On hover", ref _rowHoverFx,
+                        ProfileRowFx.HoverMask & ~SpheneProfileTheme.RequiredRowFx, accent);
+                    SpheneUI.Profile.FxChips("While idle", ref _rowIdleFx,
+                        ProfileRowFx.IdleMask & ~SpheneProfileTheme.RequiredRowFx, accent);
+                }, "List row effects", accent,
+                    "Stack as many as you like · they show on your entry in your friends' lists.");
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+                // shipped backdrops - a click only stages, Apply commits
+                SpheneUI.Layout.SectionCard(() =>
+                {
+                    SpheneUI.Text.Muted("One click stages the backdrop · Apply below commits it.");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    var presetSize = new Vector2(96f * SpheneUI.Scale, 30f * SpheneUI.Scale);
+                    var presetGap = 8f * SpheneUI.Scale;
+                    var presetStart = ImGui.GetCursorScreenPos();
+                    var presetRight = presetStart.X + SpheneUI.Controls.BoundedAvailX();
+                    var presetX = presetStart.X;
+                    var presetY = presetStart.Y;
+                    for (var i = 0; i < RowBackdropPresets.All.Length; i++)
+                    {
+                        var preset = RowBackdropPresets.All[i];
+                        if (presetX + presetSize.X > presetRight && presetX > presetStart.X)
+                        {
+                            presetX = presetStart.X;
+                            presetY += presetSize.Y + presetGap;
+                        }
+                        var pos = new Vector2(presetX, presetY);
+                        RowBackdropPresets.DrawSwatch(pos, presetSize, preset, 6f * SpheneUI.Scale);
+                        ImGui.SetCursorScreenPos(pos);
+                        if (ImGui.InvisibleButton($"##rowpreset-{preset.Id}", presetSize))
+                        {
+                            _stagedRowImage = RowBackdropPresets.Base64(preset);
+                        }
+                        SpheneUI.AttachTooltip(preset.Label);
+                        presetX += presetSize.X + presetGap;
+                    }
+                    ImGui.SetCursorScreenPos(new Vector2(presetStart.X, presetY + presetSize.Y));
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+
+                    // custom gradient: two colors + fade direction · inline
+                    // swatches, not ColorEdit rows - the settings-row dock
+                    // would pin both swatches to the card's right edge
+                    SpheneUI.Text.Muted("Or build your own fade:");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Text.Muted("From");
+                    ImGui.SameLine();
+                    SpheneUI.Controls.ColorPickerSwatch("rowfade-from", ref _rowCustomFrom);
+                    ImGui.SameLine();
+                    SpheneUI.Text.Muted("→");
+                    ImGui.SameLine();
+                    SpheneUI.Text.Muted("To");
+                    ImGui.SameLine();
+                    SpheneUI.Controls.ColorPickerSwatch("rowfade-to", ref _rowCustomTo);
+                    ImGui.SameLine();
+                    if (SpheneUI.Icons.TextButton(
+                            _rowCustomReverse ? FontAwesomeIcon.ArrowLeft : FontAwesomeIcon.ArrowRight,
+                            _rowCustomReverse ? "Right → Left" : "Left → Right"))
+                    {
+                        _rowCustomReverse = !_rowCustomReverse;
+                    }
+                    SpheneUI.AttachTooltip("Left color fades into right color · direction toggle flips it");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    if (SpheneUI.Controls.PrimaryButton("Stage fade", FontAwesomeIcon.Check))
+                    {
+                        var from = _rowCustomReverse ? _rowCustomTo : _rowCustomFrom;
+                        var to = _rowCustomReverse ? _rowCustomFrom : _rowCustomTo;
+                        var via = (from + to) * 0.5f;
+                        via.W = 1f;
+                        _stagedRowImage = Convert.ToBase64String(
+                            RowBackdropPresets.Render(new RowBackdropPresets.Preset(
+                                "custom", "Custom", from, via, to)));
+                    }
+                    SpheneUI.AttachTooltip("Generates the fade strip and stages it as your row background");
+                }, "Row background", accent,
+                    "Generated strips and gradients shown behind your entry.");
+
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                SpheneUI.Layout.SectionCard(() =>
+                {
+                    SpheneUI.Text.Muted(rowBytes.Length > 0
+                        ? "Backdrop staged · shown behind your entry with a right-side fade."
+                        : "No backdrop · upload a PNG or GIF cropped to the row strip.");
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    if (SpheneUI.Controls.PrimaryButton("Upload row image", FontAwesomeIcon.FileUpload))
+                    {
+                        _mediator.Publish(new OpenPhotoStudioMessage(null,
+                            PhotoStudioTarget.ProfileRowImage,
+                            prepared => _stagedRowImage = prepared.Base64));
+                    }
+                    SpheneUI.AttachTooltip(
+                        "PNG or GIF · you pick the shown strip in the cropper; animated GIFs play for viewers");
+                    if (rowBytes.Length > 0)
+                    {
+                        ImGui.SameLine();
+                        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Clear"))
+                        {
+                            _stagedRowImage = string.Empty;
+                        }
+                    }
+                }, "Custom image", accent,
+                    "Your own backdrop · staged here, applied below.");
+            });
+            ImGui.Unindent(catalogInset);
+        }
+        _scrollNudge = 0f;
+        SpheneUI.Layout.EndScrollArea();
+
+        var dirty = stagedTheme != theme || _stagedRowImage != null;
+        var resetBtn = new UnsavedChangesToast.Button("Reset", FontAwesomeIcon.Undo,
+            SpheneUI.Colors.Accent, true,
+            "Drop the staged theme and backdrop · back to the live look.",
+            () => ResetRowStage(profile));
+        var toastMsg = "You have unsaved changes";
+        if (!_apiController.IsSupporter && _apiController.SupporterTrialEndsUtc.HasValue)
+        {
+            var hoursLeft = Math.Max(1, (int)Math.Ceiling(
+                (_apiController.SupporterTrialEndsUtc.Value - DateTime.UtcNow).TotalHours));
+            toastMsg = $"Free trial · {hoursLeft}h left";
+        }
+        _unsavedToast.Draw(dirty, toastMsg,
+            (pinMin.X + pinMax.X) * 0.5f, viewBottom, resetBtn,
+            new UnsavedChangesToast.Button("Apply", FontAwesomeIcon.Check,
+                SpheneUI.Palette.LuminousGold, true,
+                "Commit the staged effects, backdrop and upload to your profile.",
+                () => ApplyRowStage(profile), Solid: true));
+    }
+
+    /// <summary>Backdrop bytes under the staged draft - the preview renders
+    /// the staged pick before it is committed.</summary>
+    private byte[] StagedRowBytes(SpheneProfileData profile)
+        => _stagedRowImage == null ? profile.RowImageData.Value
+            : _stagedRowImage.Length == 0 ? []
+            : Convert.FromBase64String(_stagedRowImage);
+
+    /// <summary>Seeds the effect buffers from the stored theme once - and
+    /// again whenever the stored theme changes to something this surface
+    /// neither imported nor wrote itself.</summary>
+    private void EnsureRowThemeSeeded(SpheneProfileData profile)
+    {
+        if (!string.Equals(profile.Theme, _rowThemeSeed, StringComparison.Ordinal)
+            && !string.Equals(profile.Theme, _rowAppliedTheme, StringComparison.Ordinal))
+        {
+            SeedRowTheme(profile);
+        }
+    }
+
+    private void SeedRowTheme(SpheneProfileData profile)
+    {
+        var theme = profile.ProfileTheme.Value;
+        _rowUseAccent = theme.Accent.HasValue;
+        if (theme.Accent.HasValue)
+        {
+            _rowAccent = SpheneProfileTheme.ToVector4(theme.Accent.Value);
+        }
+        _rowHoverFx = theme.RowHover;
+        _rowIdleFx = theme.RowIdle;
+        _rowThemeSeed = profile.Theme;
+        _rowAppliedTheme = null;
+    }
+
+    /// <summary>Drops the staged backdrop and every buffered theme field -
+    /// the preview snaps back to the stored look.</summary>
+    private void ResetRowStage(SpheneProfileData profile)
+    {
+        _stagedRowImage = null;
+        SeedRowTheme(profile);
+    }
+
+    /// <summary>The stored theme with the buffered row fields swapped in -
+    /// every other field (banner, card keys) rides through untouched.</summary>
+    private SpheneProfileTheme RowThemeFromBuffers(SpheneProfileTheme theme) => theme with
+    {
+        Accent = _rowUseAccent ? SpheneProfileTheme.FromVector4(_rowAccent) : null,
+        RowHover = _rowHoverFx,
+        RowIdle = _rowIdleFx,
+    };
+
+    /// <summary>Commits the staged theme fields and the staged backdrop in a
+    /// single profile write - null fields stay untouched, an empty string
+    /// clears the image.</summary>
+    private void ApplyRowStage(SpheneProfileData profile)
+    {
+        var theme = profile.ProfileTheme.Value;
+        var built = RowThemeFromBuffers(theme);
+        var serialized = built != theme ? built.Serialize() : null;
+        if (serialized == null && _stagedRowImage == null)
+        {
+            return;
+        }
+        _rowAppliedTheme = serialized;
+        _ = _apiController.UserSetProfile(new UserProfileDto(
+            new UserData(_apiController.UID), Disabled: false,
+            IsNSFW: null, ProfilePictureBase64: null, Description: null,
+            Theme: serialized, RowImageBase64: _stagedRowImage));
+        _stagedRowImage = null;
+    }
+
+    /// <summary>Activates the one-time 1-day supporter trial server-side ·
+    /// once it lands, <see cref="ApiController.IsSupporterEffective"/> flips
+    /// and this whole surface unlocks on the next frame.</summary>
+    private void StartRowTrial()
+        => _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _apiController.ActivateSupporterTrialAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogInformation("[Studio] row trial activation failed: {err}", ex.Message);
+            }
+        });
+
+    private void DrawOwnRowPreview(SpheneProfileData profile, SpheneProfileTheme theme,
+        byte[] rowBytes, string id, float? width = null)
+    {
+        var rowAnim = rowBytes.Length > 0 ? OwnRowImage(rowBytes) : null;
+        var scale = SpheneUI.Scale;
+        var rowW = width ?? SpheneUI.Controls.BoundedAvailX();
+        var rowH = 46f * scale;
+        var rowPos = ImGui.GetCursorScreenPos();
+        ImGui.InvisibleButton(id, new Vector2(rowW, rowH));
+        var rowHovered = ImGui.IsItemHovered();
+        var rowT = SpheneUI.Fx.HoverT(ImGui.GetID(id), rowHovered);
+        var online = _apiController.IsConnected;
+        SpheneUI.Profile.FriendRow(ImGui.GetWindowDrawList(), rowPos, rowW, rowH,
+            new SpheneUI.Profile.FriendRowContent(
+                OwnAvatar(profile),
+                _apiController.OwnDisplayName ?? "You",
+                online ? "● Online" : "● Offline",
+                online ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted,
+                profile.StatusMessage, profile.IsNSFW),
+            theme.AccentColor(SpheneUI.Palette.LuminousGold), rowHovered, rowT,
+            theme, rowAnim, 8f * scale);
+        ImGui.SetCursorScreenPos(new Vector2(rowPos.X, rowPos.Y + rowH));
+    }
+
+    /// <summary>Own avatar for the preview · profile bytes first, Lodestone
+    /// portrait or the logo as fallback, evicted whenever the bytes change.</summary>
+    private IDalamudTextureWrap? OwnAvatar(SpheneProfileData profile)
+    {
+        var data = profile.ImageData.Value;
+        var key = $"supporterownavatar:{_apiController.UID}";
+        if (!data.SequenceEqual(_ownAvatarBytes))
+        {
+            _ownAvatarBytes = data;
+            SpheneUI.Media.Evict(key);
+        }
+        var wrap = data.Length > 0 ? SpheneUI.Media.Texture(key, data) : null;
+        return wrap ?? (_lodestoneAvatarService.PrefetchedPortrait is { } portrait
+            ? SpheneUI.Media.Texture("lodestone:preview", portrait)
+            : SpheneBrandIcons.SpheneLogo());
+    }
+
+    /// <summary>The owner's row backdrop as a live AnimatedImage - the async
+    /// decoder keeps GIF frames, so this is the same path the style preview
+    /// uses instead of the single-frame preset trick.</summary>
+    private SpheneUI.Media.AnimatedImage? OwnRowImage(byte[] data)
+    {
+        var key = $"supporterownrow:{_apiController.UID}";
+        if (!data.SequenceEqual(_ownRowBytes))
+        {
+            _ownRowBytes = data;
+            SpheneUI.Media.Evict(key);
+        }
+        return SpheneUI.Media.Animated(key, data);
     }
 
     /// <summary>The studio sub-page content (Settings › Supporter › Nameplate Studio).</summary>

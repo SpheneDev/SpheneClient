@@ -76,24 +76,29 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         // Calculate fixed bottom section height
         var buttonHeight = ImGui.GetFrameHeight();
         var spacing = ImGui.GetStyle().ItemSpacing.Y;
-        var separatorHeight = 1.0f;
-        
+        // Separator() spends gap*2 + hairline, not just the hairline - the
+        // estimate must match or the pushed-down bottom section lands below
+        // the window's inner edge.
+        var separatorHeight = SpheneUI.Metrics.Gap * 2f + SpheneUI.Scale;
+
         // Bottom section: separator + auto-show checkbox + rules checkbox (if needed) + error message + buttons + padding
         var bottomSectionHeight = separatorHeight + spacing + // separator
                                  buttonHeight + spacing + // auto-show checkbox
                                  buttonHeight + spacing + // buttons
                                  spacing * 2; // extra padding
-        
+
         // Add rules checkbox if needed
         if (_currentRequest.RequiresRulesAcceptance && !string.IsNullOrEmpty(syncshell.Settings.JoinRules))
         {
             bottomSectionHeight += buttonHeight + spacing; // rules checkbox
         }
-        
-        // Add error message space if present
+
+        // Add error message space if present - Callout boxes spend padY*2
+        // around one to two wrapped text lines.
         if (!string.IsNullOrEmpty(_errorMessage))
         {
-            bottomSectionHeight += 40 + spacing; // error message height
+            bottomSectionHeight += ImGui.GetTextLineHeightWithSpacing()
+                + 16f * SpheneUI.Scale + spacing;
         }
         
         // Rules section - use remaining space but leave room for bottom section
@@ -101,9 +106,11 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
         {
             SpheneUI.Text.SectionHeader("Rules (must be accepted to join)");
 
-            // Calculate available height for rules, ensuring bottom section fits
+            // Calculate available height for rules, ensuring bottom section fits -
+            // a smaller pane floor keeps the buttons on a shrunken window inside
+            // the clip instead of pushing them off the unscrollable edge.
             var availableHeight = ImGui.GetContentRegionAvail().Y;
-            var rulesHeight = Math.Max(100, availableHeight - bottomSectionHeight);
+            var rulesHeight = MathF.Max(60f * SpheneUI.Scale, availableHeight - bottomSectionHeight);
 
             if (SpheneUI.Layout.BeginScrollArea("RulesText", new Vector2(0, rulesHeight), border: true))
             {

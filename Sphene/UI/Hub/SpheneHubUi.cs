@@ -113,16 +113,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private Vector4 _styleAccent = new(0.30f, 0.80f, 0.95f, 1f);
     private Vector4 _styleTop = new(0.30f, 0.80f, 0.95f, 1f);
     private Vector4 _styleBottom = new(0.40f, 0.30f, 0.80f, 1f);
-    private ProfileRowFx _styleHoverFx = ProfileRowFx.Glow;
-    private ProfileRowFx _styleIdleFx = ProfileRowFx.None;
-    private ProfileRowFx _styleCardHoverFx = ProfileRowFx.None;
-    private ProfileRowFx _styleCardIdleFx = ProfileRowFx.None;
-    private bool _styleCardShimmer = true;
-    private int _stylePreviewTab;
-    private byte[] _ownRowImageBytes = [];
-    private Vector4 _rowCustomFrom = new(0.05f, 0.45f, 0.55f, 1f);
-    private Vector4 _rowCustomTo = new(0.02f, 0.05f, 0.20f, 1f);
-    private bool _rowCustomReverse;
+    private SpheneProfileTheme _styleBaseTheme = SpheneProfileTheme.Default;
     private string? _selectedGroupGid;
     private SyncshellDetailTab _syncshellDetailTab = SyncshellDetailTab.Community;
     private long? _pendingEditEventId;
@@ -1848,7 +1839,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             currentLabel = _settingsUi.ActiveCrumbLabel;
         }
         else if (_activePage == SpheneHubPage.Supporter
-            && _settingsUi.ActiveSettingsPageValue == SettingsUi.SettingsPage.SupporterNameplate)
+            && _settingsUi.ActiveSettingsPageValue is SettingsUi.SettingsPage.SupporterNameplate
+                or SettingsUi.SettingsPage.SupporterListRow)
         {
             parentLabel = PageCrumbLabel(SpheneHubPage.Supporter);
             parentTarget = new HubLocation(SpheneHubPage.Supporter, null, null, (int)SettingsUi.SettingsPage.Supporter);
@@ -2373,14 +2365,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     private void SeedStyleBuffers(SpheneProfileTheme theme)
     {
+        _styleBaseTheme = theme;
         _styleUseAccent = theme.Accent.HasValue;
         _styleUseTop = theme.BannerTop.HasValue;
         _styleUseBottom = theme.BannerBottom.HasValue;
-        _styleHoverFx = theme.RowHover;
-        _styleIdleFx = theme.RowIdle;
-        _styleCardHoverFx = theme.CardHover;
-        _styleCardIdleFx = theme.CardIdle;
-        _styleCardShimmer = theme.CardShimmer;
         _styleTopOver = theme.BannerTopOver;
         _styleBottomOver = theme.BannerBottomOver;
         if (theme.Accent.HasValue) _styleAccent = SpheneProfileTheme.ToVector4(theme.Accent.Value);
@@ -2388,13 +2376,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         if (theme.BannerBottom.HasValue) _styleBottom = SpheneProfileTheme.ToVector4(theme.BannerBottom.Value);
     }
 
-    /// <summary>The style buffers projected as a live-preview theme.</summary>
-    private SpheneProfileTheme PreviewStyleTheme() => new(
-        _styleUseAccent ? SpheneProfileTheme.FromVector4(_styleAccent) : null,
-        _styleUseTop ? SpheneProfileTheme.FromVector4(_styleTop) : null,
-        _styleUseBottom ? SpheneProfileTheme.FromVector4(_styleBottom) : null,
-        _styleHoverFx, _styleIdleFx, _styleTopOver, _styleBottomOver,
-        _styleCardHoverFx, _styleCardIdleFx, _styleCardShimmer);
+    /// <summary>The style buffers projected as a live-preview theme · fields
+    /// the editor no longer owns (row/card effects, shimmer) ride through
+    /// from the stored theme so saving cannot wipe them.</summary>
+    private SpheneProfileTheme PreviewStyleTheme() => _styleBaseTheme with
+    {
+        Accent = _styleUseAccent ? SpheneProfileTheme.FromVector4(_styleAccent) : null,
+        BannerTop = _styleUseTop ? SpheneProfileTheme.FromVector4(_styleTop) : null,
+        BannerBottom = _styleUseBottom ? SpheneProfileTheme.FromVector4(_styleBottom) : null,
+        BannerTopOver = _styleTopOver,
+        BannerBottomOver = _styleBottomOver,
+    };
 
     /// <summary>
     /// Dedicated style page reached via the hero's "Style" action or the
@@ -2408,65 +2400,30 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private void DrawStylePage(Vector4 pageAccent)
     {
         var accent = PreviewStyleTheme().AccentColor(pageAccent);
-        if (_stylePreviewTab == 0)
+        // the profile card is the only styled surface left - list-row
+        // styling moved to the supporter list-row studio entirely
+        SpheneUI.Layout.SectionCard(() =>
         {
-            // profile-card context: accent plus everything that touches the
-            // banner/card surface · nothing list-row related
-            SpheneUI.Layout.SectionCard(() =>
+            SpheneUI.Profile.ThemeColorRow("Custom accent color",
+                ref _styleUseAccent, ref _styleAccent);
+            SpheneUI.Profile.ThemeColorRow("Custom banner top color",
+                ref _styleUseTop, ref _styleTop);
+            if (_styleUseTop)
             {
-                SpheneUI.Profile.ThemeColorRow("Custom accent color",
-                    ref _styleUseAccent, ref _styleAccent);
-                SpheneUI.Profile.ThemeColorRow("Custom banner top color",
-                    ref _styleUseTop, ref _styleTop);
-                if (_styleUseTop)
-                {
-                    SpheneUI.Controls.Toggle("Over banner image##topover", ref _styleTopOver,
-                        indented: true);
-                    SpheneUI.AttachTooltip("Blend the top color over your banner image instead of replacing it");
-                }
-                SpheneUI.Profile.ThemeColorRow("Custom banner bottom color",
-                    ref _styleUseBottom, ref _styleBottom);
-                if (_styleUseBottom)
-                {
-                    SpheneUI.Controls.Toggle("Over banner image##bottomover",
-                        ref _styleBottomOver, indented: true);
-                    SpheneUI.AttachTooltip("Blend the bottom color over your banner image instead of replacing it");
-                }
-            }, "Appearance", accent,
-                "Colors and banner blending your profile card shows to you and paired users.");
-            SpheneUI.Layout.SectionCard(() =>
+                SpheneUI.Controls.Toggle("Over banner image##topover", ref _styleTopOver,
+                    indented: true);
+                SpheneUI.AttachTooltip("Blend the top color over your banner image instead of replacing it");
+            }
+            SpheneUI.Profile.ThemeColorRow("Custom banner bottom color",
+                ref _styleUseBottom, ref _styleBottom);
+            if (_styleUseBottom)
             {
-                SpheneUI.Controls.Toggle("Ambient card shimmer##cardshimmer",
-                    ref _styleCardShimmer);
-                SpheneUI.AttachTooltip(
-                    "The card's built-in sheen sweep and border pulse · turn it off for a still card or to let your picked effects stand alone");
-                SpheneUI.Profile.FxChips("On hover", ref _styleCardHoverFx,
-                    ProfileRowFx.HoverMask, accent);
-                SpheneUI.Profile.FxChips("While idle", ref _styleCardIdleFx,
-                    ProfileRowFx.IdleMask, accent);
-            }, "Profile card effects", accent,
-                "Stack as many as you like · they play on your profile card for everyone who views it.");
-        }
-        else
-        {
-            // list-row context: the shared accent plus row effects and the
-            // supporter row image · no banner controls here
-            SpheneUI.Layout.SectionCard(() =>
-            {
-                SpheneUI.Profile.ThemeColorRow("Custom accent color",
-                    ref _styleUseAccent, ref _styleAccent);
-                SpheneUI.Text.Muted("Glow + Pulse are always on - add more below.");
-                SpheneUI.Profile.FxChips("On hover", ref _styleHoverFx,
-                    ProfileRowFx.HoverMask & ~SpheneProfileTheme.RequiredRowFx, accent);
-                SpheneUI.Profile.FxChips("While idle", ref _styleIdleFx,
-                    ProfileRowFx.IdleMask & ~SpheneProfileTheme.RequiredRowFx, accent);
-            }, "List row effects", accent,
-                "Stack as many as you like · they show on your entry in your friends' lists.");
-            SpheneUI.Layout.SectionCard(() =>
-            {
-                DrawRowImageSection();
-            }, "Row background", accent);
-        }
+                SpheneUI.Controls.Toggle("Over banner image##bottomover",
+                    ref _styleBottomOver, indented: true);
+                SpheneUI.AttachTooltip("Blend the bottom color over your banner image instead of replacing it");
+            }
+        }, "Appearance", accent,
+            "Colors and banner blending your profile card shows to you and paired users.");
 
         var toastPos = ImGui.GetWindowPos();
         var toastSize = ImGui.GetWindowSize();
@@ -2500,9 +2457,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var displayName = OwnHeroName();
 
         var previewTheme = PreviewStyleTheme();
-        var accent = previewTheme.AccentColor(pageAccent);
-        var drawList = ImGui.GetWindowDrawList();
-        var headerW = SpheneUI.Layout.CardAlignedAvailX();
 
         var pfpWrap = _profileAvatarBytes != null
             ? GetFriendTexture("hub:profile-draft:avatar", _profileAvatarBytes,
@@ -2513,14 +2467,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 ref _lastDraftBannerBytes)
             : GetBannerTexture(previewProfile);
 
-        _stylePreviewTab = SpheneUI.Layout.TabStrip("hubstyle_tabs",
-            _styleTabLabels, _stylePreviewTab);
-        // Save/Reset dock into the pinned tab row · primary actions stay
-        // reachable instead of hiding below the scrollable settings fold.
+        // Save/Reset stay docked right on the action row · the profile card
+        // is the only styled surface, so there is no preview tab strip.
         var spacing = ImGui.GetStyle().ItemSpacing.X;
         var actionWidth = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Save, "Save style")
             + SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.Undo, "Reset") + spacing;
-        ImGui.SameLine();
         ImGui.SetCursorPosX(ImGui.GetCursorPosX()
             + MathF.Max(0f, ImGui.GetContentRegionAvail().X - actionWidth));
         if (SpheneUI.Controls.PrimaryButton("Save style", FontAwesomeIcon.Save))
@@ -2541,42 +2492,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _styleSeeded = false;
             LeaveStylePage();
         }
-        if (_stylePreviewTab == 0)
-        {
-            // the complete profile surface, live-bound to the unsaved buffers  ·
-            // exactly what viewers see (banner, avatar, name, status, tags).
-            // Bounded to the preview column so the banner does not bleed
-            // mid-page.
-            var previewMin = ImGui.GetCursorScreenPos();
-            SpheneUI.Profile.Hero(displayName, OwnHeroSubtitle(), previewProfile,
-                pfpWrap, bannerWrap, previewTheme,
-                pageAccent, SpheneTheme.Current.AccentBlue,
-                isNsfw: previewProfile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo(),
-                host: new SpheneUI.Profile.HeroHost(previewMin,
-                    previewMin + new Vector2(ImGui.GetContentRegionAvail().X, 0f)));
-        }
-        else
-        {
-            // the REAL friends-list row with your own data · same renderer as
-            // the friends list, so the preview is exactly what friends see
-            var rowBytes = StagedRowImageBytes(previewProfile);
-            var rowAnim = rowBytes.Length > 0 ? GetOwnRowImage(rowBytes) : null;
-            var rowH = 46f * scale;
-            var rowPos = ImGui.GetCursorScreenPos();
-            ImGui.InvisibleButton("##ownrowprev", new Vector2(headerW, rowH));
-            var rowHovered = ImGui.IsItemHovered();
-            var rowT = SpheneUI.Fx.HoverT(ImGui.GetID("##ownrowprev"), rowHovered);
-            var online = _apiController.IsConnected;
-            SpheneUI.Profile.FriendRow(drawList, rowPos, headerW, rowH,
-                new SpheneUI.Profile.FriendRowContent(
-                    pfpWrap, displayName,
-                    online ? "● Online" : "● Offline",
-                    online ? SpheneUI.Palette.NetworkActive : SpheneUI.Colors.TextMuted,
-                    previewProfile.StatusMessage, previewProfile.IsNSFW),
-                accent, rowHovered, rowT, previewTheme, rowAnim, 8f * scale);
-            SpheneUI.Text.Muted(
-                "Hover the row · this is exactly how your entry looks in your friends' lists.");
-        }
+        // the complete profile surface, live-bound to the unsaved buffers  ·
+        // exactly what viewers see (banner, avatar, name, status, tags).
+        // Bounded to the preview column so the banner does not bleed
+        // mid-page.
+        var previewMin = ImGui.GetCursorScreenPos();
+        SpheneUI.Profile.Hero(displayName, OwnHeroSubtitle(), previewProfile,
+            pfpWrap, bannerWrap, previewTheme,
+            pageAccent, SpheneTheme.Current.AccentBlue,
+            isNsfw: previewProfile.IsNSFW, watermark: SpheneBrandIcons.SpheneLogo(),
+            host: new SpheneUI.Profile.HeroHost(previewMin,
+                previewMin + new Vector2(ImGui.GetContentRegionAvail().X, 0f)));
         ImGui.Dummy(new Vector2(0f, 8f * scale));
     }
 
@@ -2591,143 +2517,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             SetPage(SpheneHubPage.Profile);
         }
-    }
-
-    private static readonly IReadOnlyList<string> _styleTabLabels = ["Profile card", "List row"];
-
-    /// <summary>Supporter-gated animated row background (PNG or GIF) inside the style popup.</summary>
-    private void DrawRowImageSection()
-    {
-        if (!_apiController.IsSupporterEffective)
-        {
-            SpheneUI.Text.Muted(
-                "Supporters can set an animated row background (PNG or GIF) shown "
-                + "behind their entry in friends' lists · fading out to the right.");
-            return;
-        }
-
-        var ownData = new UserData(_apiController.UID);
-        var rowBytes = StagedRowImageBytes(
-            _spheneProfileManager.GetSpheneProfile(ownData));
-        SpheneUI.Text.Muted(rowBytes.Length > 0
-            ? "Row image set · preview it live on the \"List row\" tab above."
-            : "No row background set · your rows use the theme effects only.");
-
-        // shipped backdrops - one click applies, no upload needed
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        var presetSize = new Vector2(96f * SpheneUI.Scale, 30f * SpheneUI.Scale);
-        var presetGap = 8f * SpheneUI.Scale;
-        var presetStart = ImGui.GetCursorScreenPos();
-        var presetRight = presetStart.X + SpheneUI.Controls.BoundedAvailX();
-        var presetX = presetStart.X;
-        var presetY = presetStart.Y;
-        for (var i = 0; i < RowBackdropPresets.All.Length; i++)
-        {
-            var preset = RowBackdropPresets.All[i];
-            if (presetX + presetSize.X > presetRight && presetX > presetStart.X)
-            {
-                presetX = presetStart.X;
-                presetY += presetSize.Y + presetGap;
-            }
-            var pos = new Vector2(presetX, presetY);
-            RowBackdropPresets.DrawSwatch(pos, presetSize, preset, 6f * SpheneUI.Scale);
-            ImGui.SetCursorScreenPos(pos);
-            if (ImGui.InvisibleButton($"##rowpreset-{preset.Id}", presetSize))
-            {
-                StageProfilePatch(new UserProfileDto(ownData, Disabled: false,
-                    IsNSFW: null, ProfilePictureBase64: null, Description: null,
-                    RowImageBase64: RowBackdropPresets.Base64(preset)));
-            }
-            SpheneUI.AttachTooltip(preset.Label);
-            presetX += presetSize.X + presetGap;
-        }
-        ImGui.SetCursorScreenPos(new Vector2(presetStart.X, presetY + presetSize.Y));
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-
-        // custom gradient: two colors + fade direction, generated on apply
-        SpheneUI.Text.Muted("Or build your own fade:");
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        ImGui.SetNextItemWidth(120f * SpheneUI.Scale);
-        SpheneUI.Controls.ColorEdit("From", ref _rowCustomFrom);
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(120f * SpheneUI.Scale);
-        SpheneUI.Controls.ColorEdit("To", ref _rowCustomTo);
-        ImGui.SameLine();
-        if (SpheneUI.Icons.TextButton(
-                _rowCustomReverse ? FontAwesomeIcon.ArrowLeft : FontAwesomeIcon.ArrowRight,
-                _rowCustomReverse ? "Right → Left" : "Left → Right"))
-        {
-            _rowCustomReverse = !_rowCustomReverse;
-        }
-        SpheneUI.AttachTooltip("Left color fades into right color · direction toggle flips it");
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        if (SpheneUI.Controls.PrimaryButton("Apply fade", FontAwesomeIcon.Check))
-        {
-            var from = _rowCustomReverse ? _rowCustomTo : _rowCustomFrom;
-            var to = _rowCustomReverse ? _rowCustomFrom : _rowCustomTo;
-            var via = (from + to) * 0.5f;
-            via.W = 1f;
-            StageProfilePatch(new UserProfileDto(ownData, Disabled: false,
-                IsNSFW: null, ProfilePictureBase64: null, Description: null,
-                RowImageBase64: Convert.ToBase64String(
-                    RowBackdropPresets.Render(new RowBackdropPresets.Preset(
-                        "custom", "Custom", from, via, to)))));
-        }
-        SpheneUI.AttachTooltip("Generates the fade strip and sets it as your row background");
-
-        if (SpheneUI.Controls.PrimaryButton("Upload row image", FontAwesomeIcon.FileUpload))
-        {
-            PickRowImage();
-        }
-        SpheneUI.AttachTooltip(
-            "PNG or GIF · you pick the shown strip in the cropper; animated GIFs play for viewers");
-        if (rowBytes.Length > 0)
-        {
-            ImGui.SameLine();
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Trash, "Clear"))
-            {
-                StageProfilePatch(new UserProfileDto(ownData,
-                    Disabled: false, IsNSFW: null, ProfilePictureBase64: null, Description: null,
-                    RowImageBase64: ""));
-            }
-        }
-    }
-
-    /// <summary>Row-image bytes with the staged draft applied · an empty
-    /// staged string clears the background.</summary>
-    private byte[] StagedRowImageBytes(SpheneProfileData profile)
-    {
-        var staged = _profilePatch?.RowImageBase64;
-        if (staged == null)
-        {
-            return profile.RowImageData.Value;
-        }
-        return staged.Length == 0 ? [] : Convert.FromBase64String(staged);
-    }
-
-    private SpheneUI.Media.AnimatedImage? GetOwnRowImage(byte[] data)
-    {
-        var key = $"hubstylerow:{_apiController.UID}";
-        if (!_ownRowImageBytes.SequenceEqual(data))
-        {
-            _ownRowImageBytes = data;
-            SpheneUI.Media.Evict(key);
-        }
-        return SpheneUI.Media.Animated(key, data);
-    }
-
-    /// <summary>
-    /// Opens the photo studio's file browser locked to the row strip's exact
-    /// aspect · the rendered result (downscaled, GIFs keep their animation) is
-    /// uploaded as the row background.
-    /// </summary>
-    private void PickRowImage()
-    {
-        Mediator.Publish(new OpenPhotoStudioMessage(null, PhotoStudioTarget.ProfileRowImage,
-            prepared => StageProfilePatch(new UserProfileDto(
-                new UserData(_apiController.UID), Disabled: false,
-                IsNSFW: null, ProfilePictureBase64: null, Description: null,
-                RowImageBase64: prepared.Base64))));
     }
 
     private void SeedHeroEditBuffers(SpheneProfileData profile)
@@ -4068,7 +3857,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         ImGui.SetCursorScreenPos(new Vector2(pos.X + width - actPad - actBtn,
             pos.Y + (rowH - actBtn) * 0.5f));
-        if (SpheneUI.Icons.Button(actionIcon))
+        // Icons.Button seeds its widget id from the glyph alone - every row
+        // sharing the same action icon would collide on one id, so the
+        // button runs under the row's own scope (same fix the friend strip
+        // uses); width keeps the widget inside the reserved action column.
+        using var handleActionScope = ImRaii.PushId($"handle-actions-{rowKey}");
+        if (SpheneUI.Icons.Button(actionIcon, height: actBtn, width: actBtn))
         {
             onAction();
         }
@@ -4121,7 +3915,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // The card button must not cover the accept/decline strip - the
         // first-submitted widget claims the hover id and would swallow
         // every click meant for the two action buttons.
-        var clicked = ImGui.InvisibleButton("##req",
+        var clicked = ImGui.InvisibleButton($"##req{pair.UserData.UID}",
             new Vector2(cellW, cardH - pad - btnH - 2f * scale));
         var hovered = ImGui.IsItemHovered();
         var min = pos;
@@ -4180,7 +3974,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var half = (cellW - pad * 2 - SpheneUI.Spacing.X4.Scaled) * 0.5f;
         var btnY = max.Y - pad - btnH;
         ImGui.SetCursorScreenPos(new Vector2(min.X + pad, btnY));
-        if (SpheneUI.Controls.SegmentButton("Accept##acc",
+        if (SpheneUI.Controls.SegmentButton($"Accept##acc{pair.UserData.UID}",
                 size: new Vector2(half, btnH), accent: accent, active: true))
         {
             _pairManager.MarkInboundIndividualPairRequestSeen(pair.UserData.UID);
@@ -4188,7 +3982,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         ImGui.SetCursorScreenPos(new Vector2(min.X + pad + half
             + SpheneUI.Spacing.X4.Scaled, btnY));
-        if (SpheneUI.Controls.SegmentButton("Decline##dec",
+        if (SpheneUI.Controls.SegmentButton($"Decline##dec{pair.UserData.UID}",
                 size: new Vector2(half, btnH)))
         {
             _pairManager.DeclineInboundIndividualPairRequest(pair.UserData.UID);
