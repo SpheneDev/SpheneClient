@@ -54,4 +54,35 @@ public static class ReactionBar
         }
         ImGui.PopID();
     }
+
+    /// <summary>Passive strip of already-cast reactions - only kinds with a
+    /// positive count render and nothing is clickable. For surfaces where
+    /// the viewer must not add a reaction (e.g. their own comment).</summary>
+    public static void DrawReadOnly(ReactionTargetKind targetKind, long targetId,
+        ReactionSummaryDto? summary)
+    {
+        var counts = summary?.Counts;
+        if (counts == null) return;
+        var any = false;
+        foreach (var kv in counts)
+        {
+            if (kv.Value > 0) { any = true; break; }
+        }
+        if (!any) return;
+        ImGui.PushID($"rxn-ro-{targetKind}-{targetId}");
+        var first = true;
+        for (var i = 0; i < Kinds.Length; i++)
+        {
+            var (kind, icon, tip) = Kinds[i];
+            var count = counts.GetValueOrDefault((int)kind);
+            if (count <= 0) continue;
+            if (!first) ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+            first = false;
+            SpheneUI.Icons.Icon(icon, SpheneUI.Colors.TextMuted);
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            SpheneUI.Text.Muted($"{count}");
+            SpheneUI.AttachTooltip($"{tip} · {count}");
+        }
+        ImGui.PopID();
+    }
 }

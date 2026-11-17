@@ -132,6 +132,15 @@ public partial class ApiController
         return await _spheneHub!.InvokeAsync<bool>(nameof(UserDeleteProfileBlogPost), dto).ConfigureAwait(false);
     }
 
+    /// <summary>Fire-and-forget "seen" marker for a Chronicle the caller just
+    /// opened - the server dedups per (post, viewer) and skips self-reads.</summary>
+    public async Task UserMarkBlogPostViewed(long postId)
+    {
+        if (!IsConnected) return;
+        await _spheneHub!.SendAsync(nameof(UserMarkBlogPostViewed), postId)
+            .ConfigureAwait(false);
+    }
+
     // Track last push data time per session to debounce rapid successive pushes (e.g., after zoning)
     private DateTime _lastPushDataTime = DateTime.MinValue;
     private const int PushDataDebounceMs = 500; // Minimum 500ms between data pushes to prevent duplicates

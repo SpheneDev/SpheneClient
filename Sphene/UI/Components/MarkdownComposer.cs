@@ -86,7 +86,7 @@ public sealed class MarkdownComposer
     private int _mentionIndex;
 
     private readonly string _id;
-    private bool _preview = true;
+    private bool _preview;
     private string _error = string.Empty;
     private Task<byte[]?>? _uploadTask;
     private int _refPickerTab;
@@ -99,6 +99,10 @@ public sealed class MarkdownComposer
     /// surface - the inline toggle + preview block are suppressed.</summary>
     public bool ShowPreview { get; set; } = true;
 
+    /// <summary>Plain-text mode (comments): no formatting toolbar, no
+    /// preview toggle - the body is entered and rendered verbatim.</summary>
+    public bool PlainText { get; set; }
+
     public MarkdownComposer(string id) => _id = id;
 
     /// <summary>Image-source hook for <see cref="MarkdownRenderer"/> - maps
@@ -108,7 +112,8 @@ public sealed class MarkdownComposer
             ? MediaClient?.TryGetBytes(url[6..])
             : null;
 
-    /// <summary>Draws toolbar + input + optional live preview.
+    /// <summary>Draws toolbar + input, the input slot swapping in place
+    /// to a rendered preview when the toolbar's eye toggle is on.
     /// <paramref name="body"/> is the bound text - edits write through.
     /// Returns the current validation error (empty when valid).</summary>
     public string Draw(string label, ref string body, int maxLength = DefaultMaxLength,
@@ -116,7 +121,12 @@ public sealed class MarkdownComposer
     {
         var scale = SpheneUI.Scale;
         var h = height < 0f ? 110f * scale : height;
-        DrawToolbar(scale, ref body);
+        var previewing = !PlainText && ShowPreview && _preview
+            && !string.IsNullOrWhiteSpace(body);
+        if (!PlainText)
+        {
+            DrawToolbar(scale, ref body, previewing);
+        }
         if (!string.IsNullOrEmpty(_error))
         {
             SpheneUI.Text.Colored(_error, SpheneUI.Palette.Warning);
@@ -129,15 +139,21 @@ public sealed class MarkdownComposer
             _refocus = false;
             ImGui.SetKeyboardFocusHere();
         }
-        var flags = ImGuiInputTextFlags.CallbackAlways;
-        SpheneUI.Controls.InputTextMultiline(label, ref body, maxLength,
-            new Vector2(-1f, h), flags, OnInputCallback, ref _edit,
-            trailingWidth: 0f, preferredWidth: -1f);
-        if (body.Length > maxLength - maxLength / 10)
+        if (previewing)
         {
-            SpheneUI.Text.Muted($"{body.Length}/{maxLength}");
+            DrawPreviewPane(body, h);
         }
-        DrawPreviewToggle(body);
+        else
+        {
+            var flags = ImGuiInputTextFlags.CallbackAlways;
+            SpheneUI.Controls.InputTextMultiline(label, ref body, maxLength,
+                new Vector2(-1f, h), flags, OnInputCallback, ref _edit,
+                trailingWidth: 0f, preferredWidth: -1f);
+            if (body.Length > maxLength - maxLength / 10)
+            {
+                SpheneUI.Text.Muted($"{body.Length}/{maxLength}");
+            }
+        }
         return Validate(body, maxLength);
     }
 
@@ -260,7 +276,7 @@ public sealed class MarkdownComposer
         return s.Length;
     }
 
-    private void DrawToolbar(float scale, ref string body)
+    private void DrawToolbar(float scale, ref string body, bool previewing)
     {
         var gap = SpheneUI.Spacing.X2.Scaled;
         ImGui.PushID(_id);
@@ -283,47 +299,69 @@ public sealed class MarkdownComposer
             ImGui.SameLine(0f, gap);
         }
 
-        WrapBtn(FontAwesomeIcon.Bold, "Bold", "**", "**");
-        WrapBtn(FontAwesomeIcon.Italic, "Italic", "*", "*");
-        WrapBtn(FontAwesomeIcon.Underline, "Underline", "__", "__");
-        WrapBtn(FontAwesomeIcon.Strikethrough, "Strikethrough", "~~", "~~");
-        WrapBtn(FontAwesomeIcon.EyeSlash, "Spoiler", "||", "||");
-        InsertBtn(FontAwesomeIcon.ExclamationCircle, "Callout block",
-            "\n::: info\nCallout\n:::\n", 10);
-        InsertBtn(FontAwesomeIcon.Table, "Table",
-            "\n| col | col |\n|---|---|\n| a | b |\n", 3);
-        InsertBtn(FontAwesomeIcon.ListUl, "List", "\n- item\n- item\n", 3);
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.Link))
+        // formatting writes through the input callback - inert while the
+        // preview pane owns the slot
+        using (ImRaii.Disabled(previewing))
         {
-            QueueLink();
+            WrapBtn(FontAwesomeIcon.Bold, "Bold", "**", "**");
+            WrapBtn(FontAwesomeIcon.Italic, "Italic", "*", "*");
+            WrapBtn(FontAwesomeIcon.Underline, "Underline", "__", "__");
+            WrapBtn(FontAwesomeIcon.Strikethrough, "Strikethrough", "~~", "~~");
+            WrapBtn(FontAwesomeIcon.EyeSlash, "Spoiler", "||", "||");
+            InsertBtn(FontAwesomeIcon.ExclamationCircle, "Callout block",
+                "\n::: info\nCallout\n:::\n", 10);
+            InsertBtn(FontAwesomeIcon.Table, "Table",
+                "\n| col | col |\n|---|---|\n| a | b |\n", 3);
+            InsertBtn(FontAwesomeIcon.ListUl, "List", "\n- item\n- item\n", 3);
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Link))
+            {
+                QueueLink();
+            }
+            SpheneUI.AttachTooltip("Link (selection becomes the label)");
+            ImGui.SameLine(0f, gap);
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.TextHeight))
+            {
+                SpheneUI.Popups.OpenFlyout("size-" + _id);
+            }
+            SpheneUI.AttachTooltip("Text size");
+            ImGui.SameLine(0f, gap);
+            var colorOpen = SpheneUI.Popups.IsFlyoutOpen("color-" + _id);
+            if (SpheneUI.Controls.ColorSwatch("##mccolor" + _id,
+                    ParseHex(_colorHex) ?? SpheneUI.Colors.Accent, selected: colorOpen))
+            {
+                SpheneUI.Popups.ToggleFlyout("color-" + _id);
+            }
+            SpheneUI.AttachTooltip("Text color");
+            ImGui.SameLine(0f, gap);
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Image))
+            {
+                SpheneUI.Popups.OpenFlyout("img-" + _id);
+            }
+            SpheneUI.AttachTooltip("Image (uploads to the media store)");
+            ImGui.SameLine(0f, gap);
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.At))
+            {
+                SpheneUI.Popups.OpenFlyout("ref-" + _id);
+            }
+            SpheneUI.AttachTooltip("Entity reference");
         }
-        SpheneUI.AttachTooltip("Link (selection becomes the label)");
-        ImGui.SameLine(0f, gap);
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.TextHeight))
+        if (ShowPreview)
         {
-            SpheneUI.Popups.OpenFlyout("size-" + _id);
+            // mode swap docked at the toolbar row's right edge - the eye
+            // switches the input slot to the preview pane and back
+            var toggleIcon = previewing ? FontAwesomeIcon.Pen : FontAwesomeIcon.Eye;
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX()
+                + ImGui.GetContentRegionAvail().X
+                - SpheneUI.Icons.ButtonSize(toggleIcon).X);
+            using (ImRaii.Disabled(string.IsNullOrWhiteSpace(body)))
+            {
+                if (SpheneUI.Icons.Button(toggleIcon))
+                {
+                    _preview = !_preview;
+                }
+            }
+            SpheneUI.AttachTooltip(previewing ? "Back to editing" : "Preview");
         }
-        SpheneUI.AttachTooltip("Text size");
-        ImGui.SameLine(0f, gap);
-        var colorOpen = SpheneUI.Popups.IsFlyoutOpen("color-" + _id);
-        if (SpheneUI.Controls.ColorSwatch("##mccolor" + _id,
-                ParseHex(_colorHex) ?? SpheneUI.Colors.Accent, selected: colorOpen))
-        {
-            SpheneUI.Popups.ToggleFlyout("color-" + _id);
-        }
-        SpheneUI.AttachTooltip("Text color");
-        ImGui.SameLine(0f, gap);
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.Image))
-        {
-            SpheneUI.Popups.OpenFlyout("img-" + _id);
-        }
-        SpheneUI.AttachTooltip("Image (uploads to the media store)");
-        ImGui.SameLine(0f, gap);
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.At))
-        {
-            SpheneUI.Popups.OpenFlyout("ref-" + _id);
-        }
-        SpheneUI.AttachTooltip("Entity reference");
         ImGui.NewLine();
         ImGui.PopID();
 
@@ -648,35 +686,19 @@ public sealed class MarkdownComposer
         };
     }
 
-    private void DrawPreviewToggle(string body)
+    /// <summary>The input slot's preview mode: a bordered pane of the same
+    /// height rendering the markdown - the slot swaps, nothing renders
+    /// underneath. <see cref="ImGuiCol.FrameBg"/> matches the input box.</summary>
+    private void DrawPreviewPane(string body, float h)
     {
-        if (!ShowPreview)
+        var frameBg = ImGui.GetStyle().Colors[(int)ImGuiCol.FrameBg];
+        using var bgScope = ImRaii.PushColor(ImGuiCol.ChildBg,
+            ImGui.ColorConvertFloat4ToU32(frameBg));
+        using var pane = ImRaii.Child($"##mdpreview-{_id}", new Vector2(-1f, h),
+            border: true, ImGuiWindowFlags.None);
+        if (pane.Success)
         {
-            return;
+            MarkdownRenderer.RenderMarkdown(body, 0, MediaImageSource);
         }
-        var show = _preview;
-        if (SpheneUI.Controls.Toggle("Preview", ref show))
-        {
-            _preview = show;
-        }
-        if (!_preview || string.IsNullOrWhiteSpace(body))
-        {
-            return;
-        }
-        // Flat preview - never a Surface here: card helpers split the window
-        // draw list into channels and cannot nest inside a host card's
-        // in-flight split, or the host's deferred background overdraws its
-        // own content (the "editor eats the card" defect).
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        var dl = ImGui.GetWindowDrawList();
-        var linePos = ImGui.GetCursorScreenPos();
-        var bound = SpheneUI.Layout.ContentRightBound;
-        var right = bound > 0f ? bound : linePos.X + ImGui.GetContentRegionAvail().X;
-        dl.AddLine(linePos, new Vector2(right, linePos.Y),
-            SpheneUI.ColorUtils.ToU32(
-                SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.Border, 0.5f)));
-        ImGui.Dummy(new Vector2(0f, SpheneUI.Spacing.X4.Scaled));
-        SpheneUI.Text.Muted("Preview");
-        MarkdownRenderer.RenderMarkdown(body, 0, MediaImageSource);
     }
 }

@@ -15,9 +15,12 @@ namespace Sphene.UI.Components;
 /// </summary>
 internal static class FeedItemRow
 {
-    /// <summary>Draws the row; returns true when clicked.</summary>
+    /// <summary>Draws the row; returns true when clicked.
+    /// <paramref name="extraMeta"/> appends a caller-supplied segment to the
+    /// meta line (e.g. "12 views · 3 comments" on Chronicle list rows).</summary>
     public static bool Draw(string id, SyncshellCommunityFeedItemDto item,
-        string texturePrefix, Vector4? fallbackAccent = null)
+        string texturePrefix, Vector4? fallbackAccent = null,
+        string? extraMeta = null)
     {
         var scale = SpheneUI.Scale;
         var accent = SyncshellCommunityView.ParseAccent(item.AccentColor)
@@ -118,6 +121,10 @@ internal static class FeedItemRow
                 ? $"{actor} · {RelativeTime(item.TimestampUtc)}"
                 : $"{actor} · {shellName} · {RelativeTime(item.TimestampUtc)}")
             : $"{shellName} · {RelativeTime(item.TimestampUtc)}";
+        if (!string.IsNullOrEmpty(extraMeta))
+        {
+            meta += " · " + extraMeta;
+        }
         dl.AddText(new Vector2(textX, titleY + lineH),
             SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted),
             SpheneUI.Text.Ellipsize(meta, MathF.Max(40f, textRight - textX)));

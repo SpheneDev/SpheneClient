@@ -475,7 +475,12 @@ internal sealed class CommunityComposers
                 try
                 {
                     var saved = await _apiController.UpsertComment(dto).ConfigureAwait(false);
-                    if (saved != null) await refresh().ConfigureAwait(false);
+                    // edits patch the thread in place - only a new comment
+                    // changes the target's denormalized counter
+                    if (saved != null && dto.CommentId == null)
+                    {
+                        await refresh().ConfigureAwait(false);
+                    }
                     return saved;
                 }
                 catch (Exception ex)
@@ -625,7 +630,12 @@ internal sealed class CommunityComposers
                 {
                     var saved = await _apiController.UpsertComment(dto with
                         { OwnerUid = ownerUid }).ConfigureAwait(false);
-                    if (saved != null) await refresh().ConfigureAwait(false);
+                    // edits patch the thread in place - only a new comment
+                    // changes the target's denormalized counter
+                    if (saved != null && dto.CommentId == null)
+                    {
+                        await refresh().ConfigureAwait(false);
+                    }
                     return saved;
                 }
                 catch (Exception ex)

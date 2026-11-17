@@ -251,6 +251,106 @@ public static partial class SpheneUI
                 cardMin, ImGui.GetItemRectMax());
         }
 
+        /// <summary>Last frame's measured height per inner-card id - the
+        /// fill is painted before content using this rect, so it needs no
+        /// draw-list channel and stays legal inside surfaces.</summary>
+        private static readonly Dictionary<string, float> _innerCardHeights =
+            new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The visible card that is legal INSIDE channel-splitting surfaces
+        /// (Surface/SectionCard/AccentCard - e.g. comments inside a widget).
+        /// A fill must precede its content, but the card's height is only
+        /// known after it - so the fill is painted at the live cursor using
+        /// last frame's measured height: position tracks scrolling exactly,
+        /// a changed height settles within one frame, and no draw-list
+        /// channel split is needed. The fill lifts a step over the rail-band
+        /// tone so the card reads as a raised panel; <paramref name="accentColor"/>
+        /// adds the accent top seam and an accent-tinted edge.
+        /// <paramref name="padding"/> overrides <see cref="Spacing.CardPadding"/>
+        /// for tighter layouts. <paramref name="fill"/>/<paramref name="borderAlpha"/>
+        /// restyle the panel (e.g. a darker inset for the comment body) -
+        /// fill defaults to the lifted rail-band tone, border alpha to 0.45.
+        /// </summary>
+        public static void InnerCard(Action content, string id,
+            Vector4? accentColor = null, Space? padding = null,
+            Vector4? fill = null, float? borderAlpha = null)
+        {
+            var scale = SpheneUI.Scale;
+            var pad = (padding ?? Spacing.CardPadding).Scaled;
+            var radius = AccentCardRounding * scale;
+            var w = MathF.Max(40f * scale, Controls.BoundedAvailX());
+            var cardMin = ImGui.GetCursorScreenPos();
+            var dl = ImGui.GetWindowDrawList();
+            var fillCol = ColorUtils.WithAlpha(fill
+                ?? ColorUtils.LerpColor(NavRailBandColor(), Vector4.One, 0.05f), 1f);
+
+            if (_innerCardHeights.TryGetValue(id, out var lastH) && lastH > 1f)
+            {
+                var lastMax = new Vector2(cardMin.X + w, cardMin.Y + lastH);
+                var borderCol = accentColor.HasValue
+                    ? ColorUtils.WithAlpha(accentColor.Value, 0.30f)
+                    : ColorUtils.WithAlpha(Colors.Border, borderAlpha ?? 0.45f);
+                dl.AddRectFilled(cardMin, lastMax, ColorUtils.ToU32(fillCol), radius);
+                dl.AddRect(cardMin, lastMax, ColorUtils.ToU32(borderCol), radius,
+                    ImDrawFlags.RoundCornersAll, MathF.Max(1f, scale));
+            }
+            if (accentColor.HasValue)
+            {
+                // the accent seam rides the card's top edge - same identity
+                // language as SectionCard's seam
+                var seamColor = ColorUtils.WithAlpha(accentColor.Value, 0.35f);
+                var seamCol = ColorUtils.ToU32(seamColor);
+                var seamFade = ColorUtils.ToU32(ColorUtils.WithAlpha(seamColor, 0f));
+                var seamH = MathF.Max(1f, 1.5f * scale);
+                var seamInset = radius * 0.9f;
+                var seamFadeW = 24f * scale;
+                dl.AddRectFilledMultiColor(
+                    new Vector2(cardMin.X + seamInset, cardMin.Y + 0.5f),
+                    new Vector2(cardMin.X + seamInset + seamFadeW,
+                        cardMin.Y + 0.5f + seamH),
+                    seamFade, seamCol, seamCol, seamFade);
+                dl.AddRectFilled(
+                    new Vector2(cardMin.X + seamInset + seamFadeW, cardMin.Y + 0.5f),
+                    new Vector2(cardMin.X + w - seamInset - seamFadeW,
+                        cardMin.Y + 0.5f + seamH), seamCol);
+                dl.AddRectFilledMultiColor(
+                    new Vector2(cardMin.X + w - seamInset - seamFadeW,
+                        cardMin.Y + 0.5f),
+                    new Vector2(cardMin.X + w - seamInset, cardMin.Y + 0.5f + seamH),
+                    seamCol, seamFade, seamFade, seamCol);
+            }
+
+            // a bounded ContentRegion (BeginTable) must NOT run here - a
+            // nested table inside a host cell's open channel split kills
+            // the draw-list splitter (TableBeginCell → SetCurrentChannel).
+            // Bounds + wrap like SurfaceFlat: no table, no channels.
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(pad, pad));
+            var innerRight = cardMin.X + w - pad;
+            ContentBounds.Push(new Vector2(cardMin.X + pad, innerRight));
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + w - pad * 2f);
+            try
+            {
+                using (ImRaii.Group())
+                {
+                    content();
+                }
+            }
+            finally
+            {
+                ImGui.PopTextWrapPos();
+                ContentBounds.Pop();
+            }
+            var measured = ImGui.GetItemRectMax().Y - cardMin.Y + pad;
+            _innerCardHeights[id] = measured;
+            if (_innerCardHeights.Count > 1024)
+            {
+                _innerCardHeights.Clear();
+            }
+            ImGui.SetCursorScreenPos(new Vector2(cardMin.X, cardMin.Y + measured));
+            ImGui.Dummy(Vector2.Zero);
+        }
+
         /// <summary>
         /// The card that does not look like a card: a borderless tonal
         /// surface in the rail-band color family with generous padding and

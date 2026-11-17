@@ -88,6 +88,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// <summary>Post ids whose bounded Chronicle excerpt is expanded in
     /// place (Show more/less) - per session, shared by own + friend lists.</summary>
     private readonly HashSet<long> _expandedChronicles = new();
+
+    /// <summary>The Chronicle currently open in the detail reader - the
+    /// list shows compact feed rows; clicking one opens just that entry
+    /// with its full discussion.</summary>
+    private (string OwnerUid, long Id)? _openChronicle;
     private readonly MarkdownComposer _blogComposer = new("own-blog");
     private readonly SpheneUI.Popups.ConfirmDialog _chronicleDeleteConfirm = new();
     private bool _chronicleSaving;
@@ -7313,21 +7318,31 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         else
         {
-            for (var i = 0; i < blog.Count; i++)
+            var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
+                && string.Equals(openOwner, me.UID, StringComparison.Ordinal)
+                ? blog.FirstOrDefault(b => b.Id == openId) : null;
+            if (openPost != null)
             {
-                if (i > 0)
+                // Detail reader: just this entry, discussion below - the
+                // excerpt toggle bounds the body, comments always show.
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
                 {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                    _openChronicle = null;
                 }
-                var captured = blog[i];
-                // Each Chronicle is its own item card - author row with the
-                // badge + edit/delete strip on the right, title, bounded
-                // formatted excerpt with Show more/less.
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var captured = openPost;
+                var ops = CommunityComposers.BuildBlogCommentOps(me.UID, captured.Id,
+                    () =>
+                    {
+                        _spheneProfileManager.InvalidateProfileExtras(me);
+                        return Task.CompletedTask;
+                    },
+                    uid => CommunityNameFor(uid, null, null), CommentProfile);
                 SpheneUI.Layout.Surface(() =>
                 {
                     Sphene.UI.Chronicles.ChronicleReaderView.Draw(captured, me.UID,
                         OwnHeroName(), avatarWrap, accent,
-                        _blogComments, ops: null, excerptLines: 5,
+                        _blogComments, ops, excerptLines: 8,
                         isExpanded: id => _expandedChronicles.Contains(id),
                         toggleExpanded: id => ToggleChronicleExpanded(id),
                         actions: () =>
@@ -7350,7 +7365,38 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             }
                         });
                 }, id: $"own-chronicle-{captured.Id}", border: true,
-                    accentColor: accent, interactive: true);
+                    accentColor: accent);
+            }
+            else
+            {
+                if (_openChronicle is { OwnerUid: var staleOwner }
+                    && string.Equals(staleOwner, me.UID, StringComparison.Ordinal))
+                {
+                    _openChronicle = null;
+                }
+                for (var i = 0; i < blog.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    }
+                    var captured = blog[i];
+                    // Compact activity-feed row per entry - click opens the
+                    // dedicated reader with the full discussion below.
+                    var item = new SyncshellCommunityFeedItemDto(
+                        string.Empty, null, null, SyncshellFeedItemKind.Blog,
+                        captured.Id,
+                        string.IsNullOrWhiteSpace(captured.Title)
+                            ? "Untitled Chronicle" : captured.Title,
+                        null, captured.UpdatedAt,
+                        ActorDisplayName: OwnHeroName(),
+                        ThumbnailMediaHash: captured.CoverMediaHash);
+                    if (FeedItemRow.Draw($"own-chron-{captured.Id}", item,
+                            "chron:", accent, ChronicleRowMeta(captured)))
+                    {
+                        _openChronicle = (me.UID, captured.Id);
+                    }
+                }
             }
         }
         _chronicleDeleteConfirm.Draw("own-chronicle-delete", "Delete Chronicle?",
@@ -7427,13 +7473,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         else
         {
-            for (var i = 0; i < blog.Count; i++)
+            var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
+                && string.Equals(openOwner, pair.UserData.UID, StringComparison.Ordinal)
+                ? blog.FirstOrDefault(b => b.Id == openId) : null;
+            if (openPost != null)
             {
-                if (i > 0)
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
                 {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                    _openChronicle = null;
                 }
-                var post = blog[i];
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var post = openPost;
                 var ops = CommunityComposers.BuildBlogCommentOps(pair.UserData.UID, post.Id,
                     () =>
                     {
@@ -7441,8 +7491,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         return Task.CompletedTask;
                     },
                     uid => CommunityNameFor(uid, null, null), CommentProfile);
-                // Same item card as the own list - formatted body bounded
-                // to a readable excerpt with Show more, discussion inline.
                 SpheneUI.Layout.Surface(() =>
                 {
                     Sphene.UI.Chronicles.ChronicleReaderView.Draw(post,
@@ -7453,6 +7501,49 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         toggleExpanded: id => ToggleChronicleExpanded(id));
                 }, id: $"friend-chronicle-{post.Id}", border: true,
                     accentColor: accent);
+            }
+            else
+            {
+                if (_openChronicle is { OwnerUid: var staleOwner }
+                    && string.Equals(staleOwner, pair.UserData.UID, StringComparison.Ordinal))
+                {
+                    _openChronicle = null;
+                }
+                for (var i = 0; i < blog.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    }
+                    var post = blog[i];
+                    var item = new SyncshellCommunityFeedItemDto(
+                        string.Empty, null, null, SyncshellFeedItemKind.Blog,
+                        post.Id,
+                        string.IsNullOrWhiteSpace(post.Title)
+                            ? "Untitled Chronicle" : post.Title,
+                        null, post.UpdatedAt,
+                        ActorDisplayName: SyncshellCommunityView.HumanName(pair.UserData)
+                            ?? "Unknown user",
+                        ThumbnailMediaHash: post.CoverMediaHash);
+                    if (FeedItemRow.Draw($"friend-chron-{post.Id}", item,
+                            "chron:", accent, ChronicleRowMeta(post)))
+                    {
+                        _openChronicle = (pair.UserData.UID, post.Id);
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await _apiController.UserMarkBlogPostViewed(post.Id)
+                                    .ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex,
+                                    "Failed to mark chronicle {Id} viewed", post.Id);
+                            }
+                        });
+                    }
+                }
             }
         }
     }
@@ -7758,6 +7849,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _expandedChronicles.Add(id);
         }
     }
+
+    /// <summary>"N views · M comments" meta segment for the compact
+    /// Chronicle list rows - singular/plural kept explicit.</summary>
+    private static string ChronicleRowMeta(UserProfileBlogPostDto post)
+        => $"{post.ViewCount} {(post.ViewCount == 1 ? "view" : "views")} · "
+            + $"{post.CommentCount} {(post.CommentCount == 1 ? "comment" : "comments")}";
 
     private async Task DeleteOwnBlogPost(long id)
     {

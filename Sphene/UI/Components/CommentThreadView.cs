@@ -48,6 +48,7 @@ public sealed class CommentThreadView
         public readonly HashSet<long> Expanded = [];
         public long? NextCursor;
         public string Draft = string.Empty;
+        public bool ComposerOpen;
         public long? ReplyTo;
         public string ReplyDraft = string.Empty;
         public long? EditingId;
@@ -72,6 +73,16 @@ public sealed class CommentThreadView
             SummariesLoading.Clear();
         }
     }
+
+    /// <summary>Replies rendered inline before the "Show N more"
+    /// affordance kicks in - matches the server's 3-per-root preview
+    /// slice, so typical threads never need an extra fetch.</summary>
+    private const int PreviewReplyLimit = 3;
+
+    /// <summary>Author avatar edge size - the thread rail and the reply
+    /// indent are derived from it, so the rail passes through the
+    /// avatar column's center like reddit's gutter line.</summary>
+    private const float AuthorAvatarSize = 28f;
 
     private readonly Dictionary<string, ThreadState> _threads = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MarkdownComposer> _composers = new(StringComparer.Ordinal);
@@ -148,6 +159,19 @@ public sealed class CommentThreadView
         SpheneUI.Text.Muted(locked
             ? $"{commentCount} comments · locked"
             : $"{commentCount} comment{(commentCount == 1 ? string.Empty : "s")}");
+        // the comment opener docks at the right edge of the target's
+        // reaction row - one line, engagement left / composer entry right
+        if (!locked && ops.Save != null && !st.ComposerOpen)
+        {
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+            var openW = SpheneUI.Controls.SegAutoWidth("Comment",
+                FontAwesomeIcon.Comment, ImGui.GetFrameHeight());
+            SpheneUI.Controls.DockToCardEdge(openW);
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Comment, "Comment"))
+            {
+                st.ComposerOpen = true;
+            }
+        }
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
         if (locked)
@@ -155,7 +179,7 @@ public sealed class CommentThreadView
             SpheneUI.Text.Colored("This thread is locked by moderation.",
                 SpheneUI.Palette.Warning);
         }
-        else if (ops.Save != null)
+        else if (ops.Save != null && st.ComposerOpen)
         {
             var composer = ComposerFor(key, ops);
             var draft = st.Draft;
@@ -166,7 +190,15 @@ public sealed class CommentThreadView
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.PaperPlane, "Comment"))
                 {
                     Submit(kind, targetId, ownerUid, groupGid, ops, st, null);
+                    // optimistic close - the draft survives a failed
+                    // save, so reopening restores the text
+                    st.ComposerOpen = false;
                 }
+            }
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Cancel"))
+            {
+                st.ComposerOpen = false;
             }
         }
 
@@ -182,44 +214,87 @@ public sealed class CommentThreadView
 
         foreach (var root in st.Roots)
         {
+            var rootTop = ImGui.GetCursorScreenPos();
             DrawComment(root, kind, targetId, ownerUid, groupGid, ops, st,
-                locked, isReply: false);
-            if (st.Expanded.Contains(root.Id))
+                locked);
+            var replies = st.Replies.GetValueOrDefault(root.Id) ?? [];
+            var expanded = st.Expanded.Contains(root.Id);
+            var shown = expanded ? replies.Count : Math.Min(replies.Count, PreviewReplyLimit);
+            if (shown > 0 || root.ReplyCount > 0)
             {
-                using var indent = ImRaii.PushIndent(16f * SpheneUI.Scale);
-                var replies = st.Replies.GetValueOrDefault(root.Id) ?? [];
-                foreach (var reply in replies)
+                // the thread rail runs avatar-to-avatar: from the root
+                // avatar's bottom edge down the gutter to the last
+                // reply's avatar center, with a short elbow into each
+                // reply avatar - the reddit thread line
+                var railX = rootTop.X + AuthorAvatarSize * 0.5f;
+                var railTop = rootTop.Y + AuthorAvatarSize;
+                using var indent = ImRaii.PushIndent(AuthorAvatarSize);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var stubMids = new List<float>(shown);
+                for (var i = 0; i < shown; i++)
                 {
-                    DrawComment(reply, kind, targetId, ownerUid, groupGid, ops, st,
-                        locked, isReply: true);
+                    stubMids.Add(ImGui.GetCursorScreenPos().Y
+                        + AuthorAvatarSize * 0.5f);
+                    DrawComment(replies[i], kind, targetId, ownerUid, groupGid, ops, st,
+                        locked);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
-                if (root.ReplyCount > replies.Count && ops.LoadReplies != null)
-                {
-                    var next = replies.Count > 0 ? replies[^1].Id : (long?)null;
-                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.AngleDown,
-                            $"Show {root.ReplyCount - replies.Count} more repl{(root.ReplyCount - replies.Count == 1 ? "y" : "ies")}"))
-                    {
-                        LoadMoreReplies(ops, st, root.Id, next);
-                    }
-                }
-            }
-            else if (root.ReplyCount > 0)
-            {
-                using var indent = ImRaii.PushIndent(16f * SpheneUI.Scale);
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Comment,
-                        $"{root.ReplyCount} repl{(root.ReplyCount == 1 ? "y" : "ies")}"))
+                var remaining = root.ReplyCount - shown;
+                if (remaining > 0 && ops.LoadReplies != null
+                    && SpheneUI.Icons.TextButton(FontAwesomeIcon.AngleDown,
+                        $"Show {remaining} more repl{(remaining == 1 ? "y" : "ies")}"))
                 {
                     st.Expanded.Add(root.Id);
-                    if ((st.Replies.GetValueOrDefault(root.Id)?.Count ?? 0) < root.ReplyCount
-                        && ops.LoadReplies != null)
+                    if (replies.Count < root.ReplyCount)
                     {
-                        var next = st.Replies.GetValueOrDefault(root.Id) is { Count: > 0 } l
-                            ? l[^1].Id : (long?)null;
+                        var next = replies.Count > 0 ? replies[^1].Id : (long?)null;
                         LoadMoreReplies(ops, st, root.Id, next);
                     }
                 }
+                if (shown > 0)
+                {
+                    var dl = ImGui.GetWindowDrawList();
+                    var railCol = SpheneUI.ColorUtils.ToU32(
+                        SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.Border, 0.7f));
+                    var railW = MathF.Max(1.5f, 1.25f * SpheneUI.Scale);
+                    // each elbow is a quarter-circle turning the
+                    // vertical rail right into the reply's avatar edge -
+                    // arc π/2→π sweeps the bottom-left quadrant, rounded
+                    // never a hard corner
+                    var elbowR = 6f * SpheneUI.Scale;
+                    // the vertical rail ends on the last reply's elbow -
+                    // nothing below it exists to connect to
+                    var railBot = stubMids[^1] - elbowR;
+                    dl.AddLine(new Vector2(railX, railTop),
+                        new Vector2(railX, railBot), railCol, railW);
+                    foreach (var mid in stubMids)
+                    {
+                        // +1px on the elbow's x so the arc's left vertex
+                        // lands on the rail's right edge, not its center -
+                        // owner-visible 1px-left seam otherwise
+                        dl.PathArcTo(new Vector2(railX + elbowR + 1f, mid - elbowR),
+                            elbowR, MathF.PI * 0.5f, MathF.PI, 8);
+                        dl.PathStroke(railCol, ImDrawFlags.None, railW);
+                        dl.AddLine(new Vector2(railX + elbowR + 1f, mid),
+                            new Vector2(railX + AuthorAvatarSize * 0.5f, mid),
+                            railCol, railW);
+                    }
+                    // clicking the rail collapses the thread back to the
+                    // preview slice - the same affordance reddit carries
+                    var resume = ImGui.GetCursorScreenPos();
+                    ImGui.SetCursorScreenPos(new Vector2(
+                        railX - 5f * SpheneUI.Scale, railTop));
+                    if (ImGui.InvisibleButton("##rail",
+                            new Vector2(10f * SpheneUI.Scale,
+                                railBot - railTop)))
+                    {
+                        st.Expanded.Remove(root.Id);
+                    }
+                    SpheneUI.AttachTooltip("Collapse replies");
+                    ImGui.SetCursorScreenPos(resume);
+                }
             }
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X2);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         }
 
         if (st.NextCursor != null && ops.LoadRoots != null
@@ -232,7 +307,7 @@ public sealed class CommentThreadView
 
     private void DrawComment(CommunityCommentDto c, CommentTargetKind kind, long targetId,
         string? ownerUid, string? groupGid, CommentOps ops, ThreadState st,
-        bool locked, bool isReply)
+        bool locked)
     {
         ImGui.PushID($"c{c.Id}");
         var authorUid = c.Author?.UID;
@@ -240,140 +315,311 @@ public sealed class CommentThreadView
             ?? AuthorName(c.Author) ?? "Unknown user";
         var state = c.State;
 
-        if (state is CommentState.ModeratorRemoved or CommentState.AuthorDeleted)
+        // only the message text keeps a background card - the header and
+        // the footer ride bare on the host surface, the reddit way -
+        // deleted/hidden placeholders keep the same inset-card shape
+        if (state is CommentState.ModeratorRemoved or CommentState.AuthorDeleted
+            || (state == CommentState.ModeratorHidden && c.Body == null))
         {
-            SpheneUI.Text.Muted(state == CommentState.AuthorDeleted
-                ? $"[{name}] deleted this comment"
-                : $"[{name}] comment removed by moderation");
-            ImGui.PopID();
-            return;
-        }
-        if (state == CommentState.ModeratorHidden && c.Body == null)
-        {
-            SpheneUI.Text.Muted($"[{name}] comment hidden by moderation");
+            SpheneUI.Layout.InnerCard(() =>
+                SpheneUI.Text.Muted(state == CommentState.AuthorDeleted
+                    ? $"[{name}] deleted this comment"
+                    : state == CommentState.ModeratorRemoved
+                        ? $"[{name}] comment removed by moderation"
+                        : $"[{name}] comment hidden by moderation"),
+                $"cbody{c.Id}",
+                padding: SpheneUI.Spacing.X8,
+                fill: SpheneUI.ColorUtils.LerpColor(
+                    SpheneUI.Layout.NavRailBandColor(), Vector4.Zero, 0.18f),
+                borderAlpha: 0.25f);
             ImGui.PopID();
             return;
         }
 
-        DrawAuthorAvatar(authorUid, ops);
+        // header line: avatar + vertically centered name/stamp - bare
+        // on the host surface; SameLine lands back on the avatar's top
+        // edge, so each following item re-applies the offset via nameTop
+        if (DrawAuthorAvatar(authorUid, ops, AuthorAvatarSize))
+        {
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY()
+                + (AuthorAvatarSize - ImGui.GetTextLineHeight()) * 0.5f);
+        }
         SpheneUI.Text.Plain(name);
+        var nameTop = ImGui.GetItemRectMin().Y;
         ImGui.SameLine();
+        // GetItemRectMin is screen-space - SetCursorPosY takes
+        // window-local coords and would drop the stamp off-view
+        ImGui.SetCursorScreenPos(new Vector2(
+            ImGui.GetCursorScreenPos().X, nameTop));
         var stamp = c.EditedAt != null
             ? $"{c.CreatedAt:MMM d, HH:mm} · edited"
             : $"{c.CreatedAt:MMM d, HH:mm}";
-        SpheneUI.Text.Muted(stamp);
+        SpheneUI.Text.Muted($"· {stamp}");
         if (state == CommentState.ModeratorHidden)
         {
             ImGui.SameLine();
+            ImGui.SetCursorScreenPos(new Vector2(
+                ImGui.GetCursorScreenPos().X, nameTop));
             SpheneUI.Text.Colored("[hidden]", SpheneUI.Palette.Warning);
         }
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
-        if (st.EditingId == c.Id && ops.Save != null)
+        // body, footer and the reply composer sit under the name column
+        // (avatar + gap) - the rail runs free through the avatar gutter
+        using (ImRaii.PushIndent(AuthorAvatarSize + SpheneUI.Spacing.X4.Scaled))
         {
-            var draft = st.EditDraft;
-            ComposerFor($"edit{c.Id}", ops).Draw("##e", ref draft, 4000, 50f * SpheneUI.Scale);
-            st.EditDraft = draft;
-            ImGui.SameLine();
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Save"))
+            if (st.EditingId == c.Id && ops.Save != null)
             {
-                var dto = new CommentUpsertDto(kind, targetId, ownerUid, groupGid,
-                    st.EditDraft, null, c.Id);
-                st.EditingId = null;
-                _ = Task.Run(async () => await ops.Save(dto).ConfigureAwait(false));
-            }
-            ImGui.SameLine();
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Cancel"))
-            {
-                st.EditingId = null;
-            }
-        }
-        else
-        {
-            MarkdownRenderer.RenderMarkdown(c.Body ?? string.Empty, 0,
-                MarkdownComposer.MediaImageSource);
-        }
-
-        // Action row - react, reply, edit/delete (own), moderate, report.
-        if (!locked && ops.SetReaction != null)
-        {
-            DrawCommentReactions(c, ops, st);
-            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-        }
-        if (!locked && !isReply && ops.Save != null)
-        {
-            if (SpheneUI.Icons.Button(FontAwesomeIcon.Reply))
-            {
-                st.ReplyTo = st.ReplyTo == c.Id ? null : c.Id;
-                st.ReplyDraft = string.Empty;
-            }
-            SpheneUI.AttachTooltip("Reply");
-            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-        }
-        if (c.IsMine && ops.Save != null && state == CommentState.Visible)
-        {
-            if (SpheneUI.Icons.Button(FontAwesomeIcon.Pen))
-            {
-                st.EditingId = c.Id;
-                st.EditDraft = c.Body ?? string.Empty;
-            }
-            SpheneUI.AttachTooltip("Edit");
-            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-            if (ops.Delete != null && SpheneUI.Icons.Button(FontAwesomeIcon.Trash))
-            {
-                var captured = c.Id;
-                _ = Task.Run(async () => await ops.Delete(captured).ConfigureAwait(false));
-            }
-            SpheneUI.AttachTooltip("Delete");
-            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-        }
-        if (c.CanModerate && ops.Moderate != null)
-        {
-            DrawModerationButtons(c, kind, targetId, ops);
-        }
-        if (!c.IsMine && ops.Report != null)
-        {
-            if (SpheneUI.Icons.Button(FontAwesomeIcon.Flag))
-            {
-                var dto = new ReportCreateDto(ReportTargetKind.Comment, c.Id,
-                    ReportReason.Spam, ownerUid, null,
-                    groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null);
-                _ = Task.Run(async () => await ops.Report(dto).ConfigureAwait(false));
-            }
-            SpheneUI.AttachTooltip("Report");
-        }
-
-        if (st.ReplyTo == c.Id && ops.Save != null)
-        {
-            var draft = st.ReplyDraft;
-            ComposerFor($"r{c.Id}", ops).Draw("##rp", ref draft, 4000, 50f * SpheneUI.Scale);
-            st.ReplyDraft = draft;
-            ImGui.SameLine();
-            using (ImRaii.Disabled(string.IsNullOrWhiteSpace(st.ReplyDraft)))
-            {
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.PaperPlane, "Reply"))
+                var draft = st.EditDraft;
+                ComposerFor($"edit{c.Id}", ops).Draw("##e", ref draft, 4000, 50f * SpheneUI.Scale);
+                st.EditDraft = draft;
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Save"))
                 {
-                    Submit(kind, targetId, ownerUid, groupGid, ops, st, c.Id);
+                    var dto = new CommentUpsertDto(kind, targetId, ownerUid, groupGid,
+                        st.EditDraft, null, c.Id);
+                    var captured = st;
+                    // the server returns the updated comment - patch it in
+                    // place instead of refetching the whole thread
+                    _ = Task.Run(async () =>
+                    {
+                        var saved = await ops.Save(dto).ConfigureAwait(false);
+                        if (saved == null) return;
+                        PatchComment(captured, saved);
+                        captured.EditingId = null;
+                        captured.EditDraft = string.Empty;
+                    });
+                }
+                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Cancel"))
+                {
+                    st.EditingId = null;
+                }
+            }
+            else
+            {
+                // the only card left: the message text in a darker inset
+                // well - own comments carry the accent seam on it
+                SpheneUI.Layout.InnerCard(() =>
+                    SpheneUI.Text.Plain(c.Body ?? string.Empty),
+                    $"cbody{c.Id}",
+                    c.IsMine ? SpheneUI.Colors.Accent : null,
+                    padding: SpheneUI.Spacing.X8,
+                    fill: SpheneUI.ColorUtils.LerpColor(
+                        SpheneUI.Layout.NavRailBandColor(), Vector4.Zero, 0.18f),
+                    borderAlpha: 0.25f);
+            }
+
+            DrawCommentFooter(c, kind, targetId, ownerUid, groupGid, ops,
+                st, locked);
+
+            if (st.ReplyTo == c.Id && ops.Save != null)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var draft = st.ReplyDraft;
+                ComposerFor($"r{c.Id}", ops).Draw("##rp", ref draft, 4000, 50f * SpheneUI.Scale);
+                st.ReplyDraft = draft;
+                using (ImRaii.Disabled(string.IsNullOrWhiteSpace(st.ReplyDraft)))
+                {
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.PaperPlane, "Reply"))
+                    {
+                        // replying to a reply still attaches to the root -
+                        // the server model is flat depth-2
+                        Submit(kind, targetId, ownerUid, groupGid, ops, st,
+                            c.ParentId ?? c.Id);
+                    }
+                }
+                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Times, "Cancel"))
+                {
+                    st.ReplyTo = null;
                 }
             }
         }
         ImGui.PopID();
     }
 
+    /// <summary>The footer row's right-docked action cluster - own
+    /// edit/delete, staff moderation and the report flag, drawn just
+    /// left of the reply button.</summary>
+    private static List<(FontAwesomeIcon Icon, string Tip, Action Act)> BuildCommentActions(
+        CommunityCommentDto c, CommentTargetKind kind, long targetId,
+        string? ownerUid, string? groupGid, CommentOps ops, ThreadState st)
+    {
+        var right = new List<(FontAwesomeIcon Icon, string Tip, Action Act)>();
+        if (c.IsMine && ops.Save != null && c.State == CommentState.Visible)
+        {
+            right.Add((FontAwesomeIcon.Pen, "Edit", () =>
+            {
+                st.EditingId = c.Id;
+                st.EditDraft = c.Body ?? string.Empty;
+            }));
+            if (ops.Delete != null)
+            {
+                right.Add((FontAwesomeIcon.Trash, "Delete", () =>
+                {
+                    var captured = c.Id;
+                    var capturedSt = st;
+                    _ = Task.Run(async () =>
+                    {
+                        if (await ops.Delete(captured).ConfigureAwait(false))
+                        {
+                            // server keeps a tombstone - mirror it locally
+                            PatchComment(capturedSt, c with
+                            {
+                                State = CommentState.AuthorDeleted, Body = null
+                            });
+                            if (c.RootId is { } rootId)
+                            {
+                                BumpRootReplyCount(capturedSt, rootId, -1);
+                            }
+                        }
+                    });
+                }));
+            }
+        }
+        if (c.CanModerate && ops.Moderate != null)
+        {
+            void Mod(int action, string tip, FontAwesomeIcon icon)
+                => right.Add((icon, tip, () =>
+                {
+                    var dto = new CommentModerationDto(kind, targetId, c.Id,
+                        action, null, null, null);
+                    var capturedSt = st;
+                    _ = Task.Run(async () =>
+                    {
+                        var result = await ops.Moderate!(dto).ConfigureAwait(false);
+                        if (result != null)
+                        {
+                            PatchComment(capturedSt, result);
+                        }
+                    });
+                }));
+            if (c.State == CommentState.Visible)
+            {
+                // Owner-scope hides may be restored by the owner; other
+                // scopes require staff - the server enforces either way.
+                Mod(0, "Hide comment", FontAwesomeIcon.EyeSlash);
+                Mod(2, "Remove comment", FontAwesomeIcon.TimesCircle);
+            }
+            else if (c.State == CommentState.ModeratorHidden)
+            {
+                Mod(1, "Restore comment", FontAwesomeIcon.Undo);
+            }
+        }
+        if (!c.IsMine && ops.Report != null)
+        {
+            right.Add((FontAwesomeIcon.Flag, "Report", () =>
+            {
+                var dto = new ReportCreateDto(ReportTargetKind.Comment, c.Id,
+                    ReportReason.Spam, ownerUid, null,
+                    groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null);
+                _ = Task.Run(async () => await ops.Report(dto).ConfigureAwait(false));
+            }));
+        }
+
+        return right;
+    }
+
+    /// <summary>The comment's bottom row - reaction chips (or the
+    /// passive strip on own comments) flow left; the management icons
+    /// and the reply affordance dock at the row's right edge.</summary>
+    private static void DrawCommentFooter(CommunityCommentDto c,
+        CommentTargetKind kind, long targetId, string? ownerUid,
+        string? groupGid, CommentOps ops, ThreadState st, bool locked)
+    {
+        // own comments cannot be reacted to - they only display what
+        // others cast, and only once a reaction exists; replies carry
+        // Reply too - a reply-to-reply still attaches to the root
+        var showReactions = !locked && ops.SetReaction != null && !c.IsMine;
+        var showReply = !locked && ops.Save != null;
+        var actions = BuildCommentActions(c, kind, targetId, ownerUid,
+            groupGid, ops, st);
+        if (!showReactions && !showReply && !c.IsMine && actions.Count == 0)
+        {
+            return;
+        }
+
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        var replyW = showReply
+            ? SpheneUI.Controls.SegAutoWidth("Reply", FontAwesomeIcon.Reply,
+                ImGui.GetFrameHeight())
+            : 0f;
+        var rightW = replyW;
+        if (actions.Count > 0)
+        {
+            // the icon cluster sits just left of the Reply button
+            if (showReply) rightW += SpheneUI.Spacing.X8.Scaled;
+            foreach (var a in actions)
+            {
+                rightW += SpheneUI.Icons.ButtonSize(a.Icon).X
+                    + SpheneUI.Spacing.X4.Scaled;
+            }
+        }
+        SpheneUI.Layout.ActionBar(MathF.Max(0f, rightW),
+            drawRight: () =>
+            {
+                for (var i = 0; i < actions.Count; i++)
+                {
+                    if (i > 0)
+                    {
+                        ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                    }
+                    if (SpheneUI.Icons.Button(actions[i].Icon))
+                    {
+                        actions[i].Act();
+                    }
+                    SpheneUI.AttachTooltip(actions[i].Tip);
+                }
+                // nothing docks without the reply affordance - drawing
+                // the button anyway would overhang the bound and clip
+                if (!showReply) return;
+                if (actions.Count > 0)
+                {
+                    ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                }
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Reply, "Reply"))
+                {
+                    st.ReplyTo = st.ReplyTo == c.Id ? null : c.Id;
+                    st.ReplyDraft = string.Empty;
+                }
+            },
+            drawLeft: _ =>
+            {
+                if (c.IsMine)
+                {
+                    EnsureCommentSummary(c.Id, ops, st);
+                    ReactionBar.DrawReadOnly(ReactionTargetKind.Comment, c.Id,
+                        st.CommentSummaries.GetValueOrDefault(c.Id));
+                }
+                else if (showReactions)
+                {
+                    DrawCommentReactions(c, ops, st);
+                }
+            });
+    }
+
+    /// <summary>Lazy-loads the reaction summary once per comment - shared
+    /// by the interactive bar and the read-only strip on own comments.</summary>
+    private static void EnsureCommentSummary(long id, CommentOps ops, ThreadState st)
+    {
+        if (!st.CommentSummaries.ContainsKey(id) && !st.SummariesLoading.Contains(id)
+            && ops.LoadCommentSummary != null)
+        {
+            st.SummariesLoading.Add(id);
+            _ = Task.Run(async () =>
+            {
+                var s = await ops.LoadCommentSummary(id).ConfigureAwait(false);
+                if (s != null) st.CommentSummaries[id] = s;
+                st.SummariesLoading.Remove(id);
+            });
+        }
+    }
+
     private static void DrawCommentReactions(CommunityCommentDto c, CommentOps ops,
         ThreadState st)
     {
-        if (!st.CommentSummaries.ContainsKey(c.Id) && !st.SummariesLoading.Contains(c.Id)
-            && ops.LoadCommentSummary != null)
-        {
-            st.SummariesLoading.Add(c.Id);
-            var captured = c.Id;
-            _ = Task.Run(async () =>
-            {
-                var s = await ops.LoadCommentSummary(captured).ConfigureAwait(false);
-                if (s != null) st.CommentSummaries[captured] = s;
-                st.SummariesLoading.Remove(captured);
-            });
-        }
+        EnsureCommentSummary(c.Id, ops, st);
         var summary = st.CommentSummaries.GetValueOrDefault(c.Id);
         ReactionBar.DrawInline(ReactionTargetKind.Comment, c.Id, summary,
             (k, set) =>
@@ -418,34 +664,6 @@ public sealed class CommentThreadView
         ImGui.SameLine(0f, SpheneUI.Spacing.X12.Scaled);
     }
 
-    private static void DrawModerationButtons(CommunityCommentDto c, CommentTargetKind kind,
-        long targetId, CommentOps ops)
-    {
-        void Mod(int action, string tip, FontAwesomeIcon icon)
-        {
-            if (SpheneUI.Icons.Button(icon))
-            {
-                var dto = new CommentModerationDto(kind, targetId, c.Id, action,
-                    null, null, null);
-                _ = Task.Run(async () => await ops.Moderate!(dto).ConfigureAwait(false));
-            }
-            SpheneUI.AttachTooltip(tip);
-            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-        }
-
-        if (c.State == CommentState.Visible)
-        {
-            Mod(0, "Hide comment", FontAwesomeIcon.EyeSlash);
-            Mod(2, "Remove comment", FontAwesomeIcon.TimesCircle);
-        }
-        else if (c.State == CommentState.ModeratorHidden)
-        {
-            // Owner-scope hides may be restored by the owner; other scopes
-            // require staff/platform - the server enforces either way.
-            Mod(1, "Restore comment", FontAwesomeIcon.Undo);
-        }
-    }
-
     private static void Submit(CommentTargetKind kind, long targetId, string? ownerUid,
         string? groupGid, CommentOps ops, ThreadState st, long? parentId)
     {
@@ -464,9 +682,58 @@ public sealed class CommentThreadView
             {
                 st.ReplyDraft = string.Empty;
                 st.ReplyTo = null;
-                st.Replies.GetValueOrDefault(parentId.Value)?.Add(saved);
+                if (!st.Replies.TryGetValue(parentId.Value, out var replies))
+                {
+                    st.Replies[parentId.Value] = replies = [];
+                }
+                replies.Add(saved);
+                BumpRootReplyCount(st, parentId.Value, +1);
             }
         });
+    }
+
+    /// <summary>Adjusts a root comment's denormalized reply counter after a
+    /// local reply insert/remove so the "N replies" affordance stays truthful
+    /// without a refetch.</summary>
+    private static void BumpRootReplyCount(ThreadState st, long rootId, int delta)
+    {
+        for (var i = 0; i < st.Roots.Count; i++)
+        {
+            if (st.Roots[i].Id == rootId)
+            {
+                st.Roots[i] = st.Roots[i] with
+                {
+                    ReplyCount = Math.Max(0, st.Roots[i].ReplyCount + delta)
+                };
+                return;
+            }
+        }
+    }
+
+    /// <summary>Replaces a comment inside the loaded thread state in place -
+    /// the write ops return the authoritative DTO, so a save/edit/moderation
+    /// never needs a full thread refetch.</summary>
+    private static void PatchComment(ThreadState st, CommunityCommentDto updated)
+    {
+        for (var i = 0; i < st.Roots.Count; i++)
+        {
+            if (st.Roots[i].Id == updated.Id)
+            {
+                st.Roots[i] = updated;
+                return;
+            }
+        }
+        foreach (var replies in st.Replies.Values)
+        {
+            for (var i = 0; i < replies.Count; i++)
+            {
+                if (replies[i].Id == updated.Id)
+                {
+                    replies[i] = updated;
+                    return;
+                }
+            }
+        }
     }
 
     private static void LoadMoreRoots(CommentOps ops, ThreadState st)
@@ -503,7 +770,10 @@ public sealed class CommentThreadView
     {
         if (!_composers.TryGetValue(key, out var c))
         {
-            _composers[key] = c = new MarkdownComposer($"cmt-{key}");
+            _composers[key] = c = new MarkdownComposer($"cmt-{key}")
+            {
+                PlainText = true,
+            };
         }
         c.MentionProvider = () => ops.MentionCandidates?.Invoke() ?? [];
         return c;
@@ -511,18 +781,19 @@ public sealed class CommentThreadView
 
     /// <summary>Small author avatar via the host's profile hook - texture
     /// key carries a content fingerprint so avatar changes version
-    /// themselves instead of needing manual eviction.</summary>
-    private static void DrawAuthorAvatar(string? uid, CommentOps ops)
+    /// themselves instead of needing manual eviction. Returns false when
+    /// no avatar was drawn.</summary>
+    private static bool DrawAuthorAvatar(string? uid, CommentOps ops, float size)
     {
-        if (uid == null || ops.Profile == null) return;
+        if (uid == null || ops.Profile == null) return false;
         var profile = ops.Profile(uid);
-        if (profile == null || string.IsNullOrEmpty(profile.Base64ProfilePicture)) return;
+        if (profile == null || string.IsNullOrEmpty(profile.Base64ProfilePicture)) return false;
         var wrap = SpheneUI.Media.Texture(
             $"comment-avatar:{uid}:{Sphene.UI.Syncshell.SyncshellCommunityView.MediaVersion(null, profile.Base64ProfilePicture)}",
             () => profile.ImageData.Value);
-        if (wrap == null) return;
-        SpheneUI.Media.Avatar(wrap, 20f);
-        ImGui.SameLine();
+        if (wrap == null) return false;
+        SpheneUI.Media.Avatar(wrap, size);
+        return true;
     }
 
     /// <summary>DisplayName then Alias - a raw uid is never a display string.</summary>

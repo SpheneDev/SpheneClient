@@ -132,7 +132,9 @@ public static class ChronicleReaderView
             SpheneUI.Text.MutedWrapped("This Chronicle has no body yet.");
         }
 
-        if (ops != null && (excerptLines <= 0 || expanded))
+        // Discussion always renders when ops are bound - the excerpt
+        // toggle only bounds the body, never the thread.
+        if (ops != null)
         {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             SpheneUI.Layout.Separator();

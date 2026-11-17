@@ -89,19 +89,27 @@ public sealed class ChroniclePreviewUi : WindowMediatorSubscriberBase
                 "The editor this preview was bound to has been closed.");
             return;
         }
-        var profile = _spheneProfileManager.GetSpheneProfile(new UserData(_authorUid));
-        var bytes = profile.ImageData.Value;
-        if (!bytes.SequenceEqual(_lastAvatarBytes))
-        {
-            _lastAvatarBytes = bytes;
-            _avatarKey = $"chronicle-preview:{_authorUid}:{bytes.GetHashCode()}";
-            SpheneUI.Media.Evict(_avatarKey);
-            _avatarWrap = null;
-        }
-        _avatarWrap ??= bytes.Length == 0 ? null
-            : SpheneUI.Media.Texture(_avatarKey, () => bytes);
         try
         {
+            var profile = _spheneProfileManager.GetSpheneProfile(new UserData(_authorUid));
+            byte[] bytes;
+            try
+            {
+                bytes = profile.ImageData.Value;
+            }
+            catch (Exception)
+            {
+                bytes = [];
+            }
+            if (!bytes.SequenceEqual(_lastAvatarBytes))
+            {
+                SpheneUI.Media.Evict(_avatarKey);
+                _lastAvatarBytes = bytes;
+                _avatarKey = $"chronicle-preview:{_authorUid}:{bytes.GetHashCode()}";
+                _avatarWrap = null;
+            }
+            _avatarWrap ??= bytes.Length == 0 ? null
+                : SpheneUI.Media.Texture(_avatarKey, () => bytes);
             // Same card surface the published entries render inside, so
             // card geometry, fills and bounds match the list exactly.
             SpheneUI.Layout.Surface(() =>
@@ -111,18 +119,21 @@ public sealed class ChroniclePreviewUi : WindowMediatorSubscriberBase
                     previewNote: "Comments, reactions and profile links stay inert here - "
                         + "publish to make them live.");
             }, id: "chronicle-preview-card", border: true, accentColor: _accent);
+            _lastFaultSignature = null;
         }
         catch (Exception ex)
         {
-            // A draw fault must surface with its real stack once, not as a
-            // per-frame "failed to draw" loop - distinct failures still log.
+            // Log the real stack once per signature, then draw the fault
+            // in-window - a rethrow would spam "failed to draw" every frame.
             var sig = ex.GetType().Name + ":" + ex.Message;
             if (!string.Equals(sig, _lastFaultSignature, StringComparison.Ordinal))
             {
                 _lastFaultSignature = sig;
                 _logger.LogError(ex, "Chronicle preview render fault");
             }
-            throw;
+            SpheneUI.Layout.Callout("Preview render fault: " + ex.Message,
+                FontAwesomeIcon.ExclamationTriangle, SpheneUI.Palette.Warning,
+                title: "Preview error");
         }
     }
 
