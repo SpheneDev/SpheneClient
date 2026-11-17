@@ -68,6 +68,11 @@ public static partial class SpheneUI
 
     internal static SpheneMediator? Mediator => _mediator;
 
+    /// <summary>The shared emoji picker, wired once by <c>UiSharedService</c>.
+    /// Static because composer/editor instances are constructed manually
+    /// (same hook pattern as <c>MarkdownComposer.MediaClient</c>).</summary>
+    internal static Components.EmojiPicker? EmojiPickerHook { get; set; }
+
     /// <summary>Resolver wired by <c>UiSharedService</c> - lazy crisp font
     /// handles for markdown &lt;size=N&gt; tags; null until initialization.</summary>
     internal static Func<int, IFontHandle?>? MarkdownFontResolver { get; set; }

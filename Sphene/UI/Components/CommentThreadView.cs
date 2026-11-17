@@ -432,7 +432,7 @@ public sealed class CommentThreadView
                 // the only card left: the message text in a darker inset
                 // well - own comments carry the accent seam on it
                 SpheneUI.Layout.InnerCard(() =>
-                    SpheneUI.Text.Plain(c.Body ?? string.Empty),
+                    SpheneUI.Emoji.Plain(c.Body ?? string.Empty),
                     $"cbody{c.Id}",
                     c.IsMine ? SpheneUI.Colors.Accent : null,
                     padding: SpheneUI.Spacing.X8,

@@ -48,6 +48,12 @@ public static partial class SpheneUI
             public Action<string>? OnStatusCommitted { get; set; }
             public string DescriptionBuffer { get; set; } = string.Empty;
             public Action<string>? OnDescriptionCommitted { get; set; }
+            /// <summary>Pending emoji insertions for the bio input (picker → callback splice).
+            /// Ref-returned so the input callback can bind it as its context.</summary>
+            public ref Helpers.Emoji.EmojiEditQueue EmojiQueue => ref _emojiQueue;
+#pragma warning disable S2933 // ref-returned by the property above - readonly would break the ref contract
+            private Helpers.Emoji.EmojiEditQueue _emojiQueue = new();
+#pragma warning restore S2933
             /// <summary>Full comma-joined tag string after an add/remove · the hero never parses it itself.</summary>
             public Action<string>? OnTagsCommitted { get; set; }
             /// <summary>Fired when the NSFW chip is toggled in edit mode.</summary>
@@ -598,9 +604,24 @@ public static partial class SpheneUI
                 // Keystrokes only update the buffer - committing per char
                 // stages the draft early, pops the unsaved toast window into
                 // existence and that new window steals nav focus mid-typing.
+                if (edit.EmojiQueue.ConsumeRefocus())
+                {
+                    ImGui.SetKeyboardFocusHere();
+                }
+                var emojiHook = EmojiPickerHook;
+                var descW = inputWidth - (emojiHook != null
+                    ? ImGui.GetFrameHeight() + 4f * scale : 0f);
                 _ = Controls.InputTextMultiline("##hero-desc",
                     ref descBuf, 2000,
-                    new Vector2(inputWidth, lineH * 3f + 8f * scale));
+                    new Vector2(descW, lineH * 3f + 8f * scale),
+                    ImGuiInputTextFlags.CallbackAlways,
+                    Helpers.Emoji.EmojiEditQueue.OnCallback, ref edit.EmojiQueue);
+                if (emojiHook != null)
+                {
+                    ImGui.SameLine(0f, 4f * scale);
+                    emojiHook.TriggerButton("profile-bio-emoji",
+                        edit.EmojiQueue.Enqueue);
+                }
                 if (descBuf.Length == 0 && !ImGui.IsItemActive())
                 {
                     // multiline inputs carry no hint flag · painted placeholder
@@ -619,8 +640,8 @@ public static partial class SpheneUI
             {
                 var preview = profile.Description;
                 if (preview.Length > 140) preview = preview[..140] + "…";
-                Text.MutedWrapped(preview,
-                    columnMaxX - ImGui.GetWindowPos().X);
+                Emoji.Wrapped(preview,
+                    columnMaxX - ImGui.GetWindowPos().X, Colors.TextMuted);
             }
             var textActualBottom = ImGui.GetCursorScreenPos().Y;
             Layout.FlowUnindent(textIndent);
@@ -656,9 +677,24 @@ public static partial class SpheneUI
                 ImGui.SetCursorScreenPos(bInputMin);
                 var bIndent = Layout.FlowIndentTo(bInputMin.X);
                 var descBuf = edit!.DescriptionBuffer;
+                if (edit.EmojiQueue.ConsumeRefocus())
+                {
+                    ImGui.SetKeyboardFocusHere();
+                }
+                var bioEmojiHook = EmojiPickerHook;
+                var bioInputW = bioW - bPad * 2f - (bioEmojiHook != null
+                    ? ImGui.GetFrameHeight() + 4f * scale : 0f);
                 _ = Controls.InputTextMultiline("##hero-desc",
                     ref descBuf, 2000,
-                    new Vector2(bioW - bPad * 2f, bEditH));
+                    new Vector2(bioInputW, bEditH),
+                    ImGuiInputTextFlags.CallbackAlways,
+                    Helpers.Emoji.EmojiEditQueue.OnCallback, ref edit.EmojiQueue);
+                if (bioEmojiHook != null)
+                {
+                    ImGui.SameLine(0f, 4f * scale);
+                    bioEmojiHook.TriggerButton("profile-bio-emoji",
+                        edit.EmojiQueue.Enqueue);
+                }
                 if (descBuf.Length == 0 && !ImGui.IsItemActive())
                 {
                     drawList.AddText(ImGui.GetItemRectMin()
@@ -856,15 +892,14 @@ public static partial class SpheneUI
                 var flyW = MathF.Min(380f * scale,
                     ImGui.GetIO().DisplaySize.X * 0.4f);
                 var flyH = Math.Clamp(
-                    ImGui.CalcTextSize(profile.Description, false,
+                    Emoji.Measure(profile.Description,
                         flyW - 8f * scale).Y + 8f * scale,
                     lineH * 2f, 280f * scale);
                 if (Layout.BeginScrollArea("bio-text",
                         new Vector2(flyW, flyH)))
                 {
-                    Text.ColoredWrapped(profile.Description,
-                        Colors.TextSecondary,
-                        ImGui.GetCursorPosX() + flyW - 8f * scale);
+                    Emoji.Wrapped(profile.Description,
+                        flyW - 8f * scale, Colors.TextSecondary);
                 }
                 Layout.EndScrollArea();
                 Popups.EndFlyout();
@@ -1239,7 +1274,7 @@ public static partial class SpheneUI
             var lineH = ImGui.GetTextLineHeight();
             var gap = 6f * scale;
             var maxPreviewH = lineH * 3f;
-            var textSize = ImGui.CalcTextSize(bio, false, innerW);
+            var textSize = Emoji.Measure(bio, innerW);
             var truncated = textSize.Y > maxPreviewH + 1f;
             var previewH = MathF.Min(textSize.Y, maxPreviewH);
             var panelH = pad * 2f + lineH + gap + previewH
@@ -1259,8 +1294,7 @@ public static partial class SpheneUI
             var indent = Layout.FlowIndentTo(textMin.X);
             drawList.PushClipRect(textMin,
                 new Vector2(textMin.X + innerW, textMin.Y + previewH), true);
-            Text.ColoredWrapped(bio, Colors.TextSecondary,
-                textMin.X + innerW - ImGui.GetWindowPos().X);
+            Emoji.DrawAt(drawList, textMin, bio, innerW, Colors.TextSecondary);
             drawList.PopClipRect();
             Layout.FlowUnindent(indent);
             ImGui.SetCursorScreenPos(restore);

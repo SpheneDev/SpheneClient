@@ -599,6 +599,54 @@ public static partial class SpheneUI
             return changed;
         }
 
+        /// <summary>
+        /// Callback-capable <see cref="InputTextWithHint"/> · same contract as
+        /// the multiline overload: with <see cref="ImGuiInputTextFlags.CallbackAlways"/>
+        /// the callback fires each frame the widget is active, which is how
+        /// editors splice text at the live caret (UTF-8 byte offsets).
+        /// </summary>
+        public static bool InputTextWithHint<TContext>(string label, string hint, ref string value,
+            int maxLength, ImGuiInputTextFlags flags,
+            ImGui.ImGuiInputTextCallbackRefContextDelegate<TContext> callback,
+            ref TContext context, float trailingWidth = 0f, float preferredWidth = -1f,
+            bool emojiOverlay = false)
+        {
+            using var style = PushValueControlStyle();
+            // With emoji present the font can only render fallback glyphs -
+            // hide the native text and let Emoji.InputOverlay draw the whole
+            // visible line (text runs, atlas sprites, mirrored caret) instead.
+            var queue = emojiOverlay && context is Helpers.Emoji.EmojiEditQueue q ? q : null;
+            var codec = queue?.Codec;
+            // The native edit buffer holds 16-bit ImWchar - astral emoji die
+            // in the TextW→TextA round-trip. The buffer view carries one BMP
+            // placeholder per emoji; the model string keeps real sequences.
+            var view = codec?.Encode(value) ?? value;
+            var hideText = queue != null && Emoji.ContainsEmoji(value);
+            if (hideText)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, Vector4.Zero);
+            }
+            var changed = ImGui.InputTextWithHint(PrepareLabeledControl(label, trailingWidth, preferredWidth),
+                hint, ref view, maxLength, flags, callback, ref context);
+            if (codec != null)
+            {
+                // sync the model only - changed keeps the widget's own
+                // semantics (Enter for EnterReturnsTrue callers, else edit)
+                var model = codec.Expand(view);
+                if (!string.Equals(model, value, StringComparison.Ordinal))
+                {
+                    value = model;
+                }
+            }
+            if (hideText)
+            {
+                ImGui.PopStyleColor();
+                Emoji.InputOverlay(view, queue!);
+            }
+            Lint.CheckBounds(label);
+            return changed;
+        }
+
         /// <summary>InputTextMultiline with the settings-row convention (label left, control sized to the bound).</summary>
         public static bool InputTextMultiline(string label, ref string value, int maxLength, Vector2 size,
             ImGuiInputTextFlags flags = ImGuiInputTextFlags.None, float trailingWidth = 0f, float preferredWidth = -1f)
@@ -625,8 +673,20 @@ public static partial class SpheneUI
             float trailingWidth = 0f, float preferredWidth = -1f)
         {
             using var style = PushValueControlStyle();
+            // same 16-bit ImWchar boundary as the single-line overload:
+            // emoji placeholders ride the buffer, the model keeps real text.
+            var codec = context is Helpers.Emoji.EmojiEditQueue q ? q.Codec : null;
+            var view = codec?.Encode(value) ?? value;
             var changed = ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth),
-                ref value, maxLength, size, flags, callback, ref context);
+                ref view, maxLength, size, flags, callback, ref context);
+            if (codec != null)
+            {
+                var model = codec.Expand(view);
+                if (!string.Equals(model, value, StringComparison.Ordinal))
+                {
+                    value = model;
+                }
+            }
             Lint.CheckBounds(label);
             return changed;
         }

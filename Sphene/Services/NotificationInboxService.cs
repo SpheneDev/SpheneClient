@@ -193,7 +193,9 @@ public class NotificationInboxService : DisposableMediatorSubscriberBase, IHoste
             return;
         }
         var name = dto.Sender.DisplayName ?? dto.Sender.Alias ?? "Someone";
-        var text = msg.Entry.Text ?? "[encrypted message]";
+        var text = msg.Entry.Gif != null
+            ? "[GIF]"
+            : msg.Entry.Text ?? "[encrypted message]";
         var preview = text.Length > 80
             ? string.Concat(text.AsSpan(0, 80), "…")
             : text;

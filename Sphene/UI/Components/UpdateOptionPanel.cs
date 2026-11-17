@@ -68,7 +68,9 @@ public static class UpdateOptionPanel
         DirectMessaging,
         FollowedCommunities,
         ShrinkUIntegrationToggle,
-        DirectMessagingE2ee
+        DirectMessagingE2ee,
+        ChatEmoji,
+        ChatGifs
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -125,6 +127,7 @@ public static class UpdateOptionPanel
         new("v.1.1.43", [Link.FollowedCommunities]),
         new("v.1.1.44", [Link.ShrinkUIntegrationToggle]),
         new("v.1.1.45", [Link.DirectMessagingE2ee]),
+        new("v.1.1.46", [Link.ChatEmoji, Link.ChatGifs]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -184,7 +187,9 @@ public static class UpdateOptionPanel
         [Link.DirectMessaging] = "Social: Direct messages · unread badges, inbox entries & quick chat access",
         [Link.FollowedCommunities] = "Communities: Follow syncshells, browse area-bound shells & see who is in the area",
         [Link.ShrinkUIntegrationToggle] = "Plugins: ShrinkU integration toggle (intro setup + Settings → Plugins)",
-        [Link.DirectMessagingE2ee] = "Social: End-to-end encrypted direct messages · sealed history & key verification"
+        [Link.DirectMessagingE2ee] = "Social: End-to-end encrypted direct messages · sealed history & key verification",
+        [Link.ChatEmoji] = "Social: Emoji picker everywhere you write · chat, comments, Chronicles & bio with color emoji",
+        [Link.ChatGifs] = "Social: KLIPY GIFs in private chat · encrypted provider references, bounded animations"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -487,6 +492,18 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("Direct messages are now end-to-end encrypted: text is sealed on your device with keys that never leave it, the server only ever stores and forwards ciphertext, and each installation gets its own device key. A lock banner in the chat shows the encryption status - use Verify there to compare safety numbers with your contact.");
             SpheneUI.Controls.HelpText("Older history stays readable and is upgraded to encrypted storage gradually when both sides have keys - it keeps an honest 'still plaintext' marker until then. Chats with contacts on older versions can't send until they update.");
+        },
+        [Link.ChatEmoji] = (_, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("Every text field you write in now has an emoji button: private chat, community comments, the Chronicle editor and your profile bio share one picker with search, categories and recent emojis. Emoji render in color via a bundled Noto Emoji set, survive saving and stay inside the usual character limits.");
+            SpheneUI.Controls.HelpText("Skin tones, combined family/profession emoji and emoji flags are supported where the bundled set provides them; unsupported sequences degrade to a simpler emoji instead of a blank box.");
+        },
+        [Link.ChatGifs] = (configService, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("Private chats can send GIFs: the GIF button next to the message input searches KLIPY and sends the selection end-to-end encrypted like a normal message. Only a small provider reference travels inside the encrypted message - the animation itself loads from KLIPY on each device.");
+            ChatOptionBlock.DrawExternalMediaOption(configService, "UpdateOptionChatExternalMedia");
+            ChatOptionBlock.DrawGifAnimationOption(configService, "UpdateOptionChatGifAnimation");
+            SpheneUI.Controls.HelpText("GIFs never appear in comments, Chronicles or the community feed. Received GIFs render at most 320x220 and pause off-screen; a missing provider key or disabled external media shows a small placeholder instead. GIF sending is rolled out gradually by the server - the button appears once your account is granted access.");
         }
     };
 

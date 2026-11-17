@@ -77,7 +77,13 @@ public sealed class MarkdownComposer
         public int CaretB = -1;
         public int SelStartB = -1;
         public int SelEndB = -1;
+        /// <summary>Caret as an index into the model string - view offsets
+        /// differ once placeholders (1 char) stand in for sequences (N chars).</summary>
+        public int ModelCaret = -1;
         public readonly Queue<ComposerEdit> Pending = new();
+        /// <summary>Placeholder codec: emoji occupy one BMP char each in the
+        /// 16-bit ImWchar buffer - real sequences live only in the model.</summary>
+        public readonly Helpers.Emoji.EmojiTextCodec Codec = new();
     }
 
     private string? _mentionQuery;
@@ -139,6 +145,9 @@ public sealed class MarkdownComposer
             _refocus = false;
             ImGui.SetKeyboardFocusHere();
         }
+        var emoji = SpheneUI.EmojiPickerHook;
+        var emojiW = PlainText && emoji != null && !previewing
+            ? ImGui.GetFrameHeight() + SpheneUI.Spacing.X4.Scaled : 0f;
         if (previewing)
         {
             DrawPreviewPane(body, h);
@@ -146,14 +155,33 @@ public sealed class MarkdownComposer
         else
         {
             var flags = ImGuiInputTextFlags.CallbackAlways;
-            SpheneUI.Controls.InputTextMultiline(label, ref body, maxLength,
-                new Vector2(-1f, h), flags, OnInputCallback, ref _edit,
+            var inputW = emojiW > 0f
+                ? MathF.Max(60f * scale, ImGui.GetContentRegionAvail().X - emojiW)
+                : -1f;
+            // 16-bit ImWchar buffer: emoji ride as placeholders, the model keeps real text
+            var view = _edit.Codec.Encode(body);
+            SpheneUI.Controls.InputTextMultiline(label, ref view, maxLength,
+                new Vector2(inputW, h), flags, OnInputCallback, ref _edit,
                 trailingWidth: 0f, preferredWidth: -1f);
+            var expanded = _edit.Codec.Expand(view);
+            if (!string.Equals(expanded, body, StringComparison.Ordinal))
+            {
+                body = expanded;
+            }
+            _edit.ModelCaret = _edit.CaretB >= 0
+                ? _edit.Codec.Expand(view[..Math.Min(_edit.CaretB, view.Length)]).Length
+                : -1;
+            if (emojiW > 0f)
+            {
+                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                emoji!.TriggerButton($"emoji-{_id}", QueueInsertText);
+            }
             if (body.Length > maxLength - maxLength / 10)
             {
                 SpheneUI.Text.Muted($"{body.Length}/{maxLength}");
             }
         }
+        emoji?.Draw($"emoji-{_id}");
         return Validate(body, maxLength);
     }
 
@@ -187,6 +215,10 @@ public sealed class MarkdownComposer
         return (caret, caret, false);
     }
 
+    /// <summary>Queues a caret insertion from an outside control (emoji
+    /// picker) - same path the toolbar buttons use.</summary>
+    public void QueueInsertText(string insert) => QueueInsert(insert);
+
     /// <summary>Inserts <paramref name="insert"/> at the caret or replaces the
     /// selection; the caret lands at <paramref name="caretOffsetInInsert"/>
     /// UTF-8 bytes inside the inserted text (end = default).</summary>
@@ -199,9 +231,10 @@ public sealed class MarkdownComposer
             s = Math.Clamp(s, 0, bounds);
             e = Math.Clamp(e, s, bounds);
             if (e > s) d.DeleteChars(s, e - s);
-            d.InsertChars(s, insert);
+            var encoded = _edit.Codec.Encode(insert);
+            d.InsertChars(s, encoded);
             var caret = s + (caretOffsetInInsert < 0
-                ? Utf8Len(insert) : caretOffsetInInsert);
+                ? encoded.Length : caretOffsetInInsert);
             d.SelectionStart = d.SelectionEnd = d.CursorPos = caret;
         });
         _refocus = true;
@@ -220,15 +253,15 @@ public sealed class MarkdownComposer
             e = Math.Clamp(e, s, bounds);
             if (had)
             {
-                d.InsertChars(e, suffix);
-                d.InsertChars(s, prefix);
+                d.InsertChars(e, _edit.Codec.Encode(suffix));
+                d.InsertChars(s, _edit.Codec.Encode(prefix));
                 d.SelectionStart = d.SelectionEnd = d.CursorPos =
-                    e + Utf8Len(prefix) + Utf8Len(suffix);
+                    e + prefix.Length + suffix.Length;
             }
             else
             {
-                d.InsertChars(s, prefix + suffix);
-                d.SelectionStart = d.SelectionEnd = d.CursorPos = s + Utf8Len(prefix);
+                d.InsertChars(s, _edit.Codec.Encode(prefix + suffix));
+                d.SelectionStart = d.SelectionEnd = d.CursorPos = s + prefix.Length;
             }
         });
         _refocus = true;
@@ -256,24 +289,6 @@ public sealed class MarkdownComposer
             }
         });
         _refocus = true;
-    }
-
-    private static int Utf8Len(string s) => System.Text.Encoding.UTF8.GetByteCount(s);
-
-    /// <summary>Maps a UTF-8 byte offset onto a UTF-16 char index - surrogate
-    /// pairs contribute four bytes, counted at the low surrogate.</summary>
-    private static int Utf8OffsetToCharIndex(string s, int byteOffset)
-    {
-        if (byteOffset <= 0) return 0;
-        var utf8 = 0;
-        for (var i = 0; i < s.Length; i++)
-        {
-            var ch = s[i];
-            utf8 += ch < 0x80 ? 1 : ch < 0x800 ? 2 : char.IsLowSurrogate(ch) ? 4
-                : char.IsHighSurrogate(ch) ? 0 : 3;
-            if (utf8 >= byteOffset) return i + 1;
-        }
-        return s.Length;
     }
 
     private void DrawToolbar(float scale, ref string body, bool previewing)
@@ -344,6 +359,8 @@ public sealed class MarkdownComposer
                 SpheneUI.Popups.OpenFlyout("ref-" + _id);
             }
             SpheneUI.AttachTooltip("Entity reference");
+            ImGui.SameLine(0f, gap);
+            SpheneUI.EmojiPickerHook?.TriggerButton($"emoji-{_id}", QueueInsertText);
         }
         if (ShowPreview)
         {
@@ -644,9 +661,8 @@ public sealed class MarkdownComposer
     /// token - keeps surrounding text and the caret-tail intact.</summary>
     private void ApplyMention(ref string body, string effective, string uid)
     {
-        var caretIdx = _edit.CaretB >= 0
-            ? Utf8OffsetToCharIndex(effective, _edit.CaretB) : effective.Length;
-        caretIdx = Math.Min(caretIdx, effective.Length);
+        var caretIdx = _edit.ModelCaret >= 0
+            ? Math.Min(_edit.ModelCaret, effective.Length) : effective.Length;
         var tokenStart = caretIdx - _mentionQuery!.Length - 1;
         body = effective[..Math.Max(0, tokenStart)] + "@" + uid + " "
             + effective[caretIdx..];
@@ -659,8 +675,8 @@ public sealed class MarkdownComposer
     /// whitespace-bounded `@` (emails/`@uid` inside text are inert).</summary>
     private string? CaretMentionQuery(string body)
     {
-        var caretIdx = _edit.CaretB >= 0
-            ? Utf8OffsetToCharIndex(body, _edit.CaretB) : body.Length;
+        var caretIdx = _edit.ModelCaret >= 0
+            ? Math.Min(_edit.ModelCaret, body.Length) : body.Length;
         var upto = caretIdx >= body.Length ? body : body[..caretIdx];
         var i = upto.LastIndexOf('@');
         if (i < 0 || (i > 0 && !char.IsWhiteSpace(upto[i - 1])))

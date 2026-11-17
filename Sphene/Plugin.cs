@@ -568,6 +568,13 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton<CommunityMediaClientService>();
             collection.AddSingleton<AnnouncementService>();
             collection.AddSingleton<ChatService>();
+            collection.AddSingleton(s => new Services.Gifs.KlipyGifProvider(
+                s.GetRequiredService<ILogger<Services.Gifs.KlipyGifProvider>>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<SpheneConfigService>(),
+                _pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton<Services.Gifs.IGifProvider>(
+                p => p.GetRequiredService<Services.Gifs.KlipyGifProvider>());
             collection.AddSingleton(s => new Services.E2ee.ChatKeyStore(
                 s.GetRequiredService<ILogger<Services.E2ee.ChatKeyStore>>(),
                 _pluginInterface.ConfigDirectory.FullName));
@@ -633,6 +640,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<CommunityFeedService>());
             collection.AddHostedService(p => p.GetRequiredService<AnnouncementService>());
             collection.AddHostedService(p => p.GetRequiredService<ChatService>());
+            collection.AddHostedService(p => p.GetRequiredService<Services.Gifs.KlipyGifProvider>());
             collection.AddHostedService(p => p.GetRequiredService<Services.E2ee.ChatCryptoService>());
             collection.AddHostedService(p => p.GetRequiredService<Services.E2ee.ChatKeyVaultService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());

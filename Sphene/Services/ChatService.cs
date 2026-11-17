@@ -365,6 +365,13 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
         return ChatSealFailure.None;
     }
 
+    /// <summary>Sends a GIF as typed content inside the sealed envelope -
+    /// identical transport to <see cref="Send"/>, only the plaintext
+    /// body carries the provider reference instead of message text.</summary>
+    public Task<ChatSealFailure> SendGif(string uid, string provider,
+        string providerItemId, int width, int height)
+        => Send(uid, Services.E2ee.ChatContentCodec.Gif(provider, providerItemId, width, height));
+
     /// <summary>Whether the peer currently has publishable devices - drives
     /// the composer hint. Null = not yet resolved (triggers a fetch).</summary>
     public async Task<bool> CanSealForAsync(string uid)

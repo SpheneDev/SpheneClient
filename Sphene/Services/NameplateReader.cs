@@ -2830,28 +2830,63 @@ internal sealed unsafe class NameplateReader : IDisposable
     /// visible title was drawn with. That ends the frame-phase guessing the
     /// number-array and text-node anchors kept losing.
     /// </summary>
+    private static readonly TimeSpan BakeHookRetryDelay = TimeSpan.FromSeconds(30);
+    private DateTime _bakeDrawHookRetryAt = DateTime.MinValue;
+    private DateTime _bakePrepareHookRetryAt = DateTime.MinValue;
+    private DateTime _bakeBlitHookRetryAt = DateTime.MinValue;
+
     private unsafe void EnsureBakeDrawHook()
     {
-        if (_bakeDrawHook != null || _namePlateAddon == null)
+        if (_namePlateAddon == null)
             return;
         var renderer = new IntPtr(&_namePlateAddon->BakePlate);
         var vtbl = *(nint*)renderer;
         if (vtbl == 0)
             return;
-        var addr = ((nint*)vtbl)[2];
-        if (addr == 0)
-            return;
-        _bakeDrawHook = _gameInterop.HookFromAddress<BakeDrawDelegate>(addr, BakeDrawDetour);
-        _bakeDrawHook.Enable();
-        _logger.LogDebug("[Nameplate] BakePlateRenderer.Draw hook at {addr:X}", addr);
-        var prep = ((nint*)vtbl)[3];
-        if (prep != 0 && _bakePrepareHook == null)
+        // Each hook is created independently with a retry cooldown: on
+        // heavily-hooked clients Reloaded can fail to place a trampoline
+        // inside the ±2GB rel32 window (BufferAllocationException). The
+        // bake capture path degrades - it must never throw into render.
+        if (_bakeDrawHook == null && DateTime.UtcNow >= _bakeDrawHookRetryAt)
         {
-            _bakePrepareHook = _gameInterop.HookFromAddress<BakePrepareDelegate>(prep, BakePrepareDetour);
-            _bakePrepareHook.Enable();
-            _logger.LogDebug("[Nameplate] BakePlateRenderer.PrepareNode hook at {addr:X}", prep);
+            var addr = ((nint*)vtbl)[2];
+            if (addr != 0)
+            {
+                try
+                {
+                    _bakeDrawHook = _gameInterop.HookFromAddress<BakeDrawDelegate>(addr, BakeDrawDetour);
+                    _bakeDrawHook.Enable();
+                    _logger.LogDebug("[Nameplate] BakePlateRenderer.Draw hook at {addr:X}", addr);
+                }
+                catch (Exception ex)
+                {
+                    try { _bakeDrawHook?.Dispose(); } catch (Exception d) { _logger.LogDebug(d, "[Nameplate] draw hook cleanup failed"); }
+                    _bakeDrawHook = null;
+                    _bakeDrawHookRetryAt = DateTime.UtcNow + BakeHookRetryDelay;
+                    _logger.LogDebug(ex, "[Nameplate] Draw hook failed - bake capture degraded, retrying in {s}s",
+                        (int)BakeHookRetryDelay.TotalSeconds);
+                }
+            }
         }
-        if (_bakeBlitHook == null)
+        var prep = ((nint*)vtbl)[3];
+        if (prep != 0 && _bakePrepareHook == null && DateTime.UtcNow >= _bakePrepareHookRetryAt)
+        {
+            try
+            {
+                _bakePrepareHook = _gameInterop.HookFromAddress<BakePrepareDelegate>(prep, BakePrepareDetour);
+                _bakePrepareHook.Enable();
+                _logger.LogDebug("[Nameplate] BakePlateRenderer.PrepareNode hook at {addr:X}", prep);
+            }
+            catch (Exception ex)
+            {
+                try { _bakePrepareHook?.Dispose(); } catch (Exception d) { _logger.LogDebug(d, "[Nameplate] prepare hook cleanup failed"); }
+                _bakePrepareHook = null;
+                _bakePrepareHookRetryAt = DateTime.UtcNow + BakeHookRetryDelay;
+                _logger.LogDebug(ex, "[Nameplate] PrepareNode hook failed, retrying in {s}s",
+                    (int)BakeHookRetryDelay.TotalSeconds);
+            }
+        }
+        if (_bakeBlitHook == null && DateTime.UtcNow >= _bakeBlitHookRetryAt)
         {
             try
             {
@@ -2862,8 +2897,11 @@ internal sealed unsafe class NameplateReader : IDisposable
             }
             catch (Exception ex)
             {
+                try { _bakeBlitHook?.Dispose(); } catch (Exception d) { _logger.LogDebug(d, "[Nameplate] blit hook cleanup failed"); }
                 _bakeBlitHook = null;
-                _logger.LogDebug(ex, "[Nameplate] DrawBaked signature hook failed");
+                _bakeBlitHookRetryAt = DateTime.UtcNow + BakeHookRetryDelay;
+                _logger.LogDebug(ex, "[Nameplate] DrawBaked signature hook failed, retrying in {s}s",
+                    (int)BakeHookRetryDelay.TotalSeconds);
             }
         }
     }

@@ -12,6 +12,7 @@ using Markdig.Extensions.Tables;
 using Markdig.Extensions.TaskLists;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
+using Sphene.Helpers.Emoji;
 
 namespace Sphene.UI.Design;
 
@@ -390,10 +391,31 @@ internal sealed class MarkdownInlineWriter
     /// <summary>Splits text into words and emits each via <see cref="EmitWord"/>, tracking runs of whitespace as pending space width.</summary>
     private void EmitText(string text, SpanStyle style)
     {
+        // Emoji runs become their own atoms: a cluster can never be split
+        // mid-word, so it rides the same wrap flow as an unbreakable word.
+        var runs = SpheneUI.Emoji.Segment(text);
         var i = 0;
         var n = text.Length;
+        var runIdx = 0;
         while (i < n)
         {
+            if (runIdx < runs.Count)
+            {
+                var run = runs[runIdx];
+                if (run.Kind == EmojiCore.RunKind.Emoji && run.Start == i)
+                {
+                    EmitEmojiAtom(text.Substring(run.Start, run.Length), _pendingSpaces, style);
+                    _pendingSpaces = 0;
+                    i += run.Length;
+                    runIdx++;
+                    continue;
+                }
+                if (run.Start <= i)
+                {
+                    runIdx++;
+                    continue;
+                }
+            }
             var c = text[i];
             if (c == '\n')
             {
@@ -411,12 +433,43 @@ internal sealed class MarkdownInlineWriter
                 continue;
             }
             var k = i;
-            while (k < n && !char.IsWhiteSpace(text[k]))
+            while (k < n && !char.IsWhiteSpace(text[k])
+                && !(runIdx < runs.Count && runs[runIdx].Start == k))
                 k++;
             EmitWord(text[i..k], _pendingSpaces, style);
             _pendingSpaces = 0;
             i = k;
         }
+    }
+
+    /// <summary>One emoji sprite in the inline flow - wraps like a word,
+    /// draws via the atlas, keeps text line metrics.</summary>
+    private void EmitEmojiAtom(string sequence, int spaces, in SpanStyle style)
+    {
+        var lineH = ImGui.GetTextLineHeight();
+        var emojiSize = MathF.Max(1f, lineH * 1.1f);
+        var spaceW = spaces * ImGui.CalcTextSize(" ").X;
+        var atLineStart = MathF.Abs(_nextX - _lineStartX) < 0.5f;
+        var needed = (atLineStart ? 0f : spaceW) + emojiSize;
+        if (!atLineStart && _nextX + needed > RightBound + 0.001f)
+        {
+            _nextX = _lineStartX;
+            _lineY += _lineHeight;
+            _lineHeight = ImGui.GetTextLineHeight();
+        }
+        else if (!atLineStart)
+        {
+            _nextX += spaceW;
+        }
+        var pos = new Vector2(_nextX, _lineY + (lineH - emojiSize) * 0.5f);
+        ImGui.SetCursorScreenPos(pos);
+        ImGui.Dummy(new Vector2(emojiSize, lineH));
+        var alpha = style.Hidden ? 0.25f : 1f;
+        SpheneUI.Emoji.SpriteAt(ImGui.GetWindowDrawList(), pos, emojiSize,
+            sequence, alpha);
+        _nextX += emojiSize;
+        _lineHeight = MathF.Max(_lineHeight, lineH);
+        _lastWasChip = false;
     }
 
     private static Vector4 EffectiveColor(in SpanStyle s)

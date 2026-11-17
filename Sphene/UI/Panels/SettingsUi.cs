@@ -170,6 +170,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
     private readonly float[] _generalSectionTops = new float[GeneralThemeNavLabels.Length];
     private readonly ConfigBackupService _configBackupService;
     private readonly ShrinkUConfigService _shrinkUConfigService;
+    private readonly Services.Gifs.IGifProvider _gifProvider;
     private bool _showExportModal = false;
     private bool _showImportModal = false;
     private string _exportPassword = string.Empty;
@@ -199,7 +200,8 @@ public class SettingsUi : WindowMediatorSubscriberBase
         GameSoundManager gameSoundManager,
         FileDialogManager fileDialogManager,
         ConfigBackupService configBackupService,
-        ShrinkUConfigService shrinkUConfigService) : base(logger, mediator, "Network Configuration", performanceCollector)
+        ShrinkUConfigService shrinkUConfigService,
+        Services.Gifs.IGifProvider gifProvider) : base(logger, mediator, "Network Configuration", performanceCollector)
     {
         _configService = configService;
         _serverConfigurationManager = serverConfigurationManager;
@@ -223,6 +225,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         _fileDialogManager = fileDialogManager;
         _configBackupService = configBackupService;
         _shrinkUConfigService = shrinkUConfigService;
+        _gifProvider = gifProvider;
         _shrinkUVersion = GetShrinkUAssemblyVersion();
         AllowClickthrough = false;
         AllowPinning = false;
@@ -737,6 +740,20 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DebugOptionBlock.DrawOpenAcknowledgmentMonitorAction(_uiShared, Mediator, "DebugOpenAcknowledgmentMonitor");
         DebugOptionBlock.DrawOpenStatusDebugAction(_uiShared, Mediator, "DebugOpenStatusDebug");
         }, "Open dedicated windows for acknowledgment and status monitoring.");
+
+        DrawSettingsCard("GIF API Usage", FontAwesomeIcon.ChartLine, () =>
+        {
+        var snap = _gifProvider.Usage;
+        var state = _gifProvider.Available ? "active"
+            : _gifProvider.RateLimited ? "rate-limited"
+            : _gifProvider.IsConfigured ? "waiting for media consent"
+            : "disabled (no server capability or key)";
+        SpheneUI.Text.Plain($"{_gifProvider.DisplayName} · {state}");
+        SpheneUI.Text.Muted($"Last 60 min · this installation only - provider-side analytics are authoritative for shared-key usage.");
+        SpheneUI.Text.Plain($"Search {snap.Search}  ·  Trending {snap.Trending}  ·  Lookup {snap.Lookup}  ·  Share {snap.Share}");
+        SpheneUI.Text.Plain($"API calls {snap.ApiCalls}/{snap.Limit} configured budget · est. remaining {snap.EstimatedRemaining}");
+        SpheneUI.Text.Muted($"Errors {snap.Errors} · HTTP 429 {snap.Throttled} · media {snap.MediaDownloads} + previews {snap.PreviewDownloads} (not API-counted)");
+        }, "Rolling 60-minute GIF-provider request counts for this installation. The test-key budget figure is a local estimate, not authoritative global usage.");
 
         DrawSettingsCard("Active Mismatch Tracker", FontAwesomeIcon.Search, () =>
         {
@@ -3148,6 +3165,12 @@ public class SettingsUi : WindowMediatorSubscriberBase
         DrawSettingsCard("Community Notifications", FontAwesomeIcon.Users, () =>
         {
             NotificationsOptionBlock.DrawCommunityNotificationMutesOption(_apiController);
+        });
+
+        DrawSettingsCard("Direct Messages", FontAwesomeIcon.CommentDots, () =>
+        {
+            ChatOptionBlock.DrawExternalMediaOption(_configService);
+            ChatOptionBlock.DrawGifAnimationOption(_configService);
         });
     }
 

@@ -37,12 +37,27 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
+        var childTopY = ImGui.GetCursorPosY();
+        var contentH = 0f;
         if (SpheneUI.Layout.BeginScrollArea("permissions-content", ImGui.GetContentRegionAvail(),
                 contentPadding: Vector2.Zero))
         {
             DrawPermissionsContent();
+            contentH = ImGui.GetCursorPosY();
         }
         SpheneUI.Layout.EndScrollArea();
+
+        // size the PARENT window to the measured content - SetWindowSize
+        // inside the child would only resize the scroll region.
+        if (contentH > 0f)
+        {
+            var style = ImGui.GetStyle();
+            var ySize = childTopY + contentH
+                + style.FramePadding.Y * ImGuiHelpers.GlobalScale
+                + style.FrameBorderSize + style.WindowPadding.Y;
+            ImGui.SetWindowSize(new Vector2(450,
+                MathF.Min(ySize, SizeConstraints?.MaximumSize.Y ?? 500f)));
+        }
     }
 
     private void DrawPermissionsContent()
@@ -202,9 +217,6 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
             }
             SpheneUI.AttachTooltip("This will set all permissions to your defined default permissions in the Sphene Settings");
         });
-
-        var ySize = ImGui.GetCursorPosY() + style.FramePadding.Y * ImGuiHelpers.GlobalScale + style.FrameBorderSize;
-        ImGui.SetWindowSize(new(400, ySize));
     }
 
     public override void OnClose()

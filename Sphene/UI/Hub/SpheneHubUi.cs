@@ -300,7 +300,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         CommunityFeedService communityFeed, AnnouncementService announcements,
         ChangelogService changelogService,
         ChatService chatService, CommunityMediaClientService communityMedia,
-        LifestreamTravelService lifestreamTravel, Interop.Ipc.IpcManager ipcManager)
+        LifestreamTravelService lifestreamTravel, Interop.Ipc.IpcManager ipcManager,
+        Services.Gifs.IGifProvider gifProvider)
         : base(logger, mediator, "Sphene Hub###SpheneHubUI", performanceCollectorService)
     {
         _lifestreamTravel = lifestreamTravel;
@@ -313,6 +314,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _communityMedia = communityMedia;
         SyncshellCommunityView.MediaClient = communityMedia;
         MarkdownComposer.MediaClient = communityMedia;
+        _gifProvider = gifProvider;
+        _gifPicker = new UI.Components.GifPicker(gifProvider, configService);
+        SpheneUI.EmojiPickerHook = new UI.Components.EmojiPicker(configService);
         EntityChipList.Api = _apiController;
         EntityChipList.Navigate = NavigateEntityRef;
         _apiController = apiController;
@@ -437,9 +441,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             var gid = msg.Community.Group.GID;
             _shellMediaCache.TryRemove(gid, out _);
+            // cached thread pages only refetch on invalidate - the pushed
+            // change names its target, so drop it even when a different
+            // group is on screen (same fix as _blogComments below).
+            _communityPage.Comments.InvalidateForChange(msg.Community);
             if (string.Equals(_communityCacheGid, gid, StringComparison.Ordinal))
             {
-                _communityPage.Comments.InvalidateForChange(msg.Community);
                 _ = RefreshCommunity();
             }
             else
@@ -465,8 +472,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _friendBannerBytes = [];
                 _friendActivityItems = null;
                 _friendActivityCursor = null;
-                _blogComments.InvalidateAll();
             }
+            // Comment threads cache per post and only refetch on invalidate -
+            // a profile push for ANY user (own chronicles included) can mean
+            // new comments, so drop every cached page lazily. Thread drafts
+            // and expansion state survive the reset.
+            _blogComments.InvalidateAll();
         });
     }
 
@@ -1396,6 +1407,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     protected override void Dispose(bool disposing)
     {
+        _gifPicker.Dispose();
         _settingsUi.SettingsPageChanged -= OnSettingsPageChanged;
         _modSharingUi.SubPageChanged -= OnModSharingPageChanged;
         _charaDataHubUi.SubPageChanged -= OnCharaDataPageChanged;
@@ -6179,6 +6191,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private const double ChatIntroMaxHiddenSeconds = 0.8;
     private const float ChatIntroFadeSeconds = 0.2f;
     private string _chatInput = string.Empty;
+    private Helpers.Emoji.EmojiEditQueue _chatEmojiQueue = new();
+    private readonly UI.Components.GifPicker _gifPicker;
+    private readonly Services.Gifs.IGifProvider _gifProvider;
+    private readonly Dictionary<string, Task<Services.Gifs.GifItem?>>
+        _chatGifMeta = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Task<byte[]?>>
+        _chatGifBytes = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _chatGifAnimKeys = new(StringComparer.Ordinal);
     private string? _chatScrollUid;
     private int _chatScrollCount = -1;
     private int _chatScrollFrame;
@@ -6270,6 +6290,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _chatIntroStart = now;
                 _chatRevealStart = -1.0;
                 _chatScrollDistance = 0f;
+                // Animated atlases for the previous conversation free their
+                // GPU memory through the deferred media eviction queue.
+                foreach (var key in _chatGifAnimKeys)
+                {
+                    SpheneUI.Media.Evict(key);
+                }
+                _chatGifAnimKeys.Clear();
+                _chatGifMeta.Clear();
+                _chatGifBytes.Clear();
             }
             if (switched || (items.Count != _chatScrollCount && _chatWasAtBottom))
             {
@@ -6401,9 +6430,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 var m = items[i];
                 var undecryptable = m.State == ChatEntryState.Undecryptable;
+                var gif = undecryptable ? null : m.Gif;
                 var text = undecryptable
                     ? "[encrypted message - cannot be decrypted on this device]"
-                    : m.Text ?? string.Empty;
+                    : gif != null ? string.Empty : m.Text ?? string.Empty;
                 var mine = string.Equals(m.Dto.Sender.UID, own,
                     StringComparison.Ordinal);
                 var local = m.Dto.SentAt.ToLocalTime();
@@ -6420,7 +6450,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 var tickW = mine
                     ? (isDelivered ? checkDoubleW : checkW) : 0f;
                 var metaW = timeW + (mine ? tickW + 3f * scale : 0f);
-                var ts = ImGui.CalcTextSize(text, false, wrapW);
+                var gifMeta = gif != null ? ResolveChatGifMeta(gif) : null;
+                var gifSize = gif != null
+                    ? Helpers.Emoji.GifFit.Fit(gifMeta?.Width ?? gif.Width,
+                        gifMeta?.Height ?? gif.Height, wrapW, scale)
+                    : Vector2.Zero;
+                var ts = gif != null ? gifSize : SpheneUI.Emoji.Measure(text, wrapW);
                 var bw = MathF.Min(bwMax,
                     MathF.Max(ts.X, metaW) + padX * 2f);
                 var bh = ts.Y + padY * 2f + metaSize + 4f * scale;
@@ -6431,16 +6466,19 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 dl.AddRectFilled(new Vector2(pos.X + bx, pos.Y),
                     new Vector2(pos.X + bx + bw, pos.Y + bh),
                     mine ? ownCol : peerCol, round);
-                ImGui.SetCursorScreenPos(new Vector2(pos.X + bx + padX,
-                    pos.Y + padY));
-                using (ImRaii.PushColor(ImGuiCol.Text, undecryptable
-                        ? SpheneUI.Colors.TextMuted
-                        : SpheneUI.Colors.TextPrimary))
+                var contentPos = new Vector2(pos.X + bx + padX, pos.Y + padY);
+                if (gif != null)
                 {
-                    ImGui.PushTextWrapPos(
-                        ImGui.GetCursorPosX() + bw - padX * 2f);
-                    ImGui.TextUnformatted(text);
-                    ImGui.PopTextWrapPos();
+                    DrawChatGif(dl, contentPos, gif, gifMeta, gifSize,
+                        round * 0.6f, chatAlpha);
+                }
+                else
+                {
+                    SpheneUI.Emoji.DrawAt(dl, contentPos, text, bw - padX * 2f,
+                        undecryptable
+                            ? SpheneUI.Colors.TextMuted
+                            : SpheneUI.Colors.TextPrimary,
+                        chatAlpha);
                 }
                 var metaX = pos.X + bx + bw - padX - metaW;
                 var metaY = pos.Y + padY + ts.Y + 4f * scale;
@@ -6480,13 +6518,45 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         var sealedBlocked = canSeal == false;
         var sendW = 72f * scale;
-        ImGui.SetNextItemWidth(w - sendW - SpheneUI.Spacing.X8.Scaled);
+        var capGap = SpheneUI.Spacing.X4.Scaled;
+        var emojiHook = SpheneUI.EmojiPickerHook;
+        var capW = ImGui.GetFrameHeight();
+        // Server-granted GIF capability - unauthorized users get no button
+        // and no reserved composer width, not a disabled control.
+        var showGif = _gifProvider.IsConfigured;
+        var gifLabelW = ImGui.CalcTextSize("GIF").X + ImGui.GetStyle().FramePadding.X * 2f;
+        var capsW = (showGif ? gifLabelW + capGap : 0f)
+            + (emojiHook != null ? capW + capGap : 0f);
+        if (_chatEmojiQueue.ConsumeRefocus())
+        {
+            ImGui.SetKeyboardFocusHere();
+        }
+        ImGui.SetNextItemWidth(w - sendW - capsW - SpheneUI.Spacing.X8.Scaled);
         using (ImRaii.Disabled(sealedBlocked))
         {
-            var send = ImGui.InputTextWithHint("##chatinput",
+            var send = SpheneUI.Controls.InputTextWithHint("##chatinput",
                 sealedBlocked ? "Encryption unavailable…" : "Message…",
                 ref _chatInput, 500,
-                ImGuiInputTextFlags.EnterReturnsTrue);
+                ImGuiInputTextFlags.EnterReturnsTrue
+                    | ImGuiInputTextFlags.CallbackAlways,
+                Helpers.Emoji.EmojiEditQueue.OnCallback, ref _chatEmojiQueue,
+                emojiOverlay: true);
+            if (emojiHook != null)
+            {
+                ImGui.SameLine(0f, capGap);
+                emojiHook.TriggerButton("chat-emoji", _chatEmojiQueue.Enqueue);
+            }
+            if (showGif)
+            {
+                ImGui.SameLine(0f, capGap);
+                _gifPicker.TriggerButton("chat-gif", item =>
+                {
+                    _ = SendChatGifAsync(uid, item);
+                    _chatScrollPending = true;
+                    _chatScrollSettle = 0;
+                    _chatScrollLastMax = -1f;
+                }, enabled: !sealedBlocked);
+            }
             ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
             var btnW = ImGui.GetContentRegionAvail().X;
             if (SpheneUI.Controls.SegmentButton("Send##chatsend",
@@ -6505,6 +6575,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _chatScrollSettle = 0;
                 _chatScrollLastMax = -1f;
             }
+        }
+        emojiHook?.Draw("chat-emoji");
+        if (showGif)
+        {
+            _gifPicker.Draw("chat-gif");
         }
         if (sealedBlocked)
         {
@@ -6551,7 +6626,24 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// notification instead of silently dropping the text.</summary>
     private async Task SendChatAsync(string uid, string text)
     {
-        var failure = await _chatService.Send(uid, text).ConfigureAwait(false);
+        PublishSealFailure(await _chatService.Send(uid, text).ConfigureAwait(false));
+    }
+
+    /// <summary>Sends a GIF through the same sealed path as text - the
+    /// provider reference rides inside the encrypted content.</summary>
+    private async Task SendChatGifAsync(string uid, Services.Gifs.GifItem item)
+    {
+        var failure = await _chatService.SendGif(uid, _gifProvider.ProviderId,
+            item.Id, item.Width, item.Height).ConfigureAwait(false);
+        if (failure == Services.E2ee.ChatSealFailure.None)
+        {
+            _gifProvider.RegisterShare(item);
+        }
+        PublishSealFailure(failure);
+    }
+
+    private void PublishSealFailure(Services.E2ee.ChatSealFailure failure)
+    {
         if (failure == Services.E2ee.ChatSealFailure.None)
         {
             return;
@@ -6570,6 +6662,80 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             $"Could not encrypt the message: {detail}.",
             SpheneConfiguration.Models.NotificationType.Warning,
             TimeSpan.FromSeconds(6)));
+    }
+
+    /// <summary>Resolves GIF metadata for a received message; the task is
+    /// cached so a scrolling history never refires provider lookups. Only
+    /// the active provider's ids are looked up - a payload naming another
+    /// provider renders as the bounded placeholder.</summary>
+    private Services.Gifs.GifItem? ResolveChatGifMeta(
+        Services.E2ee.ChatContentCodec.GifContent gif)
+    {
+        var key = gif.Provider + ":" + gif.Id;
+        if (!_chatGifMeta.TryGetValue(key, out var task))
+        {
+            task = string.Equals(gif.Provider, _gifProvider.ProviderId, StringComparison.Ordinal)
+                ? _gifProvider.GetByIdAsync(gif.Id, CancellationToken.None)
+                : Task.FromResult<Services.Gifs.GifItem?>(null);
+            _chatGifMeta[key] = task;
+        }
+        return task is { IsCompletedSuccessfully: true } ? task.Result : null;
+    }
+
+    /// <summary>Resolves (or queues) the media bytes for a GIF message.</summary>
+    private byte[]? ResolveChatGifBytes(string id,
+        Services.Gifs.GifItem? meta)
+    {
+        if (meta == null)
+        {
+            return null;
+        }
+        if (!_chatGifBytes.TryGetValue(id, out var task))
+        {
+            task = _gifProvider.FetchGifBytesAsync(meta, CancellationToken.None);
+            _chatGifBytes[id] = task;
+        }
+        return task is { IsCompletedSuccessfully: true } ? task.Result : null;
+    }
+
+    /// <summary>
+    /// GIF content inside a chat bubble: a themed plate underlay, the decoded
+    /// animation (or first frame under reduced motion), and a restrained
+    /// loading/failed state. Decode only starts once the row is on screen -
+    /// scrolled-away history never spins up animation work.
+    /// </summary>
+    private void DrawChatGif(ImDrawListPtr dl, Vector2 pos,
+        Services.E2ee.ChatContentCodec.GifContent gif,
+        Services.Gifs.GifItem? meta, Vector2 size,
+        float rounding, float alpha)
+    {
+        var max = pos + size;
+        var plate = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+            SpheneUI.Layout.NavRailBandColor(), 0.9f * alpha));
+        dl.AddRectFilled(pos, max, plate, rounding);
+        if (!ImGui.IsRectVisible(pos, max))
+        {
+            return;
+        }
+        var bytes = ResolveChatGifBytes(gif.Provider + ":" + gif.Id, meta);
+        var anim = bytes != null
+            ? SpheneUI.Media.Animated("chat-gif:" + gif.Id, bytes) : null;
+        if (anim == null)
+        {
+            // bounded pending/failed state - the message stays a small
+            // plate with a muted label, never a broken-media crater.
+            var labelCol = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                SpheneUI.Colors.TextMuted, 0.8f * alpha));
+            var label = "GIF";
+            var ls = ImGui.CalcTextSize(label);
+            dl.AddText(pos + (size - ls) * 0.5f, labelCol, label);
+            return;
+        }
+        _chatGifAnimKeys.Add("chat-gif:" + gif.Id);
+        double? time = _configService.Current.ChatGifAnimation ? null : 0.0;
+        SpheneUI.Media.AnimatedInRect(dl, anim, pos, max,
+            ImageFit.Fit,
+            new Vector4(1f, 1f, 1f, alpha), rounding, time);
     }
 
     /// <summary>

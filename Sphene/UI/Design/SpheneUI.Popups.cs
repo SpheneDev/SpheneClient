@@ -431,6 +431,7 @@ public static partial class SpheneUI
             public Vector2 AnchorMax;
             public bool JustOpened;
             public bool WasFocused;
+            public bool PreferAbove;
             public int LastFrame = -1;
         }
 
@@ -463,13 +464,14 @@ public static partial class SpheneUI
         /// which lose their first open frame against the dropdown's own
         /// <see cref="ImGuiWindowFlags.Popup"/> layer and focus pinning.
         /// </summary>
-        public static void ToggleFlyout(string id)
+        public static void ToggleFlyout(string id, bool preferAbove = false)
         {
             if (!_flyouts.TryGetValue(id, out var st))
             {
                 st = new FlyoutState();
                 _flyouts[id] = st;
             }
+            st.PreferAbove = preferAbove;
             st.Open = !st.Open;
             st.AnchorMin = ImGui.GetItemRectMin();
             st.AnchorMax = ImGui.GetItemRectMax();
@@ -552,7 +554,10 @@ public static partial class SpheneUI
             }
             var disp = ImGui.GetIO().DisplaySize;
             var gap = 4f * Scale;
-            var flip = st.AnchorMax.Y + gap + 260f * Scale > disp.Y - 4f;
+            // preferAbove flips only when the upper side has more room - a
+            // trigger near the top edge would clip a tall panel otherwise.
+            var flip = (st.PreferAbove && st.AnchorMin.Y > disp.Y - st.AnchorMax.Y)
+                || st.AnchorMax.Y + gap + 260f * Scale > disp.Y - 4f;
             // horizontal edge guard · the panel normally expands leftward from
             // the anchor's right edge - near the left screen edge it mirrors
             // and expands rightward from the anchor's left edge instead.
