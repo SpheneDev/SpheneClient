@@ -300,6 +300,28 @@ public partial class ApiController
             nameof(UserMigrateChatMessage), messageId, copies).ConfigureAwait(false);
     }
 
+    /// <summary>Compare-and-swap write of the encrypted chat key backup:
+    /// applies only while <paramref name="expectedRevision"/> still matches
+    /// the stored revision. The result carries the new revision, or the
+    /// conflicting server state for a merge retry.</summary>
+    public async Task<ChatKeyBackupResult> UserPutChatKeyBackup(byte[] blob,
+        long expectedRevision)
+    {
+        if (!IsConnected) return new ChatKeyBackupResult(false, -1, null);
+        return await _spheneHub!.InvokeAsync<ChatKeyBackupResult>(
+            nameof(UserPutChatKeyBackup), blob, expectedRevision)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The own encrypted chat key backup plus server revision; null
+    /// when none exists.</summary>
+    public async Task<ChatKeyBackupDto?> UserGetChatKeyBackup()
+    {
+        if (!IsConnected) return null;
+        return await _spheneHub!.InvokeAsync<ChatKeyBackupDto?>(
+            nameof(UserGetChatKeyBackup)).ConfigureAwait(false);
+    }
+
     /// <summary>Newest-first durable notifications for the signed-in user.</summary>
     public async Task<List<UserNotificationDto>> UserGetNotifications(int take = 50)
     {

@@ -77,6 +77,24 @@ public sealed class ChatKeyStore
         }
     }
 
+    /// <summary>Persists a foreign-installation device identity (restored from
+    /// the encrypted key backup) without making it current - imported keys
+    /// exist purely so ciphertexts addressed to them still open. Returns
+    /// false when the device id is already stored.</summary>
+    public bool ImportDevice(ChatDeviceKeyMaterial material)
+    {
+        lock (_ioLock)
+        {
+            if (LoadAll().Any(k => string.Equals(k.DeviceId,
+                    material.DeviceId, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+            Persist(material);
+            return true;
+        }
+    }
+
     /// <summary>Creates a new identity and makes it current. The previous key
     /// is kept for decryption; the caller revokes it server-side.</summary>
     public ChatDeviceKeyMaterial Rotate()

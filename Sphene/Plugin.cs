@@ -577,6 +577,14 @@ public sealed class Plugin : IAsyncDalamudPlugin
                 s.GetRequiredService<ApiController>(),
                 s.GetRequiredService<Services.E2ee.ChatKeyStore>(),
                 _pluginInterface.ConfigDirectory.FullName));
+            collection.AddSingleton(s => new Services.E2ee.ChatKeyVaultService(
+                s.GetRequiredService<ILogger<Services.E2ee.ChatKeyVaultService>>(),
+                s.GetRequiredService<SpheneMediator>(),
+                s.GetRequiredService<ApiController>(),
+                s.GetRequiredService<Services.E2ee.ChatKeyStore>(),
+                s.GetRequiredService<Services.E2ee.ChatCryptoService>(),
+                s.GetRequiredService<ServerConfigurationManager>(),
+                _pluginInterface.ConfigDirectory.FullName));
             
             collection.AddScoped((s) => new UiService(s.GetRequiredService<ILogger<UiService>>(), _pluginInterface.UiBuilder, s.GetRequiredService<SpheneConfigService>(),
                 s.GetRequiredService<WindowSystem>(), s.GetServices<WindowMediatorSubscriberBase>(),
@@ -626,6 +634,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<AnnouncementService>());
             collection.AddHostedService(p => p.GetRequiredService<ChatService>());
             collection.AddHostedService(p => p.GetRequiredService<Services.E2ee.ChatCryptoService>());
+            collection.AddHostedService(p => p.GetRequiredService<Services.E2ee.ChatKeyVaultService>());
             collection.AddHostedService(p => p.GetRequiredService<SphenePlugin>());
             collection.AddSingleton<CharacterIdentityService>();
             collection.AddHostedService(p => p.GetRequiredService<CharacterIdentityService>());

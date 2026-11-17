@@ -110,6 +110,10 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
                     TimeSpan.FromSeconds(5), SuppressInbox: true));
             }
         });
+        // Device keys restored from the account key backup can open rows
+        // that resolved as undecryptable before - retry them in place.
+        Mediator.Subscribe<ChatKeysRestoredMessage>(this,
+            _ => ReResolveUndecryptable());
     }
 
     public int UnreadCount => _unread.Count;
@@ -430,6 +434,28 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
         return _crypto.TryOpen(dto, out var text)
             ? new(dto, text, ChatEntryState.Sealed)
             : new(dto, null, ChatEntryState.Undecryptable);
+    }
+
+    /// <summary>Retries every undecryptable entry across loaded conversations -
+    /// runs after device keys were restored from the account key backup.</summary>
+    private void ReResolveUndecryptable()
+    {
+        foreach (var (_, list) in _history)
+        {
+            lock (list)
+            {
+                for (var i = 0; i < list.Count; i++)
+                {
+                    var entry = list[i];
+                    if (entry.State != ChatEntryState.Undecryptable
+                        || !_crypto.TryOpen(entry.Dto, out var text))
+                    {
+                        continue;
+                    }
+                    list[i] = new ChatEntry(entry.Dto, text, ChatEntryState.Sealed);
+                }
+            }
+        }
     }
 
     /// <summary>

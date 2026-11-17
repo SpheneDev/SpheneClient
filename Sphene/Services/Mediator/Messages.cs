@@ -160,6 +160,15 @@ public record ChatMessageReadyMessage(string OtherUid, Services.ChatEntry Entry)
 /// client first learned it - the conversation UI surfaces a warning.</summary>
 public record ChatPeerKeyChangedMessage(string OtherUid) : MessageBase;
 
+/// <summary>Device keys were restored from the encrypted account key backup -
+/// entries that previously failed to open may now decrypt.</summary>
+public record ChatKeysRestoredMessage : MessageBase;
+
+/// <summary>The server-stored chat key backup exists but cannot be unwrapped
+/// with the current secret and cannot be proven locally-authored - it is
+/// preserved unchanged and all local keys remain.</summary>
+public record ChatKeyVaultBlockedMessage(long Revision) : MessageBase;
+
 public enum SpheneHubPage
 {
     Profile = 0,

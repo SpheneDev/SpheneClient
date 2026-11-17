@@ -410,6 +410,58 @@ public sealed class ChatCryptoService : DisposableMediatorSubscriberBase, IHoste
         }
     }
 
+    /// <summary>Serialized TOFU baseline for the encrypted key backup; null
+    /// while no peer key material was learned yet.</summary>
+    public string? ExportTofu()
+    {
+        lock (_tofuLock)
+        {
+            var tofu = LoadTofu();
+            return tofu.Peers.Count == 0 ? null : JsonSerializer.Serialize(tofu);
+        }
+    }
+
+    /// <summary>Merges a restored TOFU baseline - unknown uid/deviceId pairs
+    /// are added, locally learned entries always win so a stale backup can
+    /// never downgrade the trust state.</summary>
+    public void ImportTofu(string json)
+    {
+        TofuFile? backup;
+        try
+        {
+            backup = JsonSerializer.Deserialize<TofuFile>(json);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+        if (backup == null || backup.Peers.Count == 0) return;
+        lock (_tofuLock)
+        {
+            var tofu = LoadTofu();
+            var added = false;
+            foreach (var (uid, devices) in backup.Peers)
+            {
+                if (!tofu.Peers.TryGetValue(uid, out var seen))
+                {
+                    tofu.Peers[uid] = seen = new(StringComparer.Ordinal);
+                }
+                foreach (var (deviceId, fingerprint) in devices)
+                {
+                    if (!seen.ContainsKey(deviceId))
+                    {
+                        seen[deviceId] = fingerprint;
+                        added = true;
+                    }
+                }
+            }
+            if (added)
+            {
+                SaveTofu(tofu);
+            }
+        }
+    }
+
     private void InvalidateKeyCache()
     {
         _keyCache.Clear();
