@@ -248,11 +248,25 @@ internal static class NotificationInbox
     {
         if (item.Payload is not UserNotificationDto dto) return null;
         var itemId = long.TryParse(dto.ContentId, out var parsed) ? parsed : (long?)null;
+        // Blog targets deep-link into the Chronicle reader on the owner's
+        // profile - SubContentId carries the comment to scroll to.
+        if (string.Equals(dto.ContentKind, "blog", StringComparison.Ordinal) && itemId != null)
+        {
+            var commentId = long.TryParse(dto.SubContentId, out var cid) ? cid : (long?)null;
+            return (m, inbox, i) =>
+            {
+                m.Publish(new OpenSpheneHubMessage(
+                    ChronicleOwnerUid: dto.TargetUid,
+                    ChroniclePostId: itemId,
+                    FocusCommentId: commentId));
+                inbox.Dismiss(i.Id);
+            };
+        }
         SyncshellCommunitySection? section = dto.ContentKind switch
         {
             "news" => SyncshellCommunitySection.News,
             "event" => SyncshellCommunitySection.Events,
-            // blog/comment/report rows have no hub-surface target - landing
+            // comment/report rows have no hub-surface target - landing
             // on the community page itself is the honest destination.
             _ => null,
         };

@@ -275,7 +275,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         int? SubPage = null, string? HousingKey = null,
         string? ReleaseVersion = null,
         long? AnnouncementId = null, bool AnnouncementEdit = false,
-        SyncshellCommunitySection? CommunitySection = null, long? CommunityItemId = null);
+        SyncshellCommunitySection? CommunitySection = null, long? CommunityItemId = null,
+        /// <summary>Chronicle deep-link - the reader opens this post on the
+        /// location's owner (friend or self) and focuses the comment.</summary>
+        long? ChroniclePostId = null, long? FocusCommentId = null);
     private readonly List<HubLocation> _navBack = [];
     private readonly List<HubLocation> _navForward = [];
 
@@ -370,6 +373,25 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 if (syncshellSub == SyncshellHubSubPage.Join && msg.JoinGid != null)
                 {
                     _joinSyncshellUi.PrefillTarget(msg.JoinGid);
+                }
+            }
+            else if (msg.ChroniclePostId is { } chronId)
+            {
+                // Chronicle deep-link: own notifications land on the profile's
+                // Chronicles tab, someone else's on their friend page - the
+                // reader opens the post and focuses the comment inline.
+                var owner = msg.ChronicleOwnerUid;
+                var ownUid = _apiController.UID;
+                if (owner == null || string.Equals(owner, ownUid, StringComparison.Ordinal))
+                {
+                    NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null, 2,
+                        ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId));
+                }
+                else if (FindPairByUid(owner) is { } ownerPair)
+                {
+                    NavigateTo(new HubLocation(SpheneHubPage.Friends, null, ownerPair,
+                        (int)FriendHubSubPage.Chronicles,
+                        ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId));
                 }
             }
             else if (msg.Friend != null)
@@ -1176,6 +1198,23 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _communityPage.PickingAlbumPhotos = false;
             _communityPage.Subpage = SyncshellCommunityView.CommunitySubpage.None;
             _communityPage.SwitchT = 0f;
+        }
+        // Chronicle deep-links: the reader opens once the post list resolves
+        // the id; the comment focus waits in the thread view until the
+        // discussion loads it (auto-paginating roots/replies meanwhile).
+        if (target.ChroniclePostId is { } chronId)
+        {
+            var ownerUid = target.Page == SpheneHubPage.Friends
+                ? target.Friend?.UserData.UID
+                : _apiController.UID;
+            if (ownerUid != null)
+            {
+                _openChronicle = (ownerUid, chronId);
+                if (target.FocusCommentId is { } focusId)
+                {
+                    _blogComments.FocusComment(CommentTargetKind.Blog, chronId, focusId);
+                }
+            }
         }
         if (IsProfileFamily(_activePage) && !IsProfileFamily(target.Page))
         {

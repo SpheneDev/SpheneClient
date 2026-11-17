@@ -57,6 +57,15 @@ public sealed class CommentThreadView
         public ReactionSummaryDto? TargetSummary;
         public bool TargetSummaryLoaded;
         public readonly HashSet<long> SummariesLoading = [];
+        /// <summary>Deep-link target - scrolls to this comment once loaded;
+        /// auto-paginates roots/replies while searching. Survives Reset so a
+        /// mid-flight invalidate cannot lose the destination.</summary>
+        public long? PendingFocusCommentId;
+        /// <summary>One focus-driven page fetch at a time.</summary>
+        public bool FocusBusy;
+        /// <summary>Roots whose reply pages came back empty during a focus
+        /// walk - a stale ReplyCount must not retrigger fetches forever.</summary>
+        public readonly HashSet<long> FocusExhaustedRoots = [];
 
         /// <summary>Drops all loaded content so the next Draw refetches.
         /// Expander state and in-progress drafts survive.</summary>
@@ -71,6 +80,7 @@ public sealed class CommentThreadView
             TargetSummary = null;
             TargetSummaryLoaded = false;
             SummariesLoading.Clear();
+            FocusExhaustedRoots.Clear();
         }
     }
 
@@ -99,6 +109,19 @@ public sealed class CommentThreadView
     public void InvalidateAll()
     {
         foreach (var st in _threads.Values) st.Reset();
+    }
+
+    /// <summary>Arms a comment deep-link - the next Draw walks the thread to
+    /// the comment (auto-expanding its root for replies) and scrolls to it.
+    /// Comments still on unloaded pages are fetched first.</summary>
+    public void FocusComment(CommentTargetKind kind, long targetId, long commentId)
+    {
+        var key = $"{(int)kind}:{targetId}";
+        if (!_threads.TryGetValue(key, out var st))
+        {
+            _threads[key] = st = new ThreadState();
+        }
+        st.PendingFocusCommentId = commentId;
     }
 
     /// <summary>Invalidates the thread matching a pushed community change;
@@ -153,6 +176,7 @@ public sealed class CommentThreadView
                 captured.Loading = false;
             });
         }
+        ResolveFocus(ops, st);
 
         ImGui.PushID($"cmt-{key}");
         DrawTargetReactions(kind, targetId, ownerUid, groupGid, ops, st);
@@ -310,6 +334,13 @@ public sealed class CommentThreadView
         bool locked)
     {
         ImGui.PushID($"c{c.Id}");
+        // deep-link landing - one-shot scroll so the comment sits a third
+        // down the window, then the pending target clears
+        if (st.PendingFocusCommentId == c.Id)
+        {
+            ImGui.SetScrollHereY(0.35f);
+            st.PendingFocusCommentId = null;
+        }
         var authorUid = c.Author?.UID;
         var name = (authorUid == null ? null : ops.DisplayName?.Invoke(authorUid))
             ?? AuthorName(c.Author) ?? "Unknown user";
@@ -688,6 +719,119 @@ public sealed class CommentThreadView
                 }
                 replies.Add(saved);
                 BumpRootReplyCount(st, parentId.Value, +1);
+            }
+        });
+    }
+
+    /// <summary>Walks a pending focus target to its comment: already-loaded
+    /// replies just expand their root; unloaded ones pull one page at a time
+    /// (roots first, then the root with unfetched replies). When nothing is
+    /// left to load the comment is gone - the focus clears instead of
+    /// spinning forever.</summary>
+    private static void ResolveFocus(CommentOps ops, ThreadState st)
+    {
+        if (st.PendingFocusCommentId is not { } focusId || !st.Loaded || st.FocusBusy)
+        {
+            return;
+        }
+        if (TryLocateComment(st, focusId, out var parentId))
+        {
+            if (parentId is { } pid)
+            {
+                st.Expanded.Add(pid);
+            }
+            return;
+        }
+        if (st.NextCursor != null && ops.LoadRoots != null)
+        {
+            AdvanceFocusLoad(ops, st, null);
+            return;
+        }
+        var nextRoot = FirstRootWithMoreReplies(st);
+        if (nextRoot is { } rid && ops.LoadReplies != null)
+        {
+            AdvanceFocusLoad(ops, st, rid);
+            return;
+        }
+        st.PendingFocusCommentId = null;
+    }
+
+    /// <summary>True when the comment sits in loaded state - a root clears
+    /// <paramref name="parentId"/>, a reply sets it to its root id.</summary>
+    private static bool TryLocateComment(ThreadState st, long id, out long? parentId)
+    {
+        parentId = null;
+        foreach (var root in st.Roots)
+        {
+            if (root.Id == id) return true;
+        }
+        foreach (var kv in st.Replies)
+        {
+            foreach (var reply in kv.Value)
+            {
+                if (reply.Id == id)
+                {
+                    parentId = kv.Key;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static long? FirstRootWithMoreReplies(ThreadState st)
+    {
+        foreach (var root in st.Roots)
+        {
+            if (st.FocusExhaustedRoots.Contains(root.Id)) continue;
+            var loaded = st.Replies.TryGetValue(root.Id, out var list) ? list.Count : 0;
+            if (root.ReplyCount > loaded) return root.Id;
+        }
+        return null;
+    }
+
+    /// <summary>Fetches the next slice for the pending focus - a roots page,
+    /// or the next replies page of the first root that still has unfetched
+    /// replies. <see cref="ThreadState.FocusBusy"/> gates one fetch at a
+    /// time.</summary>
+    private static void AdvanceFocusLoad(CommentOps ops, ThreadState st, long? rootId)
+    {
+        st.FocusBusy = true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (rootId == null)
+                {
+                    var page = await ops.LoadRoots!(st.NextCursor).ConfigureAwait(false);
+                    if (page == null) return;
+                    st.Roots.AddRange(page.Roots);
+                    st.NextCursor = page.NextCursor;
+                    foreach (var kv in page.ReplyPreviews)
+                    {
+                        st.Replies[kv.Key] = kv.Value;
+                    }
+                }
+                else if (ops.LoadReplies != null)
+                {
+                    var cursor = st.Replies.TryGetValue(rootId.Value, out var list)
+                        && list.Count > 0 ? list[^1].Id : (long?)null;
+                    var page = await ops.LoadReplies(rootId.Value, cursor).ConfigureAwait(false);
+                    if (page == null || page.Roots.Count == 0)
+                    {
+                        st.FocusExhaustedRoots.Add(rootId.Value);
+                        return;
+                    }
+                    if (!st.Replies.TryGetValue(rootId.Value, out var replies))
+                    {
+                        st.Replies[rootId.Value] = replies = [];
+                    }
+                    replies.AddRange(page.Roots);
+                }
+            }
+            finally
+            {
+                st.FocusBusy = false;
             }
         });
     }

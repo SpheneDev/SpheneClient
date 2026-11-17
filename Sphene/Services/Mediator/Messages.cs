@@ -220,7 +220,13 @@ public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid 
     long? EditEventId = null, SyncshellEventOccurrenceDto? EditOccurrence = null,
     /// <summary>Friend-detail deep-link - opens <paramref name="Friend"/> on
     /// this tab instead of the default Profile tab.</summary>
-    FriendHubSubPage? FriendSub = null) : MessageBase;
+    FriendHubSubPage? FriendSub = null,
+    /// <summary>Chronicle deep-link - opens the blog post in the reader on the
+    /// owner's Chronicles tab (own profile when <paramref name="ChronicleOwnerUid"/>
+    /// is null/self, the friend's page otherwise) and scrolls the discussion to
+    /// <paramref name="FocusCommentId"/> when set.</summary>
+    string? ChronicleOwnerUid = null, long? ChroniclePostId = null,
+    long? FocusCommentId = null) : MessageBase;
 
 /// <summary>The user opened a DM conversation - unread surfaces (inbox row,
 /// badges) for that peer should clear.</summary>
