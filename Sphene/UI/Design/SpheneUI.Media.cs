@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Threading;
 using System.Threading.Tasks;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
@@ -236,6 +237,10 @@ public static partial class SpheneUI
             public required int FrameCount { get; init; }
             public required int FrameWidth { get; init; }
             public required int FrameHeight { get; init; }
+            /// <summary>Atlas grid layout - frames tile column-major inside a
+            /// texture that must stay under the GPU's max-dimension bound.</summary>
+            public required int AtlasColumns { get; init; }
+            public required int AtlasRows { get; init; }
             public required IReadOnlyList<float> Durations { get; init; }
             public float TotalDuration { get; init; }
 
@@ -267,8 +272,17 @@ public static partial class SpheneUI
 
         private static readonly ConcurrentDictionary<string, Task<AnimatedImage?>> _animated
             = new(StringComparer.Ordinal);
+        /// <summary>Animated decode (ImageSharp + atlas composite + PNG
+        /// encode + texture upload) saturates a whole core per job - a full
+        /// picker grid decodes in waves instead of hitching the render
+        /// thread's neighbors.</summary>
+        private static readonly SemaphoreSlim _decodeSlots = new(2, 2);
         private const int MaxAnimatedFrames = 48;
         private const int MaxAnimatedDimension = 512;
+        /// <summary>D3D11 hard texture bound - a horizontal frame strip of
+        /// 48 × ~400px frames overflows it and the upload throws, so the
+        /// atlas tiles frames into a grid that stays inside both axes.</summary>
+        private const int MaxAtlasDimension = 16384;
         private const int GradientCornerSegments = 8;
 
         /// <summary>
@@ -397,9 +411,12 @@ public static partial class SpheneUI
             var idx = anim.FrameIndexAt(time ?? ImGui.GetTime());
             FitRect(min, max, new Vector2(anim.FrameWidth, anim.FrameHeight), fit,
                 out var rectMin, out var rectMax, out var uv0, out var uv1);
-            var frameW = 1f / anim.FrameCount;
-            var au0 = new Vector2((idx + uv0.X) * frameW, uv0.Y);
-            var au1 = new Vector2((idx + uv1.X) * frameW, uv1.Y);
+            var col = idx % anim.AtlasColumns;
+            var row = idx / anim.AtlasColumns;
+            var cellU = 1f / anim.AtlasColumns;
+            var cellV = 1f / anim.AtlasRows;
+            var au0 = new Vector2((col + uv0.X) * cellU, (row + uv0.Y) * cellV);
+            var au1 = new Vector2((col + uv1.X) * cellU, (row + uv1.Y) * cellV);
             var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : ImGui.GetColorU32(Vector4.One);
             if (rounding > 0.5f)
             {
@@ -414,6 +431,7 @@ public static partial class SpheneUI
         /// <summary>Composites all frames (GIF disposal applied by the decoder) into one atlas.</summary>
         private static async Task<AnimatedImage?> DecodeAnimatedAsync(byte[] data)
         {
+            await _decodeSlots.WaitAsync().ConfigureAwait(false);
             try
             {
                 using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(data);
@@ -427,20 +445,28 @@ public static partial class SpheneUI
 
                 var frameCount = Math.Clamp(image.Frames.Count, 1, MaxAnimatedFrames);
                 var durations = new float[frameCount];
-                using var atlas = new Image<Rgba32>(frameWidth * frameCount, frameHeight);
+                // a horizontal strip overflows the 16384px texture bound for
+                // wide media x many frames - tile into a grid instead
+                var columns = Math.Min(frameCount,
+                    Math.Max(1, MaxAtlasDimension / frameWidth));
+                var rows = (frameCount + columns - 1) / columns;
+                using var atlas = new Image<Rgba32>(columns * frameWidth,
+                    rows * frameHeight);
                 var framePixels = new Rgba32[frameWidth * frameHeight];
                 for (var i = 0; i < frameCount; i++)
                 {
                     var frame = image.Frames[i];
                     durations[i] = FrameDelaySeconds(frame);
                     frame.CopyPixelDataTo(framePixels);
-                    var xOffset = i * frameWidth;
+                    var xOffset = (i % columns) * frameWidth;
+                    var yOffset = (i / columns) * frameHeight;
                     atlas.ProcessPixelRows(accessor =>
                     {
                         for (var y = 0; y < frameHeight; y++)
                         {
                             framePixels.AsSpan(y * frameWidth, frameWidth)
-                                .CopyTo(accessor.GetRowSpan(y).Slice(xOffset, frameWidth));
+                                .CopyTo(accessor.GetRowSpan(yOffset + y)
+                                    .Slice(xOffset, frameWidth));
                         }
                     });
                 }
@@ -456,6 +482,8 @@ public static partial class SpheneUI
                     FrameCount = frameCount,
                     FrameWidth = frameWidth,
                     FrameHeight = frameHeight,
+                    AtlasColumns = columns,
+                    AtlasRows = rows,
                     Durations = durations,
                     TotalDuration = total,
                 };
@@ -464,6 +492,10 @@ public static partial class SpheneUI
             {
                 LogError(ex, "Media: animated image decode failed");
                 return null;
+            }
+            finally
+            {
+                _decodeSlots.Release();
             }
         }
 

@@ -31,11 +31,18 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     private const int NegativeCacheSeconds = 600;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(15);
 
-    private static readonly string[] MediaPreference = ["gif", "mediumgif", "tinygif"];
-    private static readonly string[] PreviewPreference = ["tinygif", "nanogif", "gif"];
+    // file-group preference: md (~300px) fits the 320px bubble best, sm as
+    // the 220px fallback, hd only when nothing smaller exists (size-capped).
+    private static readonly string[] MediaPreference = ["md", "sm", "hd", "xs"];
+    private static readonly string[] PreviewPreference = ["sm", "xs", "md"];
 
     private const int MaxPersistedMeta = 512;
     private const string MetaFileName = "gif-meta.json";
+    /// <summary>Session-scoped media byte budget - KLIPY terms forbid
+    /// retaining media on disk, so recently fetched GIFs/previews live in
+    /// an LRU that is dropped with the process. Re-opened conversations
+    /// never refetch the network for media already shown this session.</summary>
+    private const long MaxCachedMediaBytes = 48L * 1024 * 1024;
 
     private readonly HttpClient _http = new() { Timeout = RequestTimeout };
     private readonly SpheneConfigService _configService;
@@ -43,6 +50,9 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     private readonly ConcurrentDictionary<string, GifItem> _meta = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _metaOrder = new();
     private readonly ConcurrentDictionary<string, Task<byte[]?>> _pendingBytes = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte[]> _byteCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentQueue<(string Key, int Size)> _byteOrder = new();
+    private long _byteCacheSize;
     private readonly ConcurrentDictionary<string, DateTime> _negative = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _searchLock = new(1, 1);
     private readonly System.Threading.Lock _metaFileLock = new();
@@ -157,8 +167,14 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     /// <inheritdoc cref="IGifProvider.GetByIdAsync"/>
     public async Task<GifItem?> GetByIdAsync(string id, CancellationToken ct)
     {
-        EnsureMetaLoaded();
+        // in-memory hits (search-parse, prior lookups) never touch the disk
+        // load - the file read only pays for true misses, once
         if (_meta.TryGetValue(id, out var cached))
+        {
+            return cached;
+        }
+        EnsureMetaLoaded();
+        if (_meta.TryGetValue(id, out cached))
         {
             return cached;
         }
@@ -184,6 +200,11 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
                 TrackMeta(item);
                 FlushMeta();
             }
+            else
+            {
+                // parse-null would otherwise retry every frame the message renders
+                MarkNegative(id);
+            }
             _metrics.Record(GifApiMetrics.Kind.Lookup);
             return item;
         }
@@ -202,11 +223,11 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
 
     /// <inheritdoc cref="IGifProvider.FetchPreviewBytesAsync"/>
     public Task<byte[]?> FetchPreviewBytesAsync(GifItem item, CancellationToken ct)
-        => FetchBytesAsync(item, item.PreviewUrl, item.Id + ".prev", GifApiMetrics.Kind.Preview, ct);
+        => FetchBytesAsync(item.PreviewUrl, item.Id + ".prev", GifApiMetrics.Kind.Preview, ct);
 
     /// <inheritdoc cref="IGifProvider.FetchGifBytesAsync"/>
     public Task<byte[]?> FetchGifBytesAsync(GifItem item, CancellationToken ct)
-        => FetchBytesAsync(item, item.MediaUrl, item.Id, GifApiMetrics.Kind.Media, ct);
+        => FetchBytesAsync(item.MediaUrl, item.Id, GifApiMetrics.Kind.Media, ct);
 
     /// <inheritdoc cref="IGifProvider.RegisterShare"/>
     public void RegisterShare(GifItem item)
@@ -219,8 +240,12 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         {
             try
             {
+                // spec: POST /{key}/gifs/share/{slug} with customer_id body
                 var url = $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/gifs/share/{Uri.EscapeDataString(item.Id)}";
                 using var req = new HttpRequestMessage(HttpMethod.Post, url);
+                req.Content = new StringContent(
+                    $"{{\"customer_id\":\"{CustomerId}\"}}",
+                    System.Text.Encoding.UTF8, "application/json");
                 using var resp = await _http.SendAsync(req).ConfigureAwait(false);
                 _metrics.Record(GifApiMetrics.Kind.Share,
                     failed: !resp.IsSuccessStatusCode,
@@ -237,7 +262,8 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     private string PageUrl(string endpoint, int page)
         => $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/gifs/{endpoint}"
             + $"?page={page + 1}&per_page={PageSize}"
-            + $"&customer_id={Uri.EscapeDataString(CustomerId)}";
+            + $"&customer_id={Uri.EscapeDataString(CustomerId)}"
+            + "&format_filter=gif";
 
     /// <summary>
     /// Media bytes are consent-gated only - no API key needed. KLIPY media
@@ -245,14 +271,28 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     /// revoked can still read existing chat history without regaining
     /// search/create capability.
     /// </summary>
-    private Task<byte[]?> FetchBytesAsync(GifItem item, string? mediaUrl, string cacheKey,
+    private Task<byte[]?> FetchBytesAsync(string? mediaUrl, string cacheKey,
         GifApiMetrics.Kind kind, CancellationToken ct)
     {
-        if (IsNegative(item.Id) || !ConsentGiven || mediaUrl == null)
+        // negative marks are scoped to the fetch target: a failed preview
+        // fetch must not poison the media fetch (or meta lookup) of the
+        // same item for the whole cooldown
+        // session-scoped byte cache: re-opening a chat or the picker never
+        // refetches the network (KLIPY terms forbid disk persistence, so
+        // the cache stays memory-only). Hits win over negative marks - a
+        // later failed lookup/fetch must not hide bytes already fetched.
+        if (_byteCache.TryGetValue(cacheKey, out var cached))
+        {
+            return Task.FromResult<byte[]?>(cached);
+        }
+        // negative marks are scoped to the fetch target: a failed preview
+        // fetch must not poison the media fetch (or meta lookup) of the
+        // same item for the whole cooldown
+        if (IsNegative(cacheKey) || !ConsentGiven || mediaUrl == null)
         {
             return Task.FromResult<byte[]?>(null);
         }
-        return _pendingBytes.GetOrAdd(cacheKey, key => FetchCoreAsync(item.Id, mediaUrl, key, kind, ct));
+        return _pendingBytes.GetOrAdd(cacheKey, key => FetchCoreAsync(key, mediaUrl, key, kind, ct));
     }
 
     private async Task<byte[]?> FetchCoreAsync(string id, string mediaUrl, string cacheKey,
@@ -270,6 +310,11 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             if (!CheckResponse(resp, id))
             {
                 _metrics.Record(kind, failed: !RateLimited, throttled: RateLimited);
+                if (!RateLimited)
+                {
+                    Logger.LogDebug("KLIPY: media fetch {id} returned {status}",
+                        id, (int)resp.StatusCode);
+                }
                 return null;
             }
             if (resp.Content.Headers.ContentLength > MaxDownloadBytes)
@@ -280,6 +325,16 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             }
             var bytes = await ReadBoundedAsync(resp, ct).ConfigureAwait(false);
             _metrics.Record(kind, failed: bytes == null);
+            if (bytes == null)
+            {
+                // oversize aborts land here - without the negative mark the
+                // bubble would refetch every frame it is visible
+                MarkNegative(id);
+            }
+            else
+            {
+                CacheBytes(cacheKey, bytes);
+            }
             return bytes;
         }
         catch (OperationCanceledException)
@@ -368,8 +423,11 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             var bytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(bytes);
             var items = new List<GifItem>();
-            if (doc.RootElement.TryGetProperty("results", out var results)
-                && results.ValueKind == JsonValueKind.Array)
+            var hasMore = false;
+            // v1 envelope: { result, data: { data: [items], has_next, … } }
+            // a 200 whose body we can't itemize must leave a debug trail -
+            // a shape change otherwise surfaces as an unexplained empty grid
+            if (TryItemsArray(doc.RootElement, out var results))
             {
                 foreach (var el in results.EnumerateArray())
                 {
@@ -381,11 +439,25 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
                     }
                 }
             }
-            // Preserve provider ordering verbatim - KLIPY terms forbid
-            // reordering or filtering the returned result composition.
-            var hasMore = items.Count >= PageSize;
+            else
+            {
+                Logger.LogDebug("KLIPY: {kind} response had no data[] payload ({bytes} bytes)",
+                    kind, bytes.Length);
+            }
+            if (doc.RootElement.TryGetProperty("data", out var dataEl)
+                && dataEl.ValueKind == JsonValueKind.Object
+                && dataEl.TryGetProperty("has_next", out var hn))
+            {
+                hasMore = hn.ValueKind == JsonValueKind.True;
+            }
+            else
+            {
+                hasMore = items.Count >= PageSize;
+            }
             _metrics.Record(kind);
             FlushMeta();
+            // Preserve provider ordering verbatim - KLIPY terms forbid
+            // reordering or filtering the returned result composition.
             return new GifPage(items, hasMore);
         }
         catch (OperationCanceledException)
@@ -404,10 +476,29 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         }
     }
 
+    /// <summary>Unwraps the v1 envelope <c>{result, data:{data:[…]}}</c>;
+    /// tolerates a bare <c>data:[…]</c> body too (items lookup shape).</summary>
+    private static bool TryItemsArray(JsonElement root, out JsonElement results)
+    {
+        if (root.TryGetProperty("data", out var data)
+            && data.ValueKind == JsonValueKind.Object
+            && data.TryGetProperty("data", out results)
+            && results.ValueKind == JsonValueKind.Array)
+        {
+            return true;
+        }
+        if (root.TryGetProperty("data", out results)
+            && results.ValueKind == JsonValueKind.Array)
+        {
+            return true;
+        }
+        results = default;
+        return false;
+    }
+
     private static GifItem? FirstItem(JsonElement root)
     {
-        if (!root.TryGetProperty("results", out var results)
-            || results.ValueKind != JsonValueKind.Array)
+        if (!TryItemsArray(root, out var results))
         {
             return null;
         }
@@ -442,32 +533,35 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     }
 
     /// <summary>
-    /// Parses one result object (Tenor-shaped <c>media_formats</c> map). The
-    /// media rendition is the preferred format whose declared size fits the
-    /// download bound; the preview prefers the small animated thumbnail.
+    /// Parses one v1 item ({slug, title, file:{hd|md|sm|xs:{gif:{url,width,
+    /// height,size}}}}). The media rendition is the preferred size group
+    /// whose declared byte size fits the download bound; the preview
+    /// prefers the small animated thumbnail.
     /// </summary>
     private static GifItem? ParseItem(JsonElement el)
     {
         try
         {
-            var id = el.GetProperty("id").GetString();
-            if (string.IsNullOrEmpty(id) || !IsValidId(id))
+            var slug = el.TryGetProperty("slug", out var s) ? s.GetString() : null;
+            if (string.IsNullOrEmpty(slug) || !IsValidId(slug))
             {
                 return null;
             }
             var title = el.TryGetProperty("title", out var t) ? t.GetString() ?? string.Empty : string.Empty;
-            if (!el.TryGetProperty("media_formats", out var formats)
-                || formats.ValueKind != JsonValueKind.Object)
+            if (!el.TryGetProperty("file", out var file)
+                || file.ValueKind != JsonValueKind.Object)
             {
                 return null;
             }
-            var media = PickFormat(formats, MediaPreference);
+            // media dims ride the sealed payload (bounded at 512) - a group
+            // larger than that is unsendable, so it can't be the media pick
+            var media = PickFile(file, MediaPreference, maxDim: 512);
             if (media == null || media.Value.W <= 0 || media.Value.H <= 0)
             {
                 return null;
             }
-            var preview = PickFormat(formats, PreviewPreference) ?? media.Value;
-            return new GifItem(id, title, preview.Url, media.Value.Url,
+            var preview = PickFile(file, PreviewPreference, maxDim: 0) ?? media.Value;
+            return new GifItem(slug, title, preview.Url, media.Value.Url,
                 media.Value.W, media.Value.H);
         }
         catch
@@ -476,13 +570,15 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         }
     }
 
-    private static (string Url, int W, int H, long Size)? PickFormat(JsonElement formats,
-        string[] preference)
+    private static (string Url, int W, int H, long Size)? PickFile(JsonElement file,
+        string[] preference, int maxDim)
     {
         (string Url, int W, int H, long Size)? fallback = null;
-        foreach (var name in preference)
+        foreach (var sizeKey in preference)
         {
-            if (!formats.TryGetProperty(name, out var fmt)
+            if (!file.TryGetProperty(sizeKey, out var group)
+                || group.ValueKind != JsonValueKind.Object
+                || !group.TryGetProperty("gif", out var fmt)
                 || fmt.ValueKind != JsonValueKind.Object)
             {
                 continue;
@@ -492,10 +588,15 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             {
                 continue;
             }
-            var dims = ReadDims(fmt);
-            var size = fmt.TryGetProperty("size", out var s) && s.ValueKind == JsonValueKind.Number
-                ? s.GetInt64() : 0L;
-            var candidate = (url, dims.W, dims.H, size);
+            var w = ReadInt(fmt, "width");
+            var h = ReadInt(fmt, "height");
+            if (maxDim > 0 && (w > maxDim || h > maxDim))
+            {
+                continue;
+            }
+            var size = fmt.TryGetProperty("size", out var sz) && sz.ValueKind == JsonValueKind.Number
+                ? sz.GetInt64() : 0L;
+            var candidate = (url, w, h, size);
             if (size is > 0 and <= MaxDownloadBytes)
             {
                 return candidate;
@@ -505,32 +606,34 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         return fallback;
     }
 
-    private static (int W, int H) ReadDims(JsonElement fmt)
-    {
-        if (!fmt.TryGetProperty("dims", out var d) || d.ValueKind != JsonValueKind.Array)
-        {
-            return (0, 0);
-        }
-        var w = 0;
-        var h = 0;
-        var i = 0;
-        foreach (var v in d.EnumerateArray())
-        {
-            var n = v.ValueKind == JsonValueKind.Number ? v.GetInt32() : 0;
-            if (i == 0) w = n; else if (i == 1) h = n;
-            if (++i >= 2)
-            {
-                break;
-            }
-        }
-        return (w, h);
-    }
+    private static int ReadInt(JsonElement el, string name)
+        => el.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetInt32() : 0;
 
     private bool IsNegative(string id)
         => _negative.TryGetValue(id, out var until) && DateTime.UtcNow < until;
 
     private void MarkNegative(string id)
         => _negative[id] = DateTime.UtcNow.AddSeconds(NegativeCacheSeconds);
+
+    /// <summary>Stores fetched bytes in the session LRU and evicts the
+    /// oldest entries once the budget is exceeded. Eviction is approximate
+    /// under races - the budget is a bound, not a contract.</summary>
+    private void CacheBytes(string key, byte[] bytes)
+    {
+        if (!_byteCache.TryAdd(key, bytes))
+        {
+            return;
+        }
+        _byteOrder.Enqueue((key, bytes.Length));
+        Interlocked.Add(ref _byteCacheSize, bytes.Length);
+        while (Interlocked.Read(ref _byteCacheSize) > MaxCachedMediaBytes
+            && _byteOrder.TryDequeue(out var oldest)
+            && _byteCache.TryRemove(oldest.Key, out var removed))
+        {
+            Interlocked.Add(ref _byteCacheSize, -removed.Length);
+        }
+    }
 
     // -- Persisted metadata cache -------------------------------------------
     // Provider refs (id + media URLs + dims) survive restarts, so received

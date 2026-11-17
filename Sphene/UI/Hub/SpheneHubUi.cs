@@ -6633,8 +6633,23 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// provider reference rides inside the encrypted content.</summary>
     private async Task SendChatGifAsync(string uid, Services.Gifs.GifItem item)
     {
-        var failure = await _chatService.SendGif(uid, _gifProvider.ProviderId,
-            item.Id, item.Width, item.Height).ConfigureAwait(false);
+        Services.E2ee.ChatSealFailure failure;
+        try
+        {
+            failure = await _chatService.SendGif(uid, _gifProvider.ProviderId,
+                item.Id, item.Width, item.Height).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // a dropped send must never die silently on the fire-and-forget
+            _logger.LogDebug(ex, "GIF send to {UID} failed for item {Id}",
+                uid, item.Id);
+            Mediator.Publish(new NotificationMessage("GIF not sent",
+                "The GIF could not be sent. Try again.",
+                SpheneConfiguration.Models.NotificationType.Warning,
+                TimeSpan.FromSeconds(6)));
+            return;
+        }
         if (failure == Services.E2ee.ChatSealFailure.None)
         {
             _gifProvider.RegisterShare(item);
@@ -6671,16 +6686,29 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private Services.Gifs.GifItem? ResolveChatGifMeta(
         Services.E2ee.ChatContentCodec.GifContent gif)
     {
-        var key = gif.Provider + ":" + gif.Id;
-        if (!_chatGifMeta.TryGetValue(key, out var task))
+        if (!string.Equals(gif.Provider, _gifProvider.ProviderId, StringComparison.Ordinal)
+            || !_gifProvider.ConsentGiven)
         {
-            task = string.Equals(gif.Provider, _gifProvider.ProviderId, StringComparison.Ordinal)
-                ? _gifProvider.GetByIdAsync(gif.Id, CancellationToken.None)
-                : Task.FromResult<Services.Gifs.GifItem?>(null);
+            // foreign providers and consent-off users render as the
+            // bounded placeholder (the latter gets an enable button)
+            return null;
+        }
+        var key = gif.Provider + ":" + gif.Id;
+        if (!_chatGifMeta.TryGetValue(key, out var task)
+            || TaskSettledEmpty(task))
+        {
+            // a settled empty/faulted task must not pin the placeholder
+            // forever - the provider's negative cache keeps re-requests cheap
+            task = _gifProvider.GetByIdAsync(gif.Id, CancellationToken.None);
             _chatGifMeta[key] = task;
         }
         return task is { IsCompletedSuccessfully: true } ? task.Result : null;
     }
+
+    /// <summary>True for tasks that finished without a usable result
+    /// (completed-null, faulted or cancelled) and so deserve a retry.</summary>
+    private static bool TaskSettledEmpty<T>(Task<T?> task) where T : class
+        => task.IsCompleted && (!task.IsCompletedSuccessfully || task.Result == null);
 
     /// <summary>Resolves (or queues) the media bytes for a GIF message.</summary>
     private byte[]? ResolveChatGifBytes(string id,
@@ -6690,7 +6718,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             return null;
         }
-        if (!_chatGifBytes.TryGetValue(id, out var task))
+        if (!_chatGifBytes.TryGetValue(id, out var task)
+            || TaskSettledEmpty(task))
         {
             task = _gifProvider.FetchGifBytesAsync(meta, CancellationToken.None);
             _chatGifBytes[id] = task;
@@ -6717,6 +6746,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             return;
         }
+        if (!_gifProvider.ConsentGiven)
+        {
+            DrawChatGifConsent(dl, pos, size, gif.Id, alpha);
+            return;
+        }
         var bytes = ResolveChatGifBytes(gif.Provider + ":" + gif.Id, meta);
         var anim = bytes != null
             ? SpheneUI.Media.Animated("chat-gif:" + gif.Id, bytes) : null;
@@ -6736,6 +6770,38 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SpheneUI.Media.AnimatedInRect(dl, anim, pos, max,
             ImageFit.Fit,
             new Vector4(1f, 1f, 1f, alpha), rounding, time);
+    }
+
+    /// <summary>Consent prompt inside a received GIF plate when external
+    /// media is disabled: a small label plus an enable button that flips
+    /// the same flag as the picker disclosure card and Settings toggle.
+    /// </summary>
+    private void DrawChatGifConsent(ImDrawListPtr dl, Vector2 pos,
+        Vector2 size, string gifId, float alpha)
+    {
+        // every bubble needs its own ImGui id or the buttons share state
+        using var _ = ImRaii.PushId("chatgif-consent-" + gifId);
+        var style = ImGui.GetStyle();
+        var label = "GIF";
+        var ls = ImGui.CalcTextSize(label);
+        var labelCol = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+            SpheneUI.Colors.TextMuted, 0.8f * alpha));
+        const string btnLabel = "Enable";
+        var btnW = ImGui.CalcTextSize(btnLabel).X + style.FramePadding.X * 2f;
+        var gap = 6f;
+        var totalH = ls.Y + ImGui.GetFrameHeight() + gap;
+        var labelY = pos.Y + (size.Y - totalH) * 0.5f;
+        dl.AddText(new Vector2(pos.X + (size.X - ls.X) * 0.5f, labelY),
+            labelCol, label);
+        ImGui.SetCursorScreenPos(new Vector2(
+            pos.X + (size.X - btnW) * 0.5f, labelY + ls.Y + gap));
+        if (SpheneUI.Controls.Button(btnLabel + "##chatgif-consent"))
+        {
+            _configService.Current.ChatExternalMediaEnabled = true;
+            _configService.Save();
+        }
+        SpheneUI.AttachTooltip("Loads GIFs from " + _gifProvider.DisplayName
+            + " servers. Can be changed in Settings anytime.");
     }
 
     /// <summary>

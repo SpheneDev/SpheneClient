@@ -281,6 +281,8 @@ public sealed class SupporterNameplateStudioUi
             FrameCount = 1,
             FrameWidth = 1024,
             FrameHeight = 256,
+            AtlasColumns = 1,
+            AtlasRows = 1,
             Durations = new float[] { 0.1f },
             TotalDuration = 0.1f,
         };

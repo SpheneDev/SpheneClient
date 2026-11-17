@@ -338,14 +338,14 @@ public class SpheneConfig : ISpheneConfiguration
     public int EmojiSkinTone { get; set; } = -1;
 
     // Private-chat GIFs: consent gate for contacting the external GIF
-    // provider (off = picker shows the disclosure card, received GIFs stay
-    // placeholders) and a reduced-motion/static-first-frame toggle.
+    // provider. Default ON - users who opt out keep the disclosure card in
+    // the picker and an inline "Enable" button on received GIF bubbles.
     // GifApiKey is a developer/test fallback key used only when the
     // connected server publishes none - intentionally not exposed in the
     // settings UI (provider keys are operator-managed, not user-managed).
     // GifCustomerId is a random per-installation id KLIPY uses for result
     // personalization; it deliberately does not carry the Sphene identity.
-    public bool ChatExternalMediaEnabled { get; set; } = false;
+    public bool ChatExternalMediaEnabled { get; set; } = true;
     public bool ChatGifAnimation { get; set; } = true;
     public string GifApiKey { get; set; } = string.Empty;
     public string GifCustomerId { get; set; } = string.Empty;
