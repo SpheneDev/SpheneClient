@@ -7620,14 +7620,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _profileViewerOpenT = MathF.Min(1f, _profileViewerOpenT + ImGui.GetIO().DeltaTime / 0.2f);
         var hostPos = ImGui.GetWindowPos();
         var hostSize = ImGui.GetWindowSize();
-        ImGui.SetNextWindowPos(hostPos);
-        ImGui.SetNextWindowSize(hostSize);
-        ImGui.SetNextWindowBgAlpha(0f);
-        var flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
-            | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar
-            | ImGuiWindowFlags.NoScrollWithMouse | ImGuiWindowFlags.NoCollapse
-            | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoDocking;
-        if (ImGui.Begin("##profile-viewer", flags))
+        // Child overlay like the community viewer: it lives inside the host's
+        // draw list, so it can never lose z-order and turn into an invisible
+        // input ghost, and the host's resize hit test pierces child windows
+        // so the corner grip keeps working underneath it.
+        ImGui.SetCursorScreenPos(hostPos);
+        ImGui.BeginChild("##profile-viewer", hostSize, false,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+            | ImGuiWindowFlags.NoBackground);
+        try
         {
             var isOwnViewer = _profileViewerKey?.StartsWith("own:", StringComparison.Ordinal) == true;
             var keepOpen = SyncshellImageViewer.Draw(_profileViewerImages, _profileViewerIndex,
@@ -7681,7 +7682,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _photoEditError = null;
             }
         }
-        ImGui.End();
+        catch (Exception ex)
+        {
+            // Same contract as the community viewer: a broken overlay must
+            // close, not linger invisible while it eats input.
+            SpheneUI.LogError(ex, "Profile viewer draw failed");
+            _profileViewerImages.Clear();
+            _photoEditOpen = false;
+            _photoEditImageId = 0;
+            _photoEditError = null;
+        }
+        finally
+        {
+            ImGui.EndChild();
+        }
     }
 
     /// <summary>Display title for the profile-gallery popout window - a real

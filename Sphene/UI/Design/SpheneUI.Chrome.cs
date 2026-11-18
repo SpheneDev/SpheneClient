@@ -105,7 +105,11 @@ public static partial class SpheneUI
             if (window.SizeConstraints is { } constraints)
             {
                 var min = Vector2.Min(constraints.MinimumSize, fit);
-                var max = Vector2.Max(constraints.MaximumSize, min);
+                // MaximumSize Zero is the "unbounded" sentinel - clamping it
+                // to min would pin the window at its minimum size forever.
+                var max = constraints.MaximumSize == Vector2.Zero
+                    ? fit
+                    : Vector2.Max(constraints.MaximumSize, min);
                 if (min != constraints.MinimumSize || max != constraints.MaximumSize)
                 {
                     window.SizeConstraints = new WindowSizeConstraints
