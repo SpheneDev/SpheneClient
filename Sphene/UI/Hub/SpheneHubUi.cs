@@ -363,7 +363,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 NavigateTo(new HubLocation(SpheneHubPage.Syncshells, msg.GroupGid, null,
                     msg.DetailTab,
-                    CommunitySection: msg.CommunitySection, CommunityItemId: msg.CommunityItemId));
+                    CommunitySection: msg.CommunitySection, CommunityItemId: msg.CommunityItemId,
+                    FocusCommentId: msg.FocusCommentId));
                 if (msg.EditEventId is { } editEventId)
                 {
                     // The community cache may still be loading - the planner
@@ -1210,6 +1211,22 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _communityPage.PickingAlbumPhotos = false;
             _communityPage.Subpage = SyncshellCommunityView.CommunitySubpage.None;
             _communityPage.SwitchT = 0f;
+            // Comment deep-link: arm the shared thread view - it walks the
+            // thread to the comment (auto-paginating) once it renders.
+            if (target.FocusCommentId is { } focusCommentId
+                && target.CommunityItemId is { } commentHostId)
+            {
+                var commentKind = target.CommunitySection == SyncshellCommunitySection.Events
+                    ? CommentTargetKind.Event
+                    : target.CommunitySection == SyncshellCommunitySection.News
+                        ? CommentTargetKind.News
+                        : (CommentTargetKind?)null;
+                if (commentKind != null)
+                {
+                    _communityPage.Comments.FocusComment(
+                        commentKind.Value, commentHostId, focusCommentId);
+                }
+            }
         }
         // Chronicle deep-links: the reader opens once the post list resolves
         // the id; the comment focus waits in the thread view until the
@@ -3045,7 +3062,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         if (item.Section != null && !string.IsNullOrEmpty(item.GroupGID))
         {
             NavigateTo(new HubLocation(SpheneHubPage.Syncshells, item.GroupGID, null,
-                CommunitySection: item.Section, CommunityItemId: item.ItemId));
+                CommunitySection: item.Section, CommunityItemId: item.ItemId,
+                FocusCommentId: item.SubItemId));
             return;
         }
         if (item.Kind == SyncshellFeedItemKind.Blog)
@@ -6615,26 +6633,34 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         gifMeta?.Height ?? gif.Height, bwMax, scale)
                     : Vector2.Zero;
                 var ts = gif != null ? gifSize : SpheneUI.Emoji.Measure(text, wrapW);
-                // GIF media runs edge-to-edge on top/left/right; the bubble
-                // keeps padding only in the bottom band where the meta sits.
+                // Stickers float bare on the chat surface - no bubble and no
+                // media plate; GIFs keep their edge-to-edge bubble, text its
+                // padded one. The time/tick line rides bare under the bubble
+                // in every mode instead of inside the surface.
+                var sticker = gifMeta?.IsSticker == true;
                 var bw = MathF.Min(bwMax, gif != null
-                    ? MathF.Max(gifSize.X, metaW + padX * 2f)
+                    ? sticker ? gifSize.X : MathF.Max(gifSize.X, metaW + padX * 2f)
                     : MathF.Max(ts.X, metaW) + padX * 2f);
                 var topPad = gif != null ? 0f : padY;
-                var bh = ts.Y + topPad + padY + metaSize + 4f * scale;
+                var bubbleH = gif != null ? ts.Y : topPad + ts.Y + padY;
+                var metaGap = 2f * scale;
+                var bh = bubbleH + metaGap + metaSize;
                 var bx = mine ? w - bw - margin : margin;
                 var pos = ImGui.GetCursorScreenPos();
                 ImGui.Dummy(new Vector2(w, bh + gap));
                 var next = ImGui.GetCursorPos();
-                dl.AddRectFilled(new Vector2(pos.X + bx, pos.Y),
-                    new Vector2(pos.X + bx + bw, pos.Y + bh),
-                    mine ? ownCol : peerCol, round);
+                if (!sticker)
+                {
+                    dl.AddRectFilled(new Vector2(pos.X + bx, pos.Y),
+                        new Vector2(pos.X + bx + bw, pos.Y + bubbleH),
+                        mine ? ownCol : peerCol, round);
+                }
                 var contentPos = new Vector2(pos.X + bx + (gif != null ? 0f : padX),
                     pos.Y + topPad);
                 if (gif != null)
                 {
                     DrawChatGif(dl, contentPos, gif, gifMeta, gifSize,
-                        round, chatAlpha, ImDrawFlags.RoundCornersTop);
+                        round, chatAlpha, ImDrawFlags.RoundCornersAll, bare: sticker);
                 }
                 else
                 {
@@ -6644,8 +6670,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             : SpheneUI.Colors.TextPrimary,
                         chatAlpha);
                 }
-                var metaX = pos.X + bx + bw - padX - metaW;
-                var metaY = pos.Y + topPad + ts.Y + 4f * scale;
+                // Own messages right-align the meta line to the bubble's
+                // right edge, received ones to the left edge - the same
+                // flush edge for text, GIFs and stickers.
+                var metaX = mine
+                    ? pos.X + bx + bw - metaW
+                    : pos.X + bx;
+                var metaY = pos.Y + bubbleH + metaGap;
                 dl.AddText(font, metaSize, new Vector2(metaX, metaY),
                     metaCol, time);
                 if (mine)
@@ -6931,18 +6962,25 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         Services.E2ee.ChatContentCodec.GifContent gif,
         Services.Gifs.GifItem? meta, Vector2 size,
         float rounding, float alpha,
-        ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
+        ImDrawFlags corners = ImDrawFlags.RoundCornersAll, bool bare = false)
     {
         var max = pos + size;
         var plate = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
             SpheneUI.Layout.NavRailBandColor(), 0.9f * alpha));
-        dl.AddRectFilled(pos, max, plate, rounding, corners);
+        // Stickers draw bare - their own alpha is the shape. The plate still
+        // backs every placeholder state (consent prompt, pending, failed)
+        // because those need a surface to sit on.
+        if (!bare)
+        {
+            dl.AddRectFilled(pos, max, plate, rounding, corners);
+        }
         if (!ImGui.IsRectVisible(pos, max))
         {
             return;
         }
         if (!_gifProvider.ConsentGiven)
         {
+            if (bare) dl.AddRectFilled(pos, max, plate, rounding, corners);
             DrawChatGifConsent(dl, pos, size, gif.Id, alpha);
             return;
         }
@@ -6953,9 +6991,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             // bounded pending/failed state - the message stays a small
             // plate with a muted label, never a broken-media crater.
+            if (bare) dl.AddRectFilled(pos, max, plate, rounding, corners);
             var labelCol = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
                 SpheneUI.Colors.TextMuted, 0.8f * alpha));
-            var label = "GIF";
+            var label = bare || meta?.IsSticker == true ? "Sticker" : "GIF";
             var ls = ImGui.CalcTextSize(label);
             dl.AddText(pos + (size - ls) * 0.5f, labelCol, label);
             return;

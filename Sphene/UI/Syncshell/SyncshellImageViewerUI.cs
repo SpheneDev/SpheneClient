@@ -20,11 +20,15 @@ public sealed class SyncshellImageViewerUI : WindowMediatorSubscriberBase
     private List<SyncshellGalleryImageDto> _images = [];
     private int _index;
     private string _gid = string.Empty;
+    private bool _gripHeld;
+    private float _gripAnim;
 
     public SyncshellImageViewerUI(ILogger<SyncshellImageViewerUI> logger,
         SpheneMediator mediator, PerformanceCollectorService performanceCollectorService)
         : base(logger, mediator, "Gallery###SyncshellImageViewer", performanceCollectorService)
     {
+        Size = new Vector2(860, 640);
+        SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new()
         {
             MinimumSize = new(520, 420)
@@ -69,5 +73,10 @@ public sealed class SyncshellImageViewerUI : WindowMediatorSubscriberBase
         {
             IsOpen = false;
         }
+        // Themed resize grip over the native hit zone - the chrome hides the
+        // stock grip color, so without the stamp the corner still drags but
+        // shows nothing.
+        SpheneUI.Chrome.GripCorner(ImGui.GetWindowPos() + ImGui.GetWindowSize(),
+            _gripHeld, _gripAnim, out _gripHeld, out _gripAnim);
     }
 }

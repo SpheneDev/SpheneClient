@@ -248,11 +248,14 @@ internal static class NotificationInbox
     {
         if (item.Payload is not UserNotificationDto dto) return null;
         var itemId = long.TryParse(dto.ContentId, out var parsed) ? parsed : (long?)null;
+        // SubContentId carries the inner target - the comment to focus when
+        // the row points into a thread (comments, replies, mentions and
+        // comment-target reactions all publish it server-side).
+        var commentId = long.TryParse(dto.SubContentId, out var cid) ? cid : (long?)null;
         // Blog targets deep-link into the Chronicle reader on the owner's
-        // profile - SubContentId carries the comment to scroll to.
+        // profile.
         if (string.Equals(dto.ContentKind, "blog", StringComparison.Ordinal) && itemId != null)
         {
-            var commentId = long.TryParse(dto.SubContentId, out var cid) ? cid : (long?)null;
             return (m, inbox, i) =>
             {
                 m.Publish(new OpenSpheneHubMessage(
@@ -274,7 +277,9 @@ internal static class NotificationInbox
         return (m, inbox, i) =>
         {
             m.Publish(new OpenSpheneHubMessage(GroupGid: dto.GroupGID,
-                CommunitySection: section, CommunityItemId: section == null ? null : itemId));
+                CommunitySection: section,
+                CommunityItemId: section == null ? null : itemId,
+                FocusCommentId: commentId));
             inbox.Dismiss(i.Id);
         };
     }
