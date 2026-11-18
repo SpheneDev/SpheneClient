@@ -692,6 +692,82 @@ public static partial class SpheneUI
         }
 
         /// <summary>
+        /// Private-chat composer field: a borderless multiline input meant
+        /// to sit inside a caller-drawn composite frame. ImGui's multiline
+        /// only breaks on hard newlines, so the buffer gets real '\n'
+        /// characters injected at the measured wrap points and they are
+        /// verified/stripped back out when the buffer returns - wrapping,
+        /// scrolling and caret/selection behavior all stay native.
+        /// Emoji-containing models hide the native text and get the
+        /// per-line overlay. Wrap width mirrors the widget's inner child:
+        /// <paramref name="size"/>.X minus window padding (and the
+        /// scrollbar once the content scrolls).
+        /// </summary>
+        public static bool InputComposerMultiline(string label, ref string value,
+            int maxLength, Vector2 size,
+            ImGui.ImGuiInputTextCallbackRefContextDelegate<Helpers.Emoji.EmojiEditQueue> callback,
+            ref Helpers.Emoji.EmojiEditQueue context)
+        {
+            using var style = PushValueControlStyle();
+            var codec = context.Codec;
+            var view = codec.Encode(value);
+            // the multiline's inner child insets text by FramePadding -
+            // wrap against that width or the injected breaks disagree with
+            // the widget's own layout
+            var wrapInnerWidth = MathF.Max(40f,
+                size.X - ImGui.GetStyle().FramePadding.X * 2f);
+            var (buf, soft) = Helpers.Emoji.ChatComposerWrap.Wrap(view, wrapInnerWidth,
+                s => ImGui.CalcTextSize(s).X);
+            if (Helpers.Emoji.ChatComposerWrap.Lines(buf) > 3)
+            {
+                // the field caps at 3 visible lines - past that the native
+                // scrollbar steals inner width, so wrap against the
+                // reduced width or text slides under it
+                (buf, soft) = Helpers.Emoji.ChatComposerWrap.Wrap(view,
+                    MathF.Max(40f, wrapInnerWidth - ImGui.GetStyle().ScrollbarSize),
+                    s => ImGui.CalcTextSize(s).X);
+            }
+            if (!soft.SequenceEqual(context.WrapSoft) && context.CaretCharOffset >= 0)
+            {
+                context.WrapCaretTarget = Helpers.Emoji.ChatComposerWrap.RemapCaret(
+                    context.CaretCharOffset, context.WrapSoft, soft);
+            }
+            context.WrapSoft = soft;
+            var submitted = buf;
+            var hideText = Emoji.ContainsEmoji(value);
+            // the composite owns the frame - the field's own visuals stay off
+            ImGui.PushStyleColor(ImGuiCol.FrameBg, Vector4.Zero);
+            ImGui.PushStyleColor(ImGuiCol.FrameBgHovered, Vector4.Zero);
+            ImGui.PushStyleColor(ImGuiCol.FrameBgActive, Vector4.Zero);
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameBorderSize, 0f);
+            if (hideText)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, Vector4.Zero);
+            }
+            var changed = ImGui.InputTextMultiline(label, ref buf,
+                maxLength + soft.Count, size,
+                ImGuiInputTextFlags.CallbackAlways, callback, ref context);
+            if (hideText)
+            {
+                ImGui.PopStyleColor();
+            }
+            ImGui.PopStyleVar();
+            ImGui.PopStyleColor(3);
+            var restored = Helpers.Emoji.ChatComposerWrap.Unwrap(submitted, buf, soft);
+            var model = codec.Expand(restored);
+            if (!string.Equals(model, value, StringComparison.Ordinal))
+            {
+                value = model;
+            }
+            if (hideText)
+            {
+                Emoji.InputOverlayLines(buf, context);
+            }
+            Lint.CheckBounds(label);
+            return changed;
+        }
+
+        /// <summary>
         /// One action cap fused to the right edge of an input · an icon glyph,
         /// or <paramref name="Label"/> for labeled caps (e.g. "Browse").
         /// </summary>

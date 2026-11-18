@@ -39,6 +39,26 @@ public sealed class EmojiEditQueue
     /// emoji overlay so sprite positions track the widget's own layout.</summary>
     public float ScrollEst { get; set; }
 
+    /// <summary>Estimated multiline vertical scroll in px - the overlay's
+    /// caret-visibility mirror when the native child scroll can't be read.</summary>
+    public float ScrollEstY { get; set; }
+
+    /// <summary>Scroll captured inside the callback - for the multiline
+    /// child frame this is the exact native value incl. wheel input.
+    /// ScrollMax stays 0 when the callback's window isn't the scrollable
+    /// child, which is how the overlay picks mirror vs native.</summary>
+    public float NativeScrollY { get; private set; }
+    public float NativeScrollMaxY { get; private set; }
+
+    /// <summary>Soft-wrap break set of the buffer last submitted by the
+    /// wrap-aware composer control.</summary>
+    internal List<int> WrapSoft { get; set; } = new();
+
+    /// <summary>When &gt;= 0 the callback forces the caret to this buffer
+    /// offset - the control sets it when a rewrap shifted soft breaks
+    /// under a numerically preserved caret.</summary>
+    internal int WrapCaretTarget = -1;
+
     public void Enqueue(string text)
     {
         _pending.Enqueue(text);
@@ -58,6 +78,16 @@ public sealed class EmojiEditQueue
     public static int OnCallback(ref ImGuiInputTextCallbackData data,
         ref EmojiEditQueue ctx)
     {
+        // for a multiline input the callback runs inside the child frame
+        // window, so GetScrollY reads its real scroll offset
+        ctx.NativeScrollY = ImGui.GetScrollY();
+        ctx.NativeScrollMaxY = ImGui.GetScrollMaxY();
+        if (ctx.WrapCaretTarget >= 0)
+        {
+            var t = Math.Min(ctx.WrapCaretTarget, data.BufTextLen);
+            data.SelectionStart = data.SelectionEnd = data.CursorPos = t;
+            ctx.WrapCaretTarget = -1;
+        }
         while (ctx._pending.Count > 0)
         {
             var insert = ctx._pending.Dequeue();

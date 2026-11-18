@@ -3171,6 +3171,7 @@ public class SettingsUi : WindowMediatorSubscriberBase
         {
             ChatOptionBlock.DrawExternalMediaOption(_configService);
             ChatOptionBlock.DrawGifAnimationOption(_configService);
+            ChatOptionBlock.DrawGifFavoritesOption(_configService);
         });
     }
 

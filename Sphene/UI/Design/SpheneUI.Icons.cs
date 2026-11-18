@@ -186,6 +186,124 @@ public static partial class SpheneUI
             return result;
         }
 
+        /// <summary>Short uppercase text rendered as an icon-only button -
+        /// for badges that exist as letters rather than font glyphs
+        /// ("GIF"). Shares the segmented zone look and the icon button's
+        /// height; the width grows to fit the text.</summary>
+        public static bool Button(string badgeText, float? height = null,
+            float? width = null, bool enabled = true)
+        {
+            using var disabledScope = ImRaii.Disabled(!enabled);
+            const float badgeScale = 0.58f;
+            var buttonHeight = height ?? ImGui.GetFrameHeight();
+            ImGui.SetWindowFontScale(badgeScale);
+            var textSize = ImGui.CalcTextSize(badgeText);
+            ImGui.SetWindowFontScale(1f);
+            var buttonWidth = width ?? MathF.Max(buttonHeight,
+                textSize.X + ImGui.GetStyle().FramePadding.X * 2f);
+            if (!SpheneUI.ThemeScopeTracker.InCompactScope)
+            {
+                return Controls.SegCore(badgeText, null, null,
+                    new Vector2(buttonWidth, buttonHeight), Colors.Accent,
+                    enabled: enabled,
+                    zoneContent: (drawList, zoneMin, zoneMax) =>
+                    {
+                        var hovered = enabled && ImGui.IsItemHovered();
+                        var held = enabled && ImGui.IsItemActive();
+                        var dim = enabled ? 1f : 0.45f;
+                        var col = hovered
+                            ? ColorUtils.LerpColor(Colors.Accent, Vector4.One, 0.3f)
+                            : ColorUtils.LerpColor(Colors.Accent, Vector4.One, 0.1f);
+                        col.W *= dim;
+                        ImGui.SetWindowFontScale(badgeScale);
+                        drawList.AddText((zoneMin + zoneMax) * 0.5f - textSize * 0.5f
+                                + new Vector2(0f, held ? SpheneUI.Scale : 0f),
+                            ColorUtils.ToU32(col), badgeText);
+                        ImGui.SetWindowFontScale(1f);
+                    });
+            }
+            var cursorPos = ImGui.GetCursorScreenPos();
+            var theme = Theme.Current;
+            var clicked = DrawButtonFrame(buttonWidth, buttonHeight, null, theme);
+            var dl = ImGui.GetWindowDrawList();
+            ImGui.SetWindowFontScale(badgeScale);
+            dl.AddText(cursorPos + new Vector2(
+                    (buttonWidth - textSize.X) * 0.5f,
+                    (buttonHeight - textSize.Y) * 0.5f),
+                ImGui.GetColorU32(ImGuiCol.Text), badgeText);
+            ImGui.SetWindowFontScale(1f);
+            return clicked;
+        }
+
+        /// <summary>Borderless icon button - a plain glyph that tints on
+        /// hover, for controls embedded inside another frame (composer
+        /// caps). Same hit area as a normal icon button.</summary>
+        public static bool GhostButton(FontAwesomeIcon icon, bool enabled = true)
+            => GhostButtonCore(icon.ToIconString(), iconFont: true, enabled);
+
+        /// <summary>Borderless short-text button ("GIF" badge) - same ghost
+        /// treatment as <see cref="GhostButton(FontAwesomeIcon, bool)"/>.</summary>
+        public static bool GhostButton(string badgeText, bool enabled = true)
+            => GhostButtonCore(badgeText, iconFont: false, enabled);
+
+        private static bool GhostButtonCore(string glyph, bool iconFont, bool enabled)
+        {
+            using var disabledScope = ImRaii.Disabled(!enabled);
+            // the hit slot measures at slotScale while the badge draws at
+            // drawScale - text badges grow visually without moving their
+            // neighbors (ghost caps have no visible bounds anyway)
+            const float slotScale = 0.58f;
+            const float drawScale = 0.9f;
+            var h = ImGui.GetFrameHeight();
+            Vector2 slotSize, drawSize;
+            using (iconFont ? PushIconFont() : new EmptyScope())
+            {
+                if (!iconFont)
+                {
+                    ImGui.SetWindowFontScale(slotScale);
+                }
+                slotSize = ImGui.CalcTextSize(glyph);
+                if (!iconFont)
+                {
+                    ImGui.SetWindowFontScale(drawScale);
+                }
+                drawSize = ImGui.CalcTextSize(glyph);
+                if (!iconFont)
+                {
+                    ImGui.SetWindowFontScale(1f);
+                }
+            }
+            var w = MathF.Max(h, slotSize.X + ImGui.GetStyle().FramePadding.X);
+            ImGui.PushID(glyph);
+            var pos = ImGui.GetCursorScreenPos();
+            var clicked = ImGui.InvisibleButton("##ghostbtn", new Vector2(w, h));
+            var hovered = enabled && ImGui.IsItemHovered();
+            var held = enabled && ImGui.IsItemActive();
+            var dim = enabled ? 1f : 0.45f;
+            var col = hovered
+                ? ColorUtils.LerpColor(Colors.Accent, Vector4.One, 0.3f)
+                : ColorUtils.LerpColor(Colors.Accent, Vector4.One, 0.1f);
+            col.W *= dim;
+            var dl = ImGui.GetWindowDrawList();
+            var center = pos + new Vector2(w, h) * 0.5f;
+            using (iconFont ? PushIconFont() : new EmptyScope())
+            {
+                if (!iconFont)
+                {
+                    ImGui.SetWindowFontScale(drawScale);
+                }
+                dl.AddText(center - drawSize * 0.5f
+                        + new Vector2(0f, held ? SpheneUI.Scale : 0f),
+                    ColorUtils.ToU32(col), glyph);
+                if (!iconFont)
+                {
+                    ImGui.SetWindowFontScale(1f);
+                }
+            }
+            ImGui.PopID();
+            return clicked;
+        }
+
         /// <summary>Icon + label button in the standard theme colors.</summary>
         public static bool TextButton(FontAwesomeIcon icon, string text, float? width = null,
             bool isInPopup = false, string? styleKey = null)

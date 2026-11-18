@@ -406,7 +406,8 @@ public static partial class SpheneUI
         /// </summary>
         public static void AnimatedInRect(ImDrawListPtr drawList, AnimatedImage anim,
             Vector2 min, Vector2 max, ImageFit fit = ImageFit.Cover, Vector4? tint = null,
-            float rounding = 0f, double? time = null)
+            float rounding = 0f, double? time = null,
+            ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
         {
             var idx = anim.FrameIndexAt(time ?? ImGui.GetTime());
             FitRect(min, max, new Vector2(anim.FrameWidth, anim.FrameHeight), fit,
@@ -420,7 +421,8 @@ public static partial class SpheneUI
             var tintU32 = tint.HasValue ? ColorUtils.ToU32(tint.Value) : ImGui.GetColorU32(Vector4.One);
             if (rounding > 0.5f)
             {
-                drawList.AddImageRounded(anim.Atlas.Handle, rectMin, rectMax, au0, au1, tintU32, rounding);
+                drawList.AddImageRounded(anim.Atlas.Handle, rectMin, rectMax, au0, au1,
+                    tintU32, rounding, corners);
             }
             else
             {
@@ -434,7 +436,21 @@ public static partial class SpheneUI
             await _decodeSlots.WaitAsync().ConfigureAwait(false);
             try
             {
-                using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(data);
+                // animated WebP (KLIPY stickers) declares a canvas background
+                // color in its ANIM chunk - often opaque white. The default
+                // handling paints every frame onto it, so deltas render as a
+                // moving white box; Ignore starts each canvas transparent.
+                using var image = IsWebp(data)
+                    ? await SixLabors.ImageSharp.Formats.Webp.WebpDecoder.Instance
+                        .DecodeAsync<Rgba32>(
+                            new SixLabors.ImageSharp.Formats.Webp.WebpDecoderOptions
+                            {
+                                BackgroundColorHandling = SixLabors.ImageSharp.Formats
+                                    .Webp.BackgroundColorHandling.Ignore,
+                            },
+                            new MemoryStream(data, writable: false))
+                        .ConfigureAwait(false)
+                    : SixLabors.ImageSharp.Image.Load<Rgba32>(data);
                 var frameWidth = image.Width;
                 var frameHeight = image.Height;
                 if (frameWidth <= 0 || frameHeight <= 0
@@ -498,6 +514,15 @@ public static partial class SpheneUI
                 _decodeSlots.Release();
             }
         }
+
+        /// <summary>RIFF+WEBP magic check - decides whether the
+        /// background-ignoring WebP decoder path applies.</summary>
+        private static bool IsWebp(byte[] d)
+            => d.Length >= 12
+               && d[0] == (byte)'R' && d[1] == (byte)'I'
+               && d[2] == (byte)'F' && d[3] == (byte)'F'
+               && d[8] == (byte)'W' && d[9] == (byte)'E'
+               && d[10] == (byte)'B' && d[11] == (byte)'P';
 
         private static float FrameDelaySeconds(ImageFrame<Rgba32> frame)
         {

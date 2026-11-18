@@ -20,13 +20,22 @@ public static class GifFit
     /// <summary>
     /// Returns the drawn size for a <paramref name="srcW"/>x<paramref name="srcH"/>
     /// source inside an <paramref name="availWidth"/>-wide content column at
-    /// <paramref name="scale"/> UI scale. Zero/negative sources yield a
-    /// small placeholder square so the bubble keeps a sane shape.
+    /// <paramref name="scale"/> UI scale. Portrait sources get the
+    /// transposed box so tall GIFs keep a readable width. Zero/negative
+    /// sources yield a small placeholder square so the bubble keeps a
+    /// sane shape.
     /// </summary>
     public static Vector2 Fit(int srcW, int srcH, float availWidth, float scale = 1f)
     {
-        var boxW = MathF.Min(MaxWidth * scale, MathF.Max(1f, availWidth));
-        var boxH = MaxHeight * scale;
+        // Orientation-aware box: landscape sources fit inside 320x220,
+        // portrait sources get the transposed 220x320 so a tall GIF keeps
+        // a readable width and its full ratio instead of being squeezed
+        // into the landscape height cap. Max dimension and total area
+        // stay identical, so size is bounded either way.
+        var portrait = srcH > srcW;
+        var boxW = MathF.Min((portrait ? MaxHeight : MaxWidth) * scale,
+            MathF.Max(1f, availWidth));
+        var boxH = (portrait ? MaxWidth : MaxHeight) * scale;
         if (srcW <= 0 || srcH <= 0)
         {
             var s = MathF.Min(boxW, MathF.Min(boxH, 96f * scale));

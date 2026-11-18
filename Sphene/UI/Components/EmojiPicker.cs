@@ -51,10 +51,15 @@ public sealed class EmojiPicker
 
     public EmojiPicker(SpheneConfigService config) => _config = config;
 
-    /// <summary>Small smiley trigger; call where the button should render.</summary>
-    public void TriggerButton(string flyoutId, Action<string> onPick, string tooltip = "Insert emoji")
+    /// <summary>Small smiley trigger; call where the button should render.
+    /// <paramref name="ghost"/> renders the borderless in-field style.</summary>
+    public void TriggerButton(string flyoutId, Action<string> onPick, string tooltip = "Insert emoji",
+        bool ghost = false)
     {
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.Smile))
+        var clicked = ghost
+            ? SpheneUI.Icons.GhostButton(FontAwesomeIcon.Smile)
+            : SpheneUI.Icons.Button(FontAwesomeIcon.Smile);
+        if (clicked)
         {
             _onPick = onPick;
             if (!SpheneUI.Popups.IsFlyoutOpen(flyoutId))
@@ -93,7 +98,7 @@ public sealed class EmojiPicker
             ImGui.SetKeyboardFocusHere();
             _wantSearchFocus = false;
         }
-        SpheneUI.Controls.InputTextWithHint("##emoji-search", "Search emoji…",
+        SpheneUI.Controls.InputTextWithHint("##emoji-search", "Search emoji",
             ref _search, MaxSearchLength, preferredWidth: panelW);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 

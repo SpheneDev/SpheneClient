@@ -70,7 +70,9 @@ public static class UpdateOptionPanel
         ShrinkUIntegrationToggle,
         DirectMessagingE2ee,
         ChatEmoji,
-        ChatGifs
+        ChatGifs,
+        ChatGifFavorites,
+        ChatStickers
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -127,7 +129,7 @@ public static class UpdateOptionPanel
         new("v.1.1.43", [Link.FollowedCommunities]),
         new("v.1.1.44", [Link.ShrinkUIntegrationToggle]),
         new("v.1.1.45", [Link.DirectMessagingE2ee]),
-        new("v.1.1.46", [Link.ChatEmoji, Link.ChatGifs]),
+        new("v.1.1.46", [Link.ChatEmoji, Link.ChatGifs, Link.ChatGifFavorites, Link.ChatStickers]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -189,7 +191,9 @@ public static class UpdateOptionPanel
         [Link.ShrinkUIntegrationToggle] = "Plugins: ShrinkU integration toggle (intro setup + Settings → Plugins)",
         [Link.DirectMessagingE2ee] = "Social: End-to-end encrypted direct messages · sealed history & key verification",
         [Link.ChatEmoji] = "Social: Emoji picker everywhere you write · chat, comments, Chronicles & bio with color emoji",
-        [Link.ChatGifs] = "Social: KLIPY GIFs in private chat · encrypted provider references, bounded animations"
+        [Link.ChatGifs] = "Social: KLIPY GIFs in private chat · encrypted provider references, bounded animations",
+        [Link.ChatGifFavorites] = "Social: GIF favorites + full-size preview before sending",
+        [Link.ChatStickers] = "Social: KLIPY stickers + Discord-style media picker"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -504,6 +508,16 @@ public static class UpdateOptionPanel
             ChatOptionBlock.DrawExternalMediaOption(configService, "UpdateOptionChatExternalMedia");
             ChatOptionBlock.DrawGifAnimationOption(configService, "UpdateOptionChatGifAnimation");
             SpheneUI.Controls.HelpText("GIFs never appear in comments, Chronicles or the community feed. Received GIFs render at most 320x220 and pause off-screen; a missing provider key or disabled external media shows a small placeholder instead. GIF sending is rolled out gradually by the server - the button appears once your account is granted access.");
+        },
+        [Link.ChatGifFavorites] = (configService, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("The GIF picker grew a Favorites tab: star any GIF to pin it for quick reuse across chats. Clicking a result now opens a full-size preview first - what you see there is exactly what the chat bubble renders, then Send commits it.");
+            ChatOptionBlock.DrawGifFavoritesOption(configService, "UpdateOptionChatGifFavorites");
+        },
+        [Link.ChatStickers] = (configService, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("KLIPY stickers joined the composer: a second icon button next to GIF opens the same picker in sticker mode - search, favorites and the full-size preview all work identically, and stickers travel inside the same encrypted message envelope. The picker itself was reworked into a wider two-column layout that shows each media at its real aspect ratio instead of square crops.");
+            SpheneUI.Controls.HelpText("Stickers share the GIF rollout - the button appears once your account is granted access, and the same external-media consent covers loading the media files.");
         }
     };
 

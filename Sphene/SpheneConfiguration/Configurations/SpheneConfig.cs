@@ -349,5 +349,8 @@ public class SpheneConfig : ISpheneConfiguration
     public bool ChatGifAnimation { get; set; } = true;
     public string GifApiKey { get; set; } = string.Empty;
     public string GifCustomerId { get; set; } = string.Empty;
+    // Pinned GIF references for the picker's Favorites tab (newest first,
+    // bounded - see GifFavorites.MaxFavorites). Metadata only, no media.
+    public List<GifFavorite> GifFavorites { get; set; } = new();
 
 }

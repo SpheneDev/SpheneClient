@@ -414,6 +414,133 @@ public static partial class SpheneUI
             ImGui.PopClipRect();
         }
 
+        /// <summary>
+        /// Multiline variant of <see cref="InputOverlay"/> for the composer:
+        /// the buffer already carries real newline lines (hard + soft-wrap),
+        /// so each line maps 1:1 onto the widget's own layout. Scroll offset
+        /// is the native child scroll when the callback could read it,
+        /// else the caret-visibility mirror kept on the queue.
+        /// </summary>
+        public static void InputOverlayLines(string value, EmojiEditQueue queue)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return;
+            }
+            EnsureIndex();
+            var codec = queue.Codec;
+            var style = ImGui.GetStyle();
+            var itemMin = ImGui.GetItemRectMin();
+            var itemMax = ImGui.GetItemRectMax();
+            // the multiline's inner child insets text by FramePadding
+            var padX = style.FramePadding.X;
+            var padY = style.FramePadding.Y;
+            var textOrigin = new Vector2(itemMin.X + padX, itemMin.Y + padY);
+            var innerMaxX = itemMax.X - padX;
+            var innerH = MathF.Max(0f, itemMax.Y - padY - textOrigin.Y);
+            var lineH = ImGui.GetTextLineHeight();
+            var emojiW = EmojiSize;
+
+            var caretChar = queue.CaretCharOffset >= 0
+                ? Math.Min(queue.CaretCharOffset, value.Length) : -1;
+            // caret line + column, plus the caret line's own text for
+            // the caret-x measure
+            var caretLine = 0;
+            var caretLineStart = 0;
+            if (caretChar >= 0)
+            {
+                for (var i = 0; i < caretChar; i++)
+                {
+                    if (value[i] == '\n')
+                    {
+                        caretLine++;
+                        caretLineStart = i + 1;
+                    }
+                }
+            }
+
+            var totalH = ChatComposerWrap.Lines(value) * lineH;
+            var scroll = queue.ScrollEstY;
+            if (ImGui.IsItemActive() && caretChar >= 0)
+            {
+                var cy = caretLine * lineH;
+                if (cy < scroll)
+                {
+                    scroll = cy;
+                }
+                else if (cy + lineH > scroll + innerH)
+                {
+                    scroll = cy + lineH - innerH;
+                }
+            }
+            scroll = Math.Clamp(scroll, 0f, MathF.Max(0f, totalH - innerH));
+            queue.ScrollEstY = scroll;
+            var scrollY = queue.NativeScrollMaxY > 0f ? queue.NativeScrollY : scroll;
+
+            var dl = ImGui.GetWindowDrawList();
+            var textCol = ColorUtils.ToU32(Colors.TextPrimary);
+            var atlas = Atlas();
+            ImGui.PushClipRect(new Vector2(itemMin.X, textOrigin.Y),
+                new Vector2(innerMaxX, itemMax.Y - padY), true);
+            var emojiYOfs = (lineH - emojiW) * 0.5f;
+            float caretX = -1f, caretY = 0f;
+            var start = 0;
+            var line = 0;
+            while (start <= value.Length)
+            {
+                var nl = value.IndexOf('\n', start);
+                var end = nl < 0 ? value.Length : nl;
+                var lineText = value.Substring(start, end - start);
+                var y = textOrigin.Y + line * lineH - scrollY;
+                if (y + lineH >= textOrigin.Y && y <= itemMax.Y - padY)
+                {
+                    var x = textOrigin.X;
+                    var runs = EmojiCore.Segment(lineText, codec.PlaceholderMap, _index?.Bases);
+                    foreach (var run in runs)
+                    {
+                        var sub = lineText.Substring(run.Start, run.Length);
+                        var spriteSeq = run.Kind == EmojiCore.RunKind.Emoji
+                            && run.Length == 1
+                            && codec.TryResolve(sub[0], out var resolved)
+                            ? resolved : sub;
+                        if (run.Kind == EmojiCore.RunKind.Emoji && atlas != null
+                            && TrySprite(spriteSeq, out var uv0, out var uv1))
+                        {
+                            dl.AddImage(atlas.Handle, new Vector2(x, y + emojiYOfs),
+                                new Vector2(x + emojiW, y + emojiYOfs + emojiW),
+                                uv0, uv1, 0xFFFFFFFF);
+                        }
+                        else
+                        {
+                            dl.AddText(new Vector2(x, y), textCol, sub);
+                        }
+                        x += run.Kind == EmojiCore.RunKind.Emoji
+                            ? emojiW : ImGui.CalcTextSize(sub).X;
+                    }
+                }
+                if (line == caretLine && caretChar >= 0)
+                {
+                    var caretRuns = EmojiCore.Segment(lineText, codec.PlaceholderMap, _index?.Bases);
+                    caretX = textOrigin.X + MeasurePrefix(lineText, caretRuns,
+                        caretChar - caretLineStart, emojiW);
+                    caretY = y;
+                }
+                if (nl < 0)
+                {
+                    break;
+                }
+                start = nl + 1;
+                line++;
+            }
+            if (ImGui.IsItemActive() && caretX >= 0f
+                && (int)(ImGui.GetTime() / 0.55f) % 2 == 0)
+            {
+                dl.AddRectFilled(new Vector2(caretX, caretY),
+                    new Vector2(caretX + 1.5f, caretY + lineH), textCol);
+            }
+            ImGui.PopClipRect();
+        }
+
         /// <summary>Render width of everything before <paramref name="charEnd"/>,
         /// matching the overlay's own slot math (emoji occupy <paramref name="emojiW"/>).</summary>
         private static float MeasurePrefix(string value, List<EmojiCore.Run> runs,

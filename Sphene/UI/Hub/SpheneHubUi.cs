@@ -316,6 +316,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         MarkdownComposer.MediaClient = communityMedia;
         _gifProvider = gifProvider;
         _gifPicker = new UI.Components.GifPicker(gifProvider, configService);
+        _stickerPicker = new UI.Components.GifPicker(gifProvider, configService, stickers: true);
         SpheneUI.EmojiPickerHook = new UI.Components.EmojiPicker(configService);
         EntityChipList.Api = _apiController;
         EntityChipList.Navigate = NavigateEntityRef;
@@ -1408,6 +1409,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     protected override void Dispose(bool disposing)
     {
         _gifPicker.Dispose();
+        _stickerPicker.Dispose();
         _settingsUi.SettingsPageChanged -= OnSettingsPageChanged;
         _modSharingUi.SubPageChanged -= OnModSharingPageChanged;
         _charaDataHubUi.SubPageChanged -= OnCharaDataPageChanged;
@@ -6193,6 +6195,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private string _chatInput = string.Empty;
     private Helpers.Emoji.EmojiEditQueue _chatEmojiQueue = new();
     private readonly UI.Components.GifPicker _gifPicker;
+    private readonly UI.Components.GifPicker _stickerPicker;
     private readonly Services.Gifs.IGifProvider _gifProvider;
     private readonly Dictionary<string, Task<Services.Gifs.GifItem?>>
         _chatGifMeta = new(StringComparer.Ordinal);
@@ -6251,11 +6254,50 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var canSeal = ChatSealReady(uid);
 
         var w = SpheneUI.Controls.BoundedAvailX();
-        var inputH = ImGui.GetFrameHeight() + SpheneUI.Spacing.X4.Scaled;
+        // The composer height is content-driven (1-3 wrapped lines) and has
+        // to be known before the scroll area so the field grows upward.
+        var emojiHook = SpheneUI.EmojiPickerHook;
+        var showGif = _gifProvider.IsConfigured;
+        var frameH = ImGui.GetFrameHeight();
+        var composerPadX = ImGui.GetStyle().FramePadding.X;
+        var composerPadY = ImGui.GetStyle().FramePadding.Y;
+        var capGap = SpheneUI.Spacing.X4.Scaled;
+        var lineH = ImGui.GetTextLineHeight();
+        ImGui.SetWindowFontScale(0.58f);
+        var gifBadgeW = MathF.Max(frameH,
+            ImGui.CalcTextSize("GIF").X + composerPadX * 2f);
+        ImGui.SetWindowFontScale(1f);
+        var capWidths = (emojiHook != null ? frameH : 0f)
+            + (showGif ? gifBadgeW + frameH : 0f);
+        var capCount = (emojiHook != null ? 1 : 0) + (showGif ? 2 : 0);
+        var capsW = capWidths + capGap * capCount;
+        var composerW = w - SpheneUI.Spacing.X8.Scaled;
+        var composerInnerW = MathF.Max(60f, composerW - composerPadX * 2f - capsW);
+        // matches InputComposerMultiline: the inner child insets text by
+        // FramePadding, so the wrap width is the field minus that inset
+        var composerTextW = MathF.Max(40f,
+            composerInnerW - ImGui.GetStyle().FramePadding.X * 2f);
+        var composerView = _chatEmojiQueue.Codec.Encode(_chatInput);
+        var composerLines = Math.Clamp(Helpers.Emoji.ChatComposerWrap.Lines(
+            Helpers.Emoji.ChatComposerWrap.Wrap(composerView, composerTextW,
+                s => ImGui.CalcTextSize(s).X).Buf), 1, 3);
+        // the multiline's inner child pads content by FramePadding - the
+        // widget must own that space or the child is permanently scrolled
+        // (and shows a scrollbar) even on a single line
+        var composerInset = ImGui.GetStyle().FramePadding;
+        var composerWidgetH = composerLines * lineH + composerInset.Y * 2f;
+        // extra air splits evenly so the first line + caps sit vertically
+        // centered inside the frame
+        var composerTop = composerPadY + SpheneUI.Spacing.X4.Scaled * 0.5f;
+        var inputH = composerWidgetH + composerTop + composerPadY
+            + SpheneUI.Spacing.X4.Scaled * 0.5f;
+        // caps center on the first text band whatever the line count is
+        var composerCapY = (lineH + composerInset.Y * 2f - frameH) * 0.5f;
         // The scroll area fills everything above strip + composer - reserving
-        // too little pushes them past the view, too much wastes a row.
-        var bottomReserve = inputH + ImGui.GetTextLineHeightWithSpacing() * 2f
-            + SpheneUI.Spacing.X8.Scaled * 2f;
+        // too little pushes them past the view, too much wastes a row. The
+        // blocked-chat hint line is only reserved when it can render.
+        var bottomReserve = inputH + ImGui.GetTextLineHeightWithSpacing()
+            * (canSeal == false ? 2f : 1f) + SpheneUI.Spacing.X4.Scaled;
         var listH = SpheneUI.Layout.FillToViewBottomHeight(bottomReserve);
 
         if (SpheneUI.Layout.BeginScrollArea("chat-scroll",
@@ -6570,12 +6612,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 var gifMeta = gif != null ? ResolveChatGifMeta(gif) : null;
                 var gifSize = gif != null
                     ? Helpers.Emoji.GifFit.Fit(gifMeta?.Width ?? gif.Width,
-                        gifMeta?.Height ?? gif.Height, wrapW, scale)
+                        gifMeta?.Height ?? gif.Height, bwMax, scale)
                     : Vector2.Zero;
                 var ts = gif != null ? gifSize : SpheneUI.Emoji.Measure(text, wrapW);
-                var bw = MathF.Min(bwMax,
-                    MathF.Max(ts.X, metaW) + padX * 2f);
-                var bh = ts.Y + padY * 2f + metaSize + 4f * scale;
+                // GIF media runs edge-to-edge on top/left/right; the bubble
+                // keeps padding only in the bottom band where the meta sits.
+                var bw = MathF.Min(bwMax, gif != null
+                    ? MathF.Max(gifSize.X, metaW + padX * 2f)
+                    : MathF.Max(ts.X, metaW) + padX * 2f);
+                var topPad = gif != null ? 0f : padY;
+                var bh = ts.Y + topPad + padY + metaSize + 4f * scale;
                 var bx = mine ? w - bw - margin : margin;
                 var pos = ImGui.GetCursorScreenPos();
                 ImGui.Dummy(new Vector2(w, bh + gap));
@@ -6583,11 +6629,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 dl.AddRectFilled(new Vector2(pos.X + bx, pos.Y),
                     new Vector2(pos.X + bx + bw, pos.Y + bh),
                     mine ? ownCol : peerCol, round);
-                var contentPos = new Vector2(pos.X + bx + padX, pos.Y + padY);
+                var contentPos = new Vector2(pos.X + bx + (gif != null ? 0f : padX),
+                    pos.Y + topPad);
                 if (gif != null)
                 {
                     DrawChatGif(dl, contentPos, gif, gifMeta, gifSize,
-                        round * 0.6f, chatAlpha);
+                        round, chatAlpha, ImDrawFlags.RoundCornersTop);
                 }
                 else
                 {
@@ -6598,7 +6645,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         chatAlpha);
                 }
                 var metaX = pos.X + bx + bw - padX - metaW;
-                var metaY = pos.Y + padY + ts.Y + 4f * scale;
+                var metaY = pos.Y + topPad + ts.Y + 4f * scale;
                 dl.AddText(font, metaSize, new Vector2(metaX, metaY),
                     metaCol, time);
                 if (mine)
@@ -6634,69 +6681,99 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         DrawChatSecurityStrip(pair, uid);
 
         var sealedBlocked = canSeal == false;
-        var sendW = 72f * scale;
-        var capGap = SpheneUI.Spacing.X4.Scaled;
-        var emojiHook = SpheneUI.EmojiPickerHook;
-        var capW = ImGui.GetFrameHeight();
-        // Server-granted GIF capability - unauthorized users get no button
-        // and no reserved composer width, not a disabled control.
-        var showGif = _gifProvider.IsConfigured;
-        var gifLabelW = ImGui.CalcTextSize("GIF").X + ImGui.GetStyle().FramePadding.X * 2f;
-        var capsW = (showGif ? gifLabelW + capGap : 0f)
-            + (emojiHook != null ? capW + capGap : 0f);
         if (_chatEmojiQueue.ConsumeRefocus())
         {
             ImGui.SetKeyboardFocusHere();
         }
-        ImGui.SetNextItemWidth(w - sendW - capsW - SpheneUI.Spacing.X8.Scaled);
+        var frameMin = ImGui.GetCursorScreenPos();
+        var dlFrame = ImGui.GetWindowDrawList();
+        var frameMax = frameMin + new Vector2(composerW, inputH);
+        // Enclosing rounded frame in the value-control look, drawn by hand
+        // so the emoji/GIF/sticker caps live inside the field footprint and
+        // ride the top edge while the field grows upward.
+        dlFrame.AddRectFilled(frameMin, frameMax,
+            ImGui.GetColorU32(ImGuiCol.FrameBg), SpheneUI.Metrics.ControlRadius);
+        var borderV = ImGui.ColorConvertU32ToFloat4(ImGui.GetColorU32(ImGuiCol.Border));
+        dlFrame.AddRect(frameMin, frameMax,
+            ImGui.ColorConvertFloat4ToU32(borderV with { W = MathF.Max(borderV.W, 0.35f) }),
+            SpheneUI.Metrics.ControlRadius, ImDrawFlags.None, SpheneUI.Metrics.ControlBorderSize);
+        if (sealedBlocked || _chatInput.Length == 0)
+        {
+            // hint sits where the multiline's inner child starts the text
+            dlFrame.AddText(frameMin + new Vector2(
+                    composerPadX + composerInset.X + 2f, composerTop + composerInset.Y),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                    SpheneUI.Colors.TextMuted, 0.55f)),
+                sealedBlocked ? "Encryption unavailable" : "Message");
+        }
         using (ImRaii.Disabled(sealedBlocked))
         {
-            var send = SpheneUI.Controls.InputTextWithHint("##chatinput",
-                sealedBlocked ? "Encryption unavailable…" : "Message…",
-                ref _chatInput, 500,
-                ImGuiInputTextFlags.EnterReturnsTrue
-                    | ImGuiInputTextFlags.CallbackAlways,
-                Helpers.Emoji.EmojiEditQueue.OnCallback, ref _chatEmojiQueue,
-                emojiOverlay: true);
-            if (emojiHook != null)
+            ImGui.SetCursorScreenPos(frameMin + new Vector2(composerPadX, composerTop));
+            SpheneUI.Controls.InputComposerMultiline("##chatinput", ref _chatInput,
+                500, new Vector2(composerInnerW, composerWidgetH),
+                Helpers.Emoji.EmojiEditQueue.OnCallback, ref _chatEmojiQueue);
+            // Enter sends; Shift+Enter keeps the native newline. The check
+            // rides IsItemActive so it only fires while the field has focus.
+            var io = ImGui.GetIO();
+            var enterPressed = (ImGui.IsKeyPressed(ImGuiKey.Enter, false)
+                || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter, false)) && !io.KeyShift;
+            if (ImGui.IsItemActive() && enterPressed)
             {
-                ImGui.SameLine(0f, capGap);
-                emojiHook.TriggerButton("chat-emoji", _chatEmojiQueue.Enqueue);
+                if (!string.IsNullOrWhiteSpace(_chatInput))
+                {
+                    _ = SendChatAsync(uid, _chatInput.Trim());
+                    _chatInput = string.Empty;
+                    // An own send always returns the view to the newest
+                    // message, even while the user was reading older history.
+                    _chatScrollPending = true;
+                    _chatScrollSettle = 0;
+                    _chatScrollLastMax = -1f;
+                }
+                else
+                {
+                    _chatInput = _chatInput.TrimEnd('\n');
+                }
             }
+            // Ghost caps fill the field's top-right corner right-to-left:
+            // sticker outermost, then the GIF badge, emoji leftmost -
+            // vertically centered on the first text band.
+            var capRight = frameMax.X - composerPadX;
+            var capY = frameMin.Y + composerTop + composerCapY;
             if (showGif)
             {
-                ImGui.SameLine(0f, capGap);
+                capRight -= frameH;
+                ImGui.SetCursorScreenPos(new Vector2(capRight, capY));
+                _stickerPicker.TriggerButton("chat-sticker", item =>
+                {
+                    _ = SendChatGifAsync(uid, item);
+                    _chatScrollPending = true;
+                    _chatScrollSettle = 0;
+                    _chatScrollLastMax = -1f;
+                }, enabled: !sealedBlocked, ghost: true);
+                capRight -= capGap + gifBadgeW;
+                ImGui.SetCursorScreenPos(new Vector2(capRight, capY));
                 _gifPicker.TriggerButton("chat-gif", item =>
                 {
                     _ = SendChatGifAsync(uid, item);
                     _chatScrollPending = true;
                     _chatScrollSettle = 0;
                     _chatScrollLastMax = -1f;
-                }, enabled: !sealedBlocked);
+                }, enabled: !sealedBlocked, ghost: true);
+                capRight -= capGap;
             }
-            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-            var btnW = ImGui.GetContentRegionAvail().X;
-            if (SpheneUI.Controls.SegmentButton("Send##chatsend",
-                    size: new Vector2(MathF.Min(sendW, btnW), ImGui.GetFrameHeight()),
-                    accent: accent, active: true))
+            if (emojiHook != null)
             {
-                send = true;
-            }
-            if (send && !string.IsNullOrWhiteSpace(_chatInput) && !sealedBlocked)
-            {
-                _ = SendChatAsync(uid, _chatInput.Trim());
-                _chatInput = string.Empty;
-                // An own send always returns the view to the newest message,
-                // even while the user was reading older history.
-                _chatScrollPending = true;
-                _chatScrollSettle = 0;
-                _chatScrollLastMax = -1f;
+                capRight -= frameH;
+                ImGui.SetCursorScreenPos(new Vector2(capRight, capY));
+                emojiHook.TriggerButton("chat-emoji", _chatEmojiQueue.Enqueue, ghost: true);
             }
         }
+        ImGui.SetCursorScreenPos(frameMax);
         emojiHook?.Draw("chat-emoji");
         if (showGif)
         {
             _gifPicker.Draw("chat-gif");
+            _stickerPicker.Draw("chat-sticker");
         }
         if (sealedBlocked)
         {
@@ -6853,12 +6930,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private void DrawChatGif(ImDrawListPtr dl, Vector2 pos,
         Services.E2ee.ChatContentCodec.GifContent gif,
         Services.Gifs.GifItem? meta, Vector2 size,
-        float rounding, float alpha)
+        float rounding, float alpha,
+        ImDrawFlags corners = ImDrawFlags.RoundCornersAll)
     {
         var max = pos + size;
         var plate = SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
             SpheneUI.Layout.NavRailBandColor(), 0.9f * alpha));
-        dl.AddRectFilled(pos, max, plate, rounding);
+        dl.AddRectFilled(pos, max, plate, rounding, corners);
         if (!ImGui.IsRectVisible(pos, max))
         {
             return;
@@ -6886,7 +6964,109 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         double? time = _configService.Current.ChatGifAnimation ? null : 0.0;
         SpheneUI.Media.AnimatedInRect(dl, anim, pos, max,
             ImageFit.Fit,
-            new Vector4(1f, 1f, 1f, alpha), rounding, time);
+            new Vector4(1f, 1f, 1f, alpha), rounding, time, corners);
+        DrawChatGifWatermark(dl, pos, max, alpha);
+        DrawChatGifStar(dl, pos, max, gif.Provider, meta, alpha);
+    }
+
+    /// <summary>Favorite star glyph at a rendered GIF's top-right corner
+    /// (icon only + drop shadow, same language as the picker cells).
+    /// Sent and received bubbles both allow pinning - the favorite needs
+    /// the resolved <see cref="Services.Gifs.GifItem"/> for its rendition
+    /// URLs, so the affordance waits for metadata instead of storing a
+    /// dead reference.</summary>
+    private void DrawChatGifStar(ImDrawListPtr dl, Vector2 pos, Vector2 max,
+        string provider, Services.Gifs.GifItem? meta, float alpha)
+    {
+        if (meta == null)
+        {
+            return;
+        }
+        var scale = SpheneUI.Scale;
+        var hit = 20f * scale;
+        var hitMin = new Vector2(max.X - hit - 4f * scale, pos.Y + 4f * scale);
+        var hot = ImGui.IsMouseHoveringRect(hitMin, hitMin + new Vector2(hit));
+        var pinned = Services.Gifs.GifFavorites.IsPinned(
+            _configService.Current.GifFavorites, provider, meta.Id);
+        if (!pinned && !hot)
+        {
+            return;
+        }
+        var glyph = FontAwesomeIcon.Star.ToIconString();
+        using (SpheneUI.IconFont.Push())
+        {
+            var gs = ImGui.CalcTextSize(glyph);
+            var glyphMin = hitMin + (new Vector2(hit) - gs) * 0.5f;
+            var shadow = ImGui.GetColorU32(new Vector4(0f, 0f, 0f,
+                (pinned || hot ? 0.75f : 0.5f) * alpha));
+            var col = pinned
+                ? SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.Accent)
+                : ImGui.GetColorU32(new Vector4(1f, 1f, 1f,
+                    (hot ? 0.95f : 0.6f) * alpha));
+            dl.AddText(glyphMin + new Vector2(scale), shadow, glyph);
+            dl.AddText(glyphMin, col, glyph);
+        }
+        if (hot)
+        {
+            SpheneUI.AttachTooltip(pinned ? "Remove from favorites" : "Add to favorites");
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                Services.Gifs.GifFavorites.Toggle(
+                    _configService.Current.GifFavorites, provider, meta);
+                _configService.Save();
+            }
+        }
+    }
+
+    /// <summary>Provider attribution at the bottom-left of a rendered GIF,
+    /// as the KLIPY terms require: the official wordmark on a small dark
+    /// plate so it stays readable over arbitrary frame content.</summary>
+    private static void DrawChatGifWatermark(ImDrawListPtr dl, Vector2 pos,
+        Vector2 max, float alpha)
+    {
+        var wrap = SpheneUI.Media.Texture(KlipyMarkKey, KlipyMarkPng);
+        if (wrap == null)
+        {
+            return;
+        }
+        var wmH = 11f * SpheneUI.Scale;
+        var wmW = wmH * ((float)wrap.Width / wrap.Height);
+        var pad = 2.5f * SpheneUI.Scale;
+        var inset = 5f * SpheneUI.Scale;
+        var plateMin = new Vector2(pos.X + inset,
+            max.Y - inset - wmH - pad * 2f);
+        var plateMax = plateMin + new Vector2(wmW + pad * 2.5f,
+            wmH + pad * 2f);
+        dl.AddRectFilled(plateMin, plateMax,
+            ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.45f * alpha)),
+            3f * SpheneUI.Scale);
+        var imgMin = plateMin + new Vector2(pad * 1.25f, pad);
+        SpheneUI.Media.ImageInRect(dl, wrap, imgMin,
+            imgMin + new Vector2(wmW, wmH),
+            tint: new Vector4(1f, 1f, 1f, alpha));
+    }
+
+    private const string KlipyMarkKey = "klipy-watermark";
+    private const string KlipyMarkResource = "Sphene.Resources.Gifs.klipy-mark.png";
+
+    private static byte[]? KlipyMarkPng()
+    {
+        try
+        {
+            using var stream = typeof(SpheneHubUi).Assembly
+                .GetManifestResourceStream(KlipyMarkResource);
+            if (stream == null)
+            {
+                return null;
+            }
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            return ms.ToArray();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Consent prompt inside a received GIF plate when external
@@ -6972,15 +7152,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Icons.Icon(icon);
         }
+        // the lock icon itself is the verify affordance - no separate button
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        }
+        SpheneUI.AttachTooltip("Verify identity");
+        if (ImGui.IsItemClicked(ImGuiMouseButton.Left))
+        {
+            ImGui.OpenPopup("chat-verify##" + uid);
+        }
         ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
         SpheneUI.Text.Muted(label + (hasLocked
             ? " · some messages can't be decrypted here"
             : string.Empty));
-        ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Key, "Verify##chatverify"))
-        {
-            ImGui.OpenPopup("chat-verify##" + uid);
-        }
         DrawChatVerifyPopup(pair, uid);
     }
 

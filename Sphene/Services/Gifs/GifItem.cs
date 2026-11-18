@@ -6,4 +6,10 @@ namespace Sphene.Services.Gifs;
 /// not be altered, rewritten or reconstructed.
 /// </summary>
 public sealed record GifItem(string Id, string Title, string PreviewUrl,
-    string MediaUrl, int Width, int Height);
+    string MediaUrl, int Width, int Height)
+{
+    /// <summary>True when the item came from the provider's sticker
+    /// catalog - stickers share the GIF wire payload but need the
+    /// sticker endpoints for share reporting and id lookups.</summary>
+    public bool IsSticker { get; init; }
+}

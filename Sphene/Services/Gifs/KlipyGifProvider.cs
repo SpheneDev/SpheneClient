@@ -35,6 +35,10 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     // the 220px fallback, hd only when nothing smaller exists (size-capped).
     private static readonly string[] MediaPreference = ["md", "sm", "hd", "xs"];
     private static readonly string[] PreviewPreference = ["sm", "xs", "md"];
+    // per-catalog rendition formats in fallback order - stickers are
+    // usually static or animated webp, gifs are gif-first
+    private static readonly string[] GifFormats = ["gif", "webp"];
+    private static readonly string[] StickerFormats = ["webp", "gif", "jpg", "png"];
 
     private const int MaxPersistedMeta = 512;
     private const string MetaFileName = "gif-meta.json";
@@ -155,14 +159,30 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         {
             return await TrendingAsync(page, ct).ConfigureAwait(false);
         }
-        var url = PageUrl("search", page)
+        var url = PageUrl("gifs", "search", page)
             + $"&q={Uri.EscapeDataString(query.Trim())}";
-        return await RequestPageAsync(url, GifApiMetrics.Kind.Search, ct).ConfigureAwait(false);
+        return await RequestPageAsync(url, GifApiMetrics.Kind.Search, ct, sticker: false).ConfigureAwait(false);
     }
 
     /// <inheritdoc cref="IGifProvider.TrendingAsync"/>
     public Task<GifPage> TrendingAsync(int page, CancellationToken ct)
-        => RequestPageAsync(PageUrl("trending", page), GifApiMetrics.Kind.Trending, ct);
+        => RequestPageAsync(PageUrl("gifs", "trending", page), GifApiMetrics.Kind.Trending, ct, sticker: false);
+
+    /// <inheritdoc cref="IGifProvider.SearchStickersAsync"/>
+    public async Task<GifPage> SearchStickersAsync(string query, int page, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return await TrendingStickersAsync(page, ct).ConfigureAwait(false);
+        }
+        var url = PageUrl("stickers", "search", page)
+            + $"&q={Uri.EscapeDataString(query.Trim())}";
+        return await RequestPageAsync(url, GifApiMetrics.Kind.Search, ct, sticker: true).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc cref="IGifProvider.TrendingStickersAsync"/>
+    public Task<GifPage> TrendingStickersAsync(int page, CancellationToken ct)
+        => RequestPageAsync(PageUrl("stickers", "trending", page), GifApiMetrics.Kind.Trending, ct, sticker: true);
 
     /// <inheritdoc cref="IGifProvider.GetByIdAsync"/>
     public async Task<GifItem?> GetByIdAsync(string id, CancellationToken ct)
@@ -182,28 +202,40 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         {
             return null;
         }
+        // A gif slug misses on the sticker catalog and vice versa, so both
+        // catalogs are tried; stickers ride the type "gif" wire payload
+        // and resolve through this same path.
+        var item = await FetchItemAsync("gifs", id, ct).ConfigureAwait(false)
+            ?? await FetchItemAsync("stickers", id, ct).ConfigureAwait(false);
+        if (item == null)
+        {
+            // only both-catalog misses mark negative - a gif miss must not
+            // poison the sticker lookup of the same slug
+            MarkNegative(id);
+        }
+        return item;
+    }
+
+    private async Task<GifItem?> FetchItemAsync(string catalog, string id, CancellationToken ct)
+    {
         try
         {
-            var url = $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/gifs/items"
+            var url = $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/{catalog}/items"
                 + $"?slugs={Uri.EscapeDataString(id)}";
             using var resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
-            if (!CheckResponse(resp, id))
+            if (!CheckResponse(resp, id: null))
             {
                 _metrics.Record(GifApiMetrics.Kind.Lookup,
                     failed: !RateLimited, throttled: RateLimited);
                 return null;
             }
             using var doc = JsonDocument.Parse(await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false));
-            var item = FirstItem(doc.RootElement);
+            var item = FirstItem(doc.RootElement,
+                string.Equals(catalog, "stickers", StringComparison.Ordinal));
             if (item != null)
             {
                 TrackMeta(item);
                 FlushMeta();
-            }
-            else
-            {
-                // parse-null would otherwise retry every frame the message renders
-                MarkNegative(id);
             }
             _metrics.Record(GifApiMetrics.Kind.Lookup);
             return item;
@@ -214,9 +246,8 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         }
         catch (Exception ex)
         {
-            MarkNegative(id);
             _metrics.Record(GifApiMetrics.Kind.Lookup, failed: true);
-            Logger.LogDebug(ex, "KLIPY: failed to resolve gif {id}", id);
+            Logger.LogDebug(ex, "KLIPY: failed to resolve {catalog} {id}", catalog, id);
             return null;
         }
     }
@@ -240,8 +271,9 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         {
             try
             {
-                // spec: POST /{key}/gifs/share/{slug} with customer_id body
-                var url = $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/gifs/share/{Uri.EscapeDataString(item.Id)}";
+                // spec: POST /{key}/{catalog}/share/{slug} with customer_id body
+                var catalog = item.IsSticker ? "stickers" : "gifs";
+                var url = $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/{catalog}/share/{Uri.EscapeDataString(item.Id)}";
                 using var req = new HttpRequestMessage(HttpMethod.Post, url);
                 req.Content = new StringContent(
                     $"{{\"customer_id\":\"{CustomerId}\"}}",
@@ -259,11 +291,15 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         });
     }
 
-    private string PageUrl(string endpoint, int page)
-        => $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/gifs/{endpoint}"
+    /// <summary>Page URL for a catalog ("gifs"/"stickers") endpoint. The
+    /// gif catalog is pinned to gif files via format_filter; stickers
+    /// accept their native formats (webp/jpg/png/gif).</summary>
+    private string PageUrl(string catalog, string endpoint, int page)
+        => $"{ApiBase}/{Uri.EscapeDataString(ActiveKey)}/{catalog}/{endpoint}"
             + $"?page={page + 1}&per_page={PageSize}"
             + $"&customer_id={Uri.EscapeDataString(CustomerId)}"
-            + "&format_filter=gif";
+            + (string.Equals(catalog, "gifs", StringComparison.Ordinal)
+                ? "&format_filter=gif" : string.Empty);
 
     /// <summary>
     /// Media bytes are consent-gated only - no API key needed. KLIPY media
@@ -395,7 +431,7 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     internal static bool IsValidId(string id) => IdPattern.IsMatch(id);
 
     private async Task<GifPage> RequestPageAsync(string url, GifApiMetrics.Kind kind,
-        CancellationToken ct)
+        CancellationToken ct, bool sticker)
     {
         if (!IsConfigured)
         {
@@ -431,7 +467,7 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             {
                 foreach (var el in results.EnumerateArray())
                 {
-                    var item = ParseItem(el);
+                    var item = ParseItem(el, sticker);
                     if (item != null)
                     {
                         items.Add(item);
@@ -496,7 +532,7 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         return false;
     }
 
-    private static GifItem? FirstItem(JsonElement root)
+    private static GifItem? FirstItem(JsonElement root, bool sticker)
     {
         if (!TryItemsArray(root, out var results))
         {
@@ -504,7 +540,7 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         }
         foreach (var el in results.EnumerateArray())
         {
-            var item = ParseItem(el);
+            var item = ParseItem(el, sticker);
             if (item != null)
             {
                 return item;
@@ -538,7 +574,7 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     /// whose declared byte size fits the download bound; the preview
     /// prefers the small animated thumbnail.
     /// </summary>
-    private static GifItem? ParseItem(JsonElement el)
+    private static GifItem? ParseItem(JsonElement el, bool sticker)
     {
         try
         {
@@ -553,16 +589,17 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             {
                 return null;
             }
+            var formats = sticker ? StickerFormats : GifFormats;
             // media dims ride the sealed payload (bounded at 512) - a group
             // larger than that is unsendable, so it can't be the media pick
-            var media = PickFile(file, MediaPreference, maxDim: 512);
+            var media = PickFile(file, MediaPreference, formats, maxDim: 512);
             if (media == null || media.Value.W <= 0 || media.Value.H <= 0)
             {
                 return null;
             }
-            var preview = PickFile(file, PreviewPreference, maxDim: 0) ?? media.Value;
+            var preview = PickFile(file, PreviewPreference, formats, maxDim: 0) ?? media.Value;
             return new GifItem(slug, title, preview.Url, media.Value.Url,
-                media.Value.W, media.Value.H);
+                media.Value.W, media.Value.H) { IsSticker = sticker };
         }
         catch
         {
@@ -571,15 +608,28 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
     }
 
     private static (string Url, int W, int H, long Size)? PickFile(JsonElement file,
-        string[] preference, int maxDim)
+        string[] preference, string[] formats, int maxDim)
     {
         (string Url, int W, int H, long Size)? fallback = null;
         foreach (var sizeKey in preference)
         {
             if (!file.TryGetProperty(sizeKey, out var group)
-                || group.ValueKind != JsonValueKind.Object
-                || !group.TryGetProperty("gif", out var fmt)
-                || fmt.ValueKind != JsonValueKind.Object)
+                || group.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            JsonElement fmt = default;
+            var found = false;
+            foreach (var key in formats)
+            {
+                if (group.TryGetProperty(key, out fmt)
+                    && fmt.ValueKind == JsonValueKind.Object)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
             {
                 continue;
             }
@@ -683,7 +733,12 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
                         preview = media;
                     }
                     var title = el.TryGetProperty("t", out var t) ? t.GetString() ?? string.Empty : string.Empty;
-                    var item = new GifItem(id, title, preview, media, w, h);
+                    var item = new GifItem(id, title, preview, media, w, h)
+                    {
+                        IsSticker = el.TryGetProperty("k", out var k)
+                            && k.ValueKind == JsonValueKind.Number
+                            && k.GetInt32() == 1,
+                    };
                     if (_meta.TryAdd(id, item))
                     {
                         _metaOrder.Enqueue(id);
@@ -789,6 +844,10 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
                         writer.WriteString("m", item.MediaUrl);
                         writer.WriteNumber("w", item.Width);
                         writer.WriteNumber("h", item.Height);
+                        if (item.IsSticker)
+                        {
+                            writer.WriteNumber("k", 1);
+                        }
                         writer.WriteEndObject();
                     }
                     writer.WriteEndArray();

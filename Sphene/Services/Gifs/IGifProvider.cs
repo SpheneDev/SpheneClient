@@ -50,6 +50,14 @@ public interface IGifProvider
     /// <summary>Trending page used as the picker's empty-query state.</summary>
     Task<GifPage> TrendingAsync(int page, CancellationToken ct);
 
+    /// <summary>Keyword search in the provider's sticker catalog; same
+    /// paging contract as <see cref="SearchAsync"/>. Items carry
+    /// <see cref="GifItem.IsSticker"/>.</summary>
+    Task<GifPage> SearchStickersAsync(string query, int page, CancellationToken ct);
+
+    /// <summary>Trending sticker page for the sticker picker's empty state.</summary>
+    Task<GifPage> TrendingStickersAsync(int page, CancellationToken ct);
+
     /// <summary>Resolves one item's metadata by id (received messages).</summary>
     Task<GifItem?> GetByIdAsync(string id, CancellationToken ct);
 
