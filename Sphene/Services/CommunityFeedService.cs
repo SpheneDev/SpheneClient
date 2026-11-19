@@ -11,20 +11,16 @@ namespace Sphene.Services;
 /// across the user's syncshells). Fetched once on demand and on hub
 /// reconnect  ·  never polled, so the UI reads a snapshot and a manual
 /// <see cref="Refresh"/> is the only network path.
+///
+/// Requests bind to the feed generation (<see cref="CommunityFeedStore"/>):
+/// a response landing after <see cref="Invalidate"/> - disconnect, profile
+/// switch, reconnect - is discarded instead of repopulating the stale cache,
+/// and the unlatched request flag lets the next render refetch cleanly.
 /// </summary>
 public class CommunityFeedService : DisposableMediatorSubscriberBase, IHostedService
 {
     private readonly ApiController _apiController;
-    private readonly Lock _lock = new();
-    private List<SyncshellCommunityFeedItemDto> _items = [];
-    private string? _nextCursor;
-    private bool _loading;
-    private bool _requested;
-    private DateTime _nextRetryUtc;
-
-    /// <summary>Minimum pause between auto-retries after a failed fetch ·
-    /// keeps a persistent outage from firing a request every frame.</summary>
-    private static readonly TimeSpan RetryBackoff = TimeSpan.FromSeconds(5);
+    private readonly CommunityFeedStore _store = new();
 
     public CommunityFeedService(ILogger<CommunityFeedService> logger,
         SpheneMediator mediator, ApiController apiController)
@@ -37,144 +33,123 @@ public class CommunityFeedService : DisposableMediatorSubscriberBase, IHostedSer
         // render refetches once instead of fetching on every push.
         Mediator.Subscribe<CommunityChangedMessage>(this, (_) => Invalidate());
         Mediator.Subscribe<ClearProfileDataMessage>(this, (_) => Invalidate());
+        // Follow/unfollow changes the eligible set (followed shells feed
+        // public events) - a cached result, including an empty one, must
+        // re-resolve against the new set.
+        Mediator.Subscribe<SyncshellFavoritesChangedMessage>(this, (_) => Invalidate());
     }
 
     /// <summary>Newest-first snapshot of the feed. Empty until the first refresh lands.</summary>
-    public IReadOnlyList<SyncshellCommunityFeedItemDto> Items
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _items;
-            }
-        }
-    }
+    public IReadOnlyList<SyncshellCommunityFeedItemDto> Items => _store.Items;
 
     /// <summary>True while a fetch is in flight.</summary>
-    public bool IsLoading
-    {
-        get { lock (_lock) { return _loading; } }
-    }
+    public bool IsLoading => _store.IsLoading;
 
     /// <summary>Another page is available via <see cref="LoadMoreAsync"/>.</summary>
-    public bool HasMore
+    public bool HasMore => _store.HasMore;
+
+    /// <summary>The last first-page fetch failed - visible items stay up and
+    /// the feed surfaces a retry instead of the plain empty state.</summary>
+    public bool RefreshFailed => _store.RefreshFailed;
+
+    /// <summary>The last <see cref="LoadMoreAsync"/> failed - items and cursor
+    /// are untouched, so the same page can be retried.</summary>
+    public bool PageFailed => _store.PageFailed;
+
+    /// <summary>The earliest eligible upcoming event for the highlight tile,
+    /// resolved by the server independently of feed paging - a later page
+    /// can never swap in a farther event. Null until the lookup lands.</summary>
+    public SyncshellCommunityFeedItemDto? NextEvent => _store.NextEvent;
+
+    /// <summary>Kicks the next-event lookup the first time the highlights
+    /// strip renders (idempotent, deduped per generation). Bound to the
+    /// feed generation - a profile switch discards a stale response.</summary>
+    public void EnsureNextEventRequested()
     {
-        get { lock (_lock) { return _nextCursor != null; } }
+        if (!_store.ShouldRequestNextEvent(DateTime.UtcNow))
+        {
+            return;
+        }
+        _store.MarkNextEventRequested();
+        _ = LoadNextEvent();
     }
 
     /// <summary>
     /// Kicks a fetch the first time a feed surface renders (idempotent).
     /// Safe to call every frame  ·  deduped against in-flight requests.
     /// After a failed attempt the request flag is released again, gated by
-    /// <see cref="RetryBackoff"/>, so the feed recovers on its own instead
-    /// of requiring a manual refresh.
+    /// <see cref="CommunityFeedStore.RetryBackoff"/>, so the feed recovers on
+    /// its own instead of requiring a manual refresh.
     /// </summary>
     public void EnsureRequested()
     {
-        lock (_lock)
+        if (!_store.ShouldRequest(DateTime.UtcNow))
         {
-            if (_requested || _loading || DateTime.UtcNow < _nextRetryUtc)
-            {
-                return;
-            }
-            _requested = true;
+            return;
         }
+        _store.MarkRequested();
         _ = Refresh();
     }
 
-    /// <summary>Drops the cache; the next <see cref="EnsureRequested"/> refetches.</summary>
-    public void Invalidate()
-    {
-        lock (_lock)
-        {
-            _requested = false;
-            _items = [];
-            _nextCursor = null;
-            _nextRetryUtc = default;
-        }
-    }
+    /// <summary>Drops the cache; the next <see cref="EnsureRequested"/> refetches.
+    /// In-flight responses bound to the old generation are discarded.</summary>
+    public void Invalidate() => _store.Invalidate();
 
     /// <summary>Fetches the first page; dedupes concurrent calls.</summary>
     public async Task Refresh()
     {
-        if (!BeginLoad()) return;
+        if (!_store.TryBeginRefresh(out var request)) return;
         try
         {
             var page = await _apiController.GroupGetCommunityFeedPage(
                 new FeedPageRequestDto()).ConfigureAwait(false);
-            lock (_lock)
-            {
-                _items = page.Items;
-                _nextCursor = page.NextCursor;
-                _requested = true;
-                _nextRetryUtc = default;
-            }
+            _store.ApplyPage(request, page.Items, page.NextCursor);
         }
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Community feed fetch failed");
-            lock (_lock)
-            {
-                // Unlatch so the next render retries - throttled by the
-                // backoff so a persistent outage doesn't request per frame.
-                _requested = false;
-                _nextRetryUtc = DateTime.UtcNow + RetryBackoff;
-            }
+            _store.ApplyFailure(request, DateTime.UtcNow);
         }
-        finally { EndLoad(); }
+        finally { _store.EndRequest(request); }
     }
 
     /// <summary>Appends the next cursor page; no-op at the end or while a
-    /// fetch is in flight. New inserts between pages are deduped by identity.</summary>
+    /// fetch is in flight. New inserts between pages are deduped by identity.
+    /// A failed append leaves the visible items untouched and can be retried.</summary>
     public async Task LoadMoreAsync()
     {
-        string? cursor;
-        lock (_lock)
-        {
-            if (_loading || _nextCursor == null) return;
-            cursor = _nextCursor;
-            _loading = true;
-        }
+        if (!_store.TryBeginPage(out var request)) return;
         try
         {
             var page = await _apiController.GroupGetCommunityFeedPage(
-                new FeedPageRequestDto(cursor)).ConfigureAwait(false);
-            lock (_lock)
-            {
-                var seen = new HashSet<string>(_items.Select(KeyOf), StringComparer.Ordinal);
-                foreach (var item in page.Items)
-                {
-                    if (seen.Add(KeyOf(item))) _items.Add(item);
-                }
-                _nextCursor = page.NextCursor;
-            }
+                new FeedPageRequestDto(request.Cursor)).ConfigureAwait(false);
+            _store.ApplyPage(request, page.Items, page.NextCursor);
         }
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Community feed page fetch failed");
+            _store.ApplyFailure(request, DateTime.UtcNow);
         }
-        finally { EndLoad(); }
+        finally { _store.EndRequest(request); }
     }
 
-    /// <summary>Dedupe identity - activity rows can repeat (kind,id) pairs
-    /// across actors, and insert races can resend a row across a cursor move.</summary>
-    private static string KeyOf(SyncshellCommunityFeedItemDto i)
-        => $"{i.Kind}:{i.Id}:{i.ActorUid}:{i.TimestampUtc.Ticks}";
-
-    private bool BeginLoad()
+    /// <summary>Fetches the true next community event - a single narrow
+    /// call, not a feed page, so the result is correct no matter how far
+    /// the feed has paged.</summary>
+    private async Task LoadNextEvent()
     {
-        lock (_lock)
+        if (!_store.TryBeginNextEvent(out var generation)) return;
+        try
         {
-            if (_loading) return false;
-            _loading = true;
-            return true;
+            var ev = await _apiController.GroupGetNextCommunityEvent().ConfigureAwait(false);
+            _store.ApplyNextEvent(generation, ev);
         }
-    }
-
-    private void EndLoad()
-    {
-        lock (_lock) { _loading = false; }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Community next-event fetch failed");
+            _store.ApplyNextEventFailure(generation, DateTime.UtcNow);
+        }
+        finally { _store.EndNextEventRequest(generation); }
     }
 
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;

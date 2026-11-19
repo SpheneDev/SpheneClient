@@ -353,6 +353,12 @@ public partial class ApiController
         return await _spheneHub!.InvokeAsync<SyncshellCommunityFeedPageDto>(nameof(GroupGetCommunityFeedPage), dto).ConfigureAwait(false);
     }
 
+    public async Task<SyncshellCommunityFeedItemDto?> GroupGetNextCommunityEvent()
+    {
+        CheckConnection();
+        return await _spheneHub!.InvokeAsync<SyncshellCommunityFeedItemDto?>(nameof(GroupGetNextCommunityEvent)).ConfigureAwait(false);
+    }
+
     public async Task<SyncshellCommunityFeedPageDto> UserGetProfileActivity(string targetUid, FeedPageRequestDto dto)
     {
         CheckConnection();

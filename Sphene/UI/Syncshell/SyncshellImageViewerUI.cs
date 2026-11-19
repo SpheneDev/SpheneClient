@@ -42,6 +42,8 @@ public sealed class SyncshellImageViewerUI : WindowMediatorSubscriberBase
 
         Mediator.Subscribe<OpenSyncshellImageViewerMessage>(this, (msg) =>
         {
+            _logger.LogDebug("[CommUi] viewer open gid={Gid} count={Count} (popout)",
+                msg.GroupGid, msg.Images.Count);
             _images = msg.Images;
             _index = msg.StartIndex;
             _gid = msg.GroupGid;
@@ -96,11 +98,16 @@ public sealed class SyncshellImageViewerUI : WindowMediatorSubscriberBase
         var keepOpen = SyncshellImageViewer.Draw(_images, _index, "viewer-popout:",
             _gid, closeOnBackdrop: false,
             setIndex: i => _index = i,
-            onClose: () => IsOpen = false,
+            onClose: () =>
+            {
+                _logger.LogDebug("[CommUi] viewer closed (popout)");
+                IsOpen = false;
+            },
             onPopOut: null, standalone: true,
             onLike: i => _ = ToggleImageLike(i));
         if (!keepOpen)
         {
+            _logger.LogDebug("[CommUi] viewer close via keepOpen (popout)");
             IsOpen = false;
         }
         // Themed resize grip over the native hit zone - the chrome hides the

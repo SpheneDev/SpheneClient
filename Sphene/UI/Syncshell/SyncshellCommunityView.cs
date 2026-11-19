@@ -720,6 +720,10 @@ internal static partial class SyncshellCommunityView
             // "the page ignores input". The Tab setter already closed any
             // open lightbox when the section actually changed.
             page.AlbumId = null;
+            if (page.ManagingAlbums)
+            {
+                SpheneUI.LogDebug("[CommUi] ManageAlbums=false");
+            }
             page.ManagingAlbums = false;
             page.PickingAlbumPhotos = false;
             page.ViewerEditOpen = false;
@@ -1029,12 +1033,14 @@ internal static partial class SyncshellCommunityView
         var imgId = img.Id;
         page.ViewerEditSaving = true;
         page.ViewerEditError = null;
+        SpheneUI.LogDebug("[CommUi] photo save click id={ImageId}", imgId);
         _ = Task.Run(async () =>
         {
             var ok = await ops.SaveImage(patched).ConfigureAwait(false);
             page.ViewerEditSaving = false;
             if (ok)
             {
+                SpheneUI.LogDebug("[CommUi] photo save ok id={ImageId}", imgId);
                 if (page.ViewerImages != null)
                 {
                     var idx = page.ViewerImages.FindIndex(v => v.Id == imgId);
@@ -1049,6 +1055,7 @@ internal static partial class SyncshellCommunityView
             }
             else
             {
+                SpheneUI.LogDebug("[CommUi] photo save rejected id={ImageId}", imgId);
                 page.ViewerEditError = "Couldn't save the photo - changes kept, try again.";
             }
         });
@@ -2389,6 +2396,12 @@ internal static partial class SyncshellCommunityView
             return;
         }
         var viewerId = $"##community-viewer-{profile.GroupGID}";
+        if (page.ViewerOpenT <= 0f)
+        {
+            // Every open path resets OpenT to 0 - the edge logs exactly once
+            // per open instead of per frame.
+            SpheneUI.LogDebug("[CommUi] viewer open gid={Gid} count={Count}", profile.GroupGID, viewerImgs.Count);
+        }
         page.ViewerOpenT = MathF.Min(1f, page.ViewerOpenT + ImGui.GetIO().DeltaTime / 0.2f);
         ImGui.SetCursorScreenPos(bleed.Min);
         ImGui.BeginChild(viewerId, bleed.Size, false,
@@ -2405,6 +2418,7 @@ internal static partial class SyncshellCommunityView
                 setIndex: i => page.ViewerIndex = i,
                 onClose: () =>
                 {
+                    SpheneUI.LogDebug("[CommUi] viewer closed");
                     page.ViewerImages = null;
                     page.ViewerEditOpen = false;
                     page.ViewerEditImgId = -1;
@@ -2412,6 +2426,7 @@ internal static partial class SyncshellCommunityView
                 },
                 onPopOut: onViewerPopout == null ? null : () =>
                 {
+                    SpheneUI.LogDebug("[CommUi] viewer popped out");
                     onViewerPopout(viewerImgs, page.ViewerIndex);
                     page.ViewerImages = null;
                     page.ViewerEditOpen = false;
@@ -2434,6 +2449,9 @@ internal static partial class SyncshellCommunityView
                 editHeight: canEditPhoto ? CommunityPhotoEditorHeight(page, scale) : 0f);
             if (!keepOpen)
             {
+                // Backdrop click or Escape handed the close back through the
+                // draw return.
+                SpheneUI.LogDebug("[CommUi] viewer close via keepOpen");
                 page.ViewerImages = null;
                 page.ViewerEditOpen = false;
                 page.ViewerEditImgId = -1;
@@ -5569,6 +5587,7 @@ internal static partial class SyncshellCommunityView
         ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
         if (SpheneUI.Controls.SegmentButton("Done editing", FontAwesomeIcon.Check))
         {
+            SpheneUI.LogDebug("[CommUi] ManageAlbums=false");
             page.ManagingAlbums = false;
             page.AlbumDrafts.Clear();
         }
@@ -5674,6 +5693,7 @@ internal static partial class SyncshellCommunityView
                 (Action)(() =>
                 {
                     page.ManagingAlbums = !page.ManagingAlbums;
+                    SpheneUI.LogDebug("[CommUi] ManageAlbums={Managing}", page.ManagingAlbums);
                     if (!page.ManagingAlbums)
                     {
                         page.AlbumDrafts.Clear();

@@ -93,6 +93,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// list shows compact feed rows; clicking one opens just that entry
     /// with its full discussion.</summary>
     private (string OwnerUid, long Id)? _openChronicle;
+    /// <summary>Shown in the Chronicles surface when a deep-linked post can't
+    /// resolve after the list loaded - deleted or no longer visible.</summary>
+    private string? _chronicleNotice;
+    private const string ChronicleMissingNotice =
+        "That Chronicle couldn't be opened - it may have been deleted or is no longer visible to you.";
     private readonly MarkdownComposer _blogComposer = new("own-blog");
     private readonly SpheneUI.Popups.ConfirmDialog _chronicleDeleteConfirm = new();
     private bool _chronicleSaving;
@@ -216,8 +221,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             e.LastUsedTicks = Environment.TickCount64;
         }
     }
-    private List<SyncshellDirectoryEntryDto>? _directoryEntries;
-    private bool _directoryLoading;
+    /// <summary>Serialized Discover request state - every directory/preview
+    /// fetch binds to the generation that issued it, so a reset can't race
+    /// a delayed completion or a queued open.</summary>
+    private readonly DiscoverRequestTracker _discover = new();
     private List<SyncshellDirectoryEntryDto>? _favoriteEntries;
     private bool _favoritesLoading;
     private string _discoverSearch = string.Empty;
@@ -399,6 +406,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         (int)FriendHubSubPage.Chronicles,
                         ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId));
                 }
+                else
+                {
+                    // Owner resolvable to neither self nor a pair/co-member -
+                    // unreachable profiles get an honest reason, not silence.
+                    Mediator.Publish(new NotificationMessage("Chronicle unavailable",
+                        "This Chronicle can't be opened - it may have been deleted or is no longer visible to you.",
+                        SpheneConfiguration.Models.NotificationType.Warning,
+                        TimeSpan.FromSeconds(6)));
+                }
             }
             else if (msg.Friend != null)
             {
@@ -425,7 +441,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         Mediator.Subscribe<SyncshellFavoritesChangedMessage>(this, (_) =>
         {
             _favoriteEntries = null;
-            _directoryEntries = null;
+            _discover.Reset();
         });
         Mediator.Subscribe<DisconnectedMessage>(this, (_) =>
         {
@@ -1239,6 +1255,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             if (ownerUid != null)
             {
                 _openChronicle = (ownerUid, chronId);
+                _chronicleNotice = null;
                 if (target.FocusCommentId is { } focusId)
                 {
                     _blogComments.FocusComment(CommentTargetKind.Blog, chronId, focusId);
@@ -1397,6 +1414,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _lastDrawnLocation = null;
         _areaBoundShells = null;
         _areaBoundLoading = false;
+        // New generation: in-flight directory/preview completions land as
+        // stale and the freed flags let this profile request immediately.
+        _discover.Reset();
         _profileEditMode = false;
         _styleSeeded = false;
         _navBack.Clear();
@@ -3011,6 +3031,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
                 }
             }
+            else if (items.Count == 0 && _communityFeed.RefreshFailed)
+            {
+                // First-page outage - an honest error state with a manual
+                // retry instead of the misleading "nothing new" empty card.
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                    "Couldn't load the feed",
+                    "The community feed could not be reached - it retries on its own, or try again now.",
+                    "Retry",
+                    () => _ = _communityFeed.Refresh(),
+                    FontAwesomeIcon.SyncAlt, accent);
+            }
             else if (items.Count == 0)
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.Newspaper,
@@ -3037,12 +3068,21 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                     }
                 }
+                if (_communityFeed.PageFailed)
+                {
+                    // A failed page append leaves the visible rows and the
+                    // cursor untouched - the same page retries here.
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Text.Colored("Couldn't load more.",
+                        SpheneUI.Palette.Warning);
+                }
                 if (_communityFeed.HasMore)
                 {
                     SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
                     using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_communityFeed.IsLoading))
                     {
-                        if (SpheneUI.Controls.Button("Load more##feedmore"))
+                        if (SpheneUI.Controls.Button(
+                                _communityFeed.PageFailed ? "Retry##feedmore" : "Load more##feedmore"))
                         {
                             _ = _communityFeed.LoadMoreAsync();
                         }
@@ -3054,9 +3094,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>Deep-link routing for feed rows. Section-tagged rows land on
-    /// the owning shell's community tab + drill-in; blog post rows navigate
-    /// to the author's pair page; activity on the caller's own blog resolves
-    /// to the caller's profile (its blog lives there).</summary>
+    /// the owning shell's community tab + drill-in. Chronicle rows - a blog
+    /// post or activity on one - route through the same deep-link the
+    /// notification inbox uses: the TARGET owner decides the host profile
+    /// (never the interactor's), with the post id and comment focus attached.</summary>
     private void NavigateFeedItem(SyncshellCommunityFeedItemDto item)
     {
         if (item.Section != null && !string.IsNullOrEmpty(item.GroupGID))
@@ -3066,34 +3107,23 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 FocusCommentId: item.SubItemId));
             return;
         }
-        if (item.Kind == SyncshellFeedItemKind.Blog)
+        // Who owns the chronicle this lands on: blog rows are owned by their
+        // author; comment/reaction rows carry the host owner - ActorUid is
+        // only the person who interacted. Pre-TargetOwnerUid servers fall
+        // back to the actor, the best available guess.
+        var chronicleOwner = item.Kind switch
         {
-            if (string.Equals(item.ActorUid, _apiController.UID, StringComparison.Ordinal))
-            {
-                // Own Chronicle · its home is the profile's Chronicles tab.
-                NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
-                    SubPage: 2));
-                return;
-            }
-            var pair = item.ActorUid != null ? FindPairByUid(item.ActorUid) : null;
-            // Chronicle deep-links land on the friend's Chronicles tab.
-            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
-                SubPage: pair != null ? 2 : null));
-            return;
-        }
-        if (item.ActorUid != null)
+            SyncshellFeedItemKind.Blog => item.ActorUid,
+            SyncshellFeedItemKind.Comment or SyncshellFeedItemKind.Reaction
+                => item.TargetOwnerUid ?? item.ActorUid,
+            _ => null,
+        };
+        if (chronicleOwner != null && item.ItemId is { } chronicleId)
         {
-            // Comment/reaction on a Chronicle - the host owner's Chronicles
-            // tab is where the discussion lives (own profile or the friend's).
-            if (string.Equals(item.ActorUid, _apiController.UID, StringComparison.Ordinal))
-            {
-                NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
-                    SubPage: 2));
-                return;
-            }
-            var hostPair = FindPairByUid(item.ActorUid);
-            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, hostPair,
-                SubPage: hostPair != null ? 2 : null));
+            Mediator.Publish(new OpenSpheneHubMessage(
+                ChronicleOwnerUid: chronicleOwner,
+                ChroniclePostId: chronicleId,
+                FocusCommentId: item.SubItemId));
             return;
         }
         if (!string.IsNullOrEmpty(item.GroupGID))
@@ -3128,7 +3158,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private void DrawHomeDiscoverStrip(Vector4 accent)
     {
         EnsureDirectoryLoaded();
-        if (_directoryEntries == null || _directoryEntries.Count == 0)
+        var entries = _discover.Entries;
+        if (entries == null || entries.Count == 0)
         {
             return;
         }
@@ -3140,7 +3171,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 joinedGids.Add(kv.Key.Group.GID);
             }
         }
-        var listed = _directoryEntries
+        var listed = entries
             .Where(e => !joinedGids.Contains(e.GroupGID) && !e.CallerIsMember).Take(4).ToList();
         if (listed.Count == 0)
         {
@@ -3163,7 +3194,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         entry.GroupAlias ?? entry.GroupGID,
                         $"{entry.MemberCount} members", entryAccent))
                 {
-                    OpenPublicCommunity(entry.GroupGID);
+                    OpenPublicCommunity(entry);
                 }
             }, gap: 10f * scale, maxCols: 4);
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
@@ -5577,25 +5608,21 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// feed payload honestly supports: the next non-cancelled upcoming
     /// event, the latest news post and the latest photo. Labels describe
     /// schedule and recency only · no invented popularity or engagement.
+    /// The event tile comes from the dedicated next-event lookup - feed
+    /// paging orders newest-first, so the earliest eligible event can live
+    /// on a page that was never loaded.
     /// </summary>
     private void DrawCommunityHighlights(
         IReadOnlyList<SyncshellCommunityFeedItemDto> items, Vector4 accent)
     {
-        SyncshellCommunityFeedItemDto? nextEvent = null;
+        _communityFeed.EnsureNextEventRequested();
+        var nextEvent = _communityFeed.NextEvent;
         SyncshellCommunityFeedItemDto? latestNews = null;
         SyncshellCommunityFeedItemDto? latestPhoto = null;
-        var now = DateTime.UtcNow;
         foreach (var item in items)
         {
             switch (item.Kind)
             {
-                case SyncshellFeedItemKind.Event
-                    when item.TimestampUtc > now
-                    && !item.Title.StartsWith("Cancelled - ", StringComparison.Ordinal)
-                    && (nextEvent == null
-                        || item.TimestampUtc < nextEvent.TimestampUtc):
-                    nextEvent = item;
-                    break;
                 case SyncshellFeedItemKind.News when latestNews == null:
                     latestNews = item;
                     break;
@@ -7936,6 +7963,19 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         else if (extras.Blog is not { Count: > 0 } blog)
         {
+            if (_openChronicle is { OwnerUid: var missingOwner }
+                && string.Equals(missingOwner, me.UID, StringComparison.Ordinal))
+            {
+                // A deep-link arrived but the post isn't in the list - deleted
+                // or hidden since the feed row was emitted.
+                _openChronicle = null;
+                _chronicleNotice = ChronicleMissingNotice;
+            }
+            if (_chronicleNotice != null)
+            {
+                SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
             SpheneUI.Layout.Surface(() =>
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen, "No Chronicles yet",
@@ -7999,6 +8039,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     && string.Equals(staleOwner, me.UID, StringComparison.Ordinal))
                 {
                     _openChronicle = null;
+                    _chronicleNotice = ChronicleMissingNotice;
+                }
+                if (_chronicleNotice != null)
+                {
+                    SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
                 for (var i = 0; i < blog.Count; i++)
                 {
@@ -8091,6 +8137,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         else if (extras.Blog is not { Count: > 0 } blog)
         {
+            if (_openChronicle is { OwnerUid: var missingOwner }
+                && string.Equals(missingOwner, pair.UserData.UID, StringComparison.Ordinal))
+            {
+                _openChronicle = null;
+                _chronicleNotice = ChronicleMissingNotice;
+            }
+            if (_chronicleNotice != null)
+            {
+                SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
             SpheneUI.Layout.Surface(() =>
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen, "No Chronicles",
@@ -8134,6 +8191,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     && string.Equals(staleOwner, pair.UserData.UID, StringComparison.Ordinal))
                 {
                     _openChronicle = null;
+                    _chronicleNotice = ChronicleMissingNotice;
+                }
+                if (_chronicleNotice != null)
+                {
+                    SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
                 for (var i = 0; i < blog.Count; i++)
                 {
@@ -9097,7 +9160,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     entry.GroupAlias ?? entry.GroupGID,
                     $"{entry.MemberCount} members", accent))
             {
-                OpenPublicCommunity(entry.GroupGID);
+                OpenPublicCommunity(entry);
             }
         }, gap: 10f * SpheneUI.Scale, maxCols: 4);
     }
@@ -9127,14 +9190,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         });
     }
 
-    /// <summary>Public community directory · opt-in listings from other syncshells.</summary>
+    /// <summary>Public community directory · opt-in listings from other
+    /// syncshells. The section stays mounted in every state - loading,
+    /// load error (with retry), empty directory, empty search - so a
+    /// transient failure never makes Discover disappear.</summary>
     private void DrawDiscoverSection()
     {
         EnsureDirectoryLoaded();
-        if (_directoryEntries == null || _directoryEntries.Count == 0)
-        {
-            return;
-        }
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Section);
         SpheneUI.Text.SectionHeader("Discover Communities");
@@ -9142,6 +9204,50 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SpheneUI.Text.PageIntro(
             "Clubs, venues and groups that listed themselves publicly · open a card to see their community page.");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
+
+        var previewError = _discover.PreviewError;
+        if (previewError != null)
+        {
+            // A card click that failed to fetch the public page - the card
+            // stays mounted, so clicking it again is the retry.
+            SpheneUI.Text.ColoredWrapped(previewError, SpheneUI.Palette.Warning);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        }
+
+        if (_discover.DirectoryLoading)
+        {
+            SpheneUI.Text.Muted("Loading public communities…");
+            return;
+        }
+        if (_discover.DirectoryError)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                "Couldn't load the directory",
+                "The public community listing could not be reached.",
+                "Retry",
+                () =>
+                {
+                    // Clearing the flag re-arms the loader on the next frame -
+                    // search and sort ride on fields and stay untouched.
+                    _discover.ClearDirectoryError();
+                },
+                FontAwesomeIcon.SyncAlt, SpheneUI.Palette.CrystalBlue);
+            return;
+        }
+        var entries = _discover.Entries;
+        if (entries == null)
+        {
+            // Never fetched and not fetching - only reachable while offline.
+            SpheneUI.Text.Muted("Connect to browse public communities.");
+            return;
+        }
+        if (entries.Count == 0)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Compass,
+                "No public communities yet",
+                "Syncshells appear here once their owners list them publicly.");
+            return;
+        }
 
         var joinedGids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var kv in _pairManager.GroupPairs)
@@ -9168,7 +9274,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             initialSelectedItem: sortLabels[Math.Clamp(_discoverSort, 0, sortLabels.Length - 1)]);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
-        var listed = _directoryEntries
+        var listed = entries
             .Where(e => !joinedGids.Contains(e.GroupGID) && !e.CallerIsMember)
             .Where(e => string.IsNullOrWhiteSpace(_discoverSearch)
                 || (e.GroupAlias ?? e.GroupGID).Contains(_discoverSearch, StringComparison.OrdinalIgnoreCase)
@@ -9182,9 +9288,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         };
         if (listed.Count == 0)
         {
+            var searchActive = !string.IsNullOrWhiteSpace(_discoverSearch);
             SpheneUI.Layout.EmptyState(FontAwesomeIcon.Compass,
-                "No communities match",
-                "Try a different search - or check back for new public listings.");
+                searchActive ? "No communities match" : "No communities to show",
+                searchActive
+                    ? "Try a different search - or check back for new public listings."
+                    : "Every listed community is already joined.");
             return;
         }
 
@@ -9215,7 +9324,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 featured.GroupAlias ?? featured.GroupGID,
                 $"{featured.MemberCount} members", featuredAccent))
         {
-            OpenPublicCommunity(featured.GroupGID);
+            OpenPublicCommunity(featured);
         }
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
@@ -9230,38 +9339,53 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     entry.GroupAlias ?? entry.GroupGID,
                     $"{entry.MemberCount} members", accent))
             {
-                OpenPublicCommunity(entry.GroupGID);
+                OpenPublicCommunity(entry);
             }
         }, gap: 10f * scale, maxCols: 4);
     }
 
     private void EnsureDirectoryLoaded()
     {
-        if (_directoryEntries != null || _directoryLoading || !_apiController.IsConnected)
+        // The error latch needs the Retry button to clear it - without the
+        // latch a persistent outage would request per frame. Gate + claim +
+        // generation capture are one atomic step inside the tracker.
+        if (!_discover.TryBeginDirectory(_discover.Entries != null,
+                _apiController.IsConnected, out var generation))
         {
             return;
         }
-        _directoryLoading = true;
         _ = Task.Run(async () =>
         {
             try
             {
-                _directoryEntries = await _apiController.GroupGetCommunityDirectory().ConfigureAwait(false);
+                var entries = await _apiController.GroupGetCommunityDirectory().ConfigureAwait(false);
+                _discover.ApplyDirectoryResult(generation, entries);
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to load community directory");
-                _directoryEntries = [];
+                _discover.ApplyDirectoryFailure(generation);
             }
             finally
             {
-                _directoryLoading = false;
+                // Generation-bound release: a stale request can't evict a
+                // newer one that claimed the slot after a reset.
+                _discover.EndDirectory(generation);
             }
         });
     }
 
-    private void OpenPublicCommunity(string gid)
+    /// <summary>Opens the public page behind a directory/favorite card.
+    /// Failures surface as an inline retry hint - the card stays mounted,
+    /// so clicking it again is the retry path. A queued notification could
+    /// be delivered after a profile switch, so no toast fires here.</summary>
+    private void OpenPublicCommunity(SyncshellDirectoryEntryDto entry)
     {
+        var gid = entry.GroupGID;
+        if (!_discover.TryBeginPreview(gid, out var generation))
+        {
+            return;
+        }
         _ = Task.Run(async () =>
         {
             try
@@ -9269,16 +9393,33 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 var community = await _apiController
                     .GroupGetPublicCommunity(new GroupDto(new GroupData(gid)))
                     .ConfigureAwait(false);
-                if (community != null)
+                if (community == null)
                 {
-                    Mediator.Publish(new OpenSyncshellCommunityMessage(community, null, JoinPopup: false));
+                    _discover.ApplyPreviewError(generation, PreviewErrorText(entry));
+                    return;
                 }
+                // The open is queued, so the request identity rides along
+                // and is re-validated when the preview actually opens - a
+                // reset between completion and consumption drops it.
+                Mediator.Publish(new OpenSyncshellCommunityMessage(community, null, JoinPopup: false,
+                    IsStillValid: () => _discover.IsCurrent(generation)));
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to load public community for {GID}", gid);
+                _discover.ApplyPreviewError(generation, PreviewErrorText(entry));
+            }
+            finally
+            {
+                _discover.EndPreview(generation);
             }
         });
+    }
+
+    private static string PreviewErrorText(SyncshellDirectoryEntryDto entry)
+    {
+        var name = entry.GroupAlias ?? entry.GroupGID;
+        return $"Couldn't open {name} - the community page could not be loaded. Click its card to retry.";
     }
 
     /// <summary>

@@ -110,6 +110,10 @@ public sealed class UiService : DisposableMediatorSubscriberBase
             _ = _framework.RunOnFrameworkThread(() =>
             {
                 if (_disposed) return;
+                // Queued opens carry their request's validity - a stale one
+                // (profile switched while the fetch was in flight) is dropped
+                // here, not at publish time.
+                if (msg.IsStillValid?.Invoke() == false) return;
                 _logger.LogDebug("Creating syncshell community UI with GroupFullInfo: {GroupAliasOrGID}", msg.GroupFullInfo?.Group.AliasOrGID);
                 var window = _uiFactory.CreateSyncshellCommunityUi(msg.Community, msg.GroupFullInfo,
                     msg.JoinPopup, msg.PreviewAsVisitor);

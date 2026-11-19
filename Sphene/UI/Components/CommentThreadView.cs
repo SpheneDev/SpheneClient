@@ -42,6 +42,12 @@ public sealed class CommentThreadView
 
     private sealed class ThreadState
     {
+        /// <summary>Serializes every read and write of the collections and
+        /// flags below - Draw iterates them on the UI thread while load,
+        /// patch and focus-walk completions apply off-thread. Every apply
+        /// takes this gate for a tiny section; Draw holds it across the
+        /// render so a completion can never modify a collection mid-foreach.</summary>
+        public readonly Lock Gate = new();
         public bool Loaded, Loading;
         public List<CommunityCommentDto> Roots = [];
         public readonly Dictionary<long, List<CommunityCommentDto>> Replies = [];
@@ -71,16 +77,19 @@ public sealed class CommentThreadView
         /// Expander state and in-progress drafts survive.</summary>
         public void Reset()
         {
-            Loaded = false;
-            Loading = false;
-            Roots = [];
-            Replies.Clear();
-            NextCursor = null;
-            CommentSummaries.Clear();
-            TargetSummary = null;
-            TargetSummaryLoaded = false;
-            SummariesLoading.Clear();
-            FocusExhaustedRoots.Clear();
+            lock (Gate)
+            {
+                Loaded = false;
+                Loading = false;
+                Roots = [];
+                Replies.Clear();
+                NextCursor = null;
+                CommentSummaries.Clear();
+                TargetSummary = null;
+                TargetSummaryLoaded = false;
+                SummariesLoading.Clear();
+                FocusExhaustedRoots.Clear();
+            }
         }
     }
 
@@ -94,6 +103,9 @@ public sealed class CommentThreadView
     /// avatar column's center like reddit's gutter line.</summary>
     private const float AuthorAvatarSize = 28f;
 
+    /// <summary>Guards <see cref="_threads"/> - entries are looked up on the
+    /// UI thread while invalidations can arrive on mediator threads.</summary>
+    private readonly Lock _threadsGate = new();
     private readonly Dictionary<string, ThreadState> _threads = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MarkdownComposer> _composers = new(StringComparer.Ordinal);
 
@@ -101,14 +113,20 @@ public sealed class CommentThreadView
     /// reloads roots, replies and reaction summaries.</summary>
     public void Invalidate(CommentTargetKind kind, long targetId)
     {
-        if (_threads.TryGetValue($"{(int)kind}:{targetId}", out var st)) st.Reset();
+        lock (_threadsGate)
+        {
+            if (_threads.TryGetValue($"{(int)kind}:{targetId}", out var st)) st.Reset();
+        }
     }
 
     /// <summary>Drops every cached thread - for pushes without a precise
     /// target (reaction changes) and whole-profile refreshes.</summary>
     public void InvalidateAll()
     {
-        foreach (var st in _threads.Values) st.Reset();
+        lock (_threadsGate)
+        {
+            foreach (var st in _threads.Values) st.Reset();
+        }
     }
 
     /// <summary>Arms a comment deep-link - the next Draw walks the thread to
@@ -117,11 +135,18 @@ public sealed class CommentThreadView
     public void FocusComment(CommentTargetKind kind, long targetId, long commentId)
     {
         var key = $"{(int)kind}:{targetId}";
-        if (!_threads.TryGetValue(key, out var st))
+        ThreadState st;
+        lock (_threadsGate)
         {
-            _threads[key] = st = new ThreadState();
+            if (!_threads.TryGetValue(key, out st!))
+            {
+                _threads[key] = st = new ThreadState();
+            }
         }
-        st.PendingFocusCommentId = commentId;
+        lock (st.Gate)
+        {
+            st.PendingFocusCommentId = commentId;
+        }
     }
 
     /// <summary>Invalidates the thread matching a pushed community change;
@@ -152,32 +177,54 @@ public sealed class CommentThreadView
         string? groupGid, CommentOps ops, bool locked, int commentCount)
     {
         var key = $"{(int)kind}:{targetId}";
-        if (!_threads.TryGetValue(key, out var st))
+        ThreadState st;
+        lock (_threadsGate)
         {
-            _threads[key] = st = new ThreadState();
-        }
-        if (!st.Loaded && !st.Loading && ops.LoadRoots != null)
-        {
-            st.Loading = true;
-            var captured = st;
-            _ = Task.Run(async () =>
+            if (!_threads.TryGetValue(key, out st!))
             {
-                var page = await ops.LoadRoots(null).ConfigureAwait(false);
-                if (page != null)
-                {
-                    captured.Roots = page.Roots;
-                    captured.NextCursor = page.NextCursor;
-                    foreach (var kv in page.ReplyPreviews)
-                    {
-                        captured.Replies[kv.Key] = kv.Value;
-                    }
-                }
-                captured.Loaded = true;
-                captured.Loading = false;
-            });
+                _threads[key] = st = new ThreadState();
+            }
         }
-        ResolveFocus(ops, st);
+        lock (st.Gate)
+        {
+            if (!st.Loaded && !st.Loading && ops.LoadRoots != null)
+            {
+                st.Loading = true;
+                var captured = st;
+                _ = Task.Run(async () =>
+                {
+                    var page = await ops.LoadRoots(null).ConfigureAwait(false);
+                    // Apply inside the gate - Draw iterates these same
+                    // collections on the UI thread every frame.
+                    lock (captured.Gate)
+                    {
+                        if (page != null)
+                        {
+                            captured.Roots = page.Roots;
+                            captured.NextCursor = page.NextCursor;
+                            foreach (var kv in page.ReplyPreviews ?? [])
+                            {
+                                captured.Replies[kv.Key] = kv.Value;
+                            }
+                        }
+                        captured.Loaded = true;
+                        captured.Loading = false;
+                    }
+                });
+            }
+            ResolveFocus(ops, st);
+            DrawThread(kind, targetId, ownerUid, groupGid, ops, locked,
+                commentCount, key, st);
+        }
+    }
 
+    /// <summary>The actual thread render - the caller holds
+    /// <paramref name="st"/>'s <see cref="ThreadState.Gate"/>, so every
+    /// collection this iterates is frozen against off-thread applies.</summary>
+    private void DrawThread(CommentTargetKind kind, long targetId, string? ownerUid,
+        string? groupGid, CommentOps ops, bool locked, int commentCount,
+        string key, ThreadState st)
+    {
         ImGui.PushID($"cmt-{key}");
         DrawTargetReactions(kind, targetId, ownerUid, groupGid, ops, st);
         SpheneUI.Text.Muted(locked
@@ -416,9 +463,12 @@ public sealed class CommentThreadView
                     {
                         var saved = await ops.Save(dto).ConfigureAwait(false);
                         if (saved == null) return;
-                        PatchComment(captured, saved);
-                        captured.EditingId = null;
-                        captured.EditDraft = string.Empty;
+                        lock (captured.Gate)
+                        {
+                            PatchComment(captured, saved);
+                            captured.EditingId = null;
+                            captured.EditDraft = string.Empty;
+                        }
                     });
                 }
                 ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
@@ -496,13 +546,16 @@ public sealed class CommentThreadView
                         if (await ops.Delete(captured).ConfigureAwait(false))
                         {
                             // server keeps a tombstone - mirror it locally
-                            PatchComment(capturedSt, c with
+                            lock (capturedSt.Gate)
                             {
-                                State = CommentState.AuthorDeleted, Body = null
-                            });
-                            if (c.RootId is { } rootId)
-                            {
-                                BumpRootReplyCount(capturedSt, rootId, -1);
+                                PatchComment(capturedSt, c with
+                                {
+                                    State = CommentState.AuthorDeleted, Body = null
+                                });
+                                if (c.RootId is { } rootId)
+                                {
+                                    BumpRootReplyCount(capturedSt, rootId, -1);
+                                }
                             }
                         }
                     });
@@ -522,7 +575,10 @@ public sealed class CommentThreadView
                         var result = await ops.Moderate!(dto).ConfigureAwait(false);
                         if (result != null)
                         {
-                            PatchComment(capturedSt, result);
+                            lock (capturedSt.Gate)
+                            {
+                                PatchComment(capturedSt, result);
+                            }
                         }
                     });
                 }));
@@ -641,8 +697,11 @@ public sealed class CommentThreadView
             _ = Task.Run(async () =>
             {
                 var s = await ops.LoadCommentSummary(id).ConfigureAwait(false);
-                if (s != null) st.CommentSummaries[id] = s;
-                st.SummariesLoading.Remove(id);
+                lock (st.Gate)
+                {
+                    if (s != null) st.CommentSummaries[id] = s;
+                    st.SummariesLoading.Remove(id);
+                }
             });
         }
     }
@@ -659,7 +718,10 @@ public sealed class CommentThreadView
                 _ = Task.Run(async () =>
                 {
                     var s = await ops.SetReaction!(dto).ConfigureAwait(false);
-                    st.CommentSummaries[c.Id] = s;
+                    lock (st.Gate)
+                    {
+                        st.CommentSummaries[c.Id] = s;
+                    }
                 });
             });
     }
@@ -674,7 +736,11 @@ public sealed class CommentThreadView
             var captured = st;
             _ = Task.Run(async () =>
             {
-                captured.TargetSummary = await ops.LoadTargetSummary(targetId).ConfigureAwait(false);
+                var summary = await ops.LoadTargetSummary(targetId).ConfigureAwait(false);
+                lock (captured.Gate)
+                {
+                    captured.TargetSummary = summary;
+                }
             });
         }
         var rk = kind switch
@@ -689,7 +755,11 @@ public sealed class CommentThreadView
                 groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null);
             _ = Task.Run(async () =>
             {
-                st.TargetSummary = await ops.SetReaction(dto).ConfigureAwait(false);
+                var summary = await ops.SetReaction(dto).ConfigureAwait(false);
+                lock (st.Gate)
+                {
+                    st.TargetSummary = summary;
+                }
             });
         });
         ImGui.SameLine(0f, SpheneUI.Spacing.X12.Scaled);
@@ -704,21 +774,24 @@ public sealed class CommentThreadView
         {
             var saved = await ops.Save!(dto).ConfigureAwait(false);
             if (saved == null) return;
-            if (parentId == null)
+            lock (st.Gate)
             {
-                st.Draft = string.Empty;
-                st.Roots.Insert(0, saved);
-            }
-            else
-            {
-                st.ReplyDraft = string.Empty;
-                st.ReplyTo = null;
-                if (!st.Replies.TryGetValue(parentId.Value, out var replies))
+                if (parentId == null)
                 {
-                    st.Replies[parentId.Value] = replies = [];
+                    st.Draft = string.Empty;
+                    st.Roots.Insert(0, saved);
                 }
-                replies.Add(saved);
-                BumpRootReplyCount(st, parentId.Value, +1);
+                else
+                {
+                    st.ReplyDraft = string.Empty;
+                    st.ReplyTo = null;
+                    if (!st.Replies.TryGetValue(parentId.Value, out var replies))
+                    {
+                        st.Replies[parentId.Value] = replies = [];
+                    }
+                    replies.Add(saved);
+                    BumpRootReplyCount(st, parentId.Value, +1);
+                }
             }
         });
     }
@@ -803,35 +876,56 @@ public sealed class CommentThreadView
             {
                 if (rootId == null)
                 {
-                    var page = await ops.LoadRoots!(st.NextCursor).ConfigureAwait(false);
-                    if (page == null) return;
-                    st.Roots.AddRange(page.Roots);
-                    st.NextCursor = page.NextCursor;
-                    foreach (var kv in page.ReplyPreviews)
+                    long? cursor;
+                    lock (st.Gate)
                     {
-                        st.Replies[kv.Key] = kv.Value;
+                        cursor = st.NextCursor;
+                    }
+                    var page = await ops.LoadRoots!(cursor).ConfigureAwait(false);
+                    if (page == null) return;
+                    lock (st.Gate)
+                    {
+                        st.Roots.AddRange(page.Roots);
+                        st.NextCursor = page.NextCursor;
+                        foreach (var kv in page.ReplyPreviews ?? [])
+                        {
+                            st.Replies[kv.Key] = kv.Value;
+                        }
                     }
                 }
                 else if (ops.LoadReplies != null)
                 {
-                    var cursor = st.Replies.TryGetValue(rootId.Value, out var list)
-                        && list.Count > 0 ? list[^1].Id : (long?)null;
+                    long? cursor;
+                    lock (st.Gate)
+                    {
+                        cursor = st.Replies.TryGetValue(rootId.Value, out var list)
+                            && list.Count > 0 ? list[^1].Id : (long?)null;
+                    }
                     var page = await ops.LoadReplies(rootId.Value, cursor).ConfigureAwait(false);
                     if (page == null || page.Roots.Count == 0)
                     {
-                        st.FocusExhaustedRoots.Add(rootId.Value);
+                        lock (st.Gate)
+                        {
+                            st.FocusExhaustedRoots.Add(rootId.Value);
+                        }
                         return;
                     }
-                    if (!st.Replies.TryGetValue(rootId.Value, out var replies))
+                    lock (st.Gate)
                     {
-                        st.Replies[rootId.Value] = replies = [];
+                        if (!st.Replies.TryGetValue(rootId.Value, out var replies))
+                        {
+                            st.Replies[rootId.Value] = replies = [];
+                        }
+                        replies.AddRange(page.Roots);
                     }
-                    replies.AddRange(page.Roots);
                 }
             }
             finally
             {
-                st.FocusBusy = false;
+                lock (st.Gate)
+                {
+                    st.FocusBusy = false;
+                }
             }
         });
     }
@@ -887,11 +981,14 @@ public sealed class CommentThreadView
         {
             var page = await ops.LoadRoots!(cursor).ConfigureAwait(false);
             if (page == null) return;
-            st.Roots.AddRange(page.Roots);
-            st.NextCursor = page.NextCursor;
-            foreach (var kv in page.ReplyPreviews)
+            lock (st.Gate)
             {
-                st.Replies[kv.Key] = kv.Value;
+                st.Roots.AddRange(page.Roots);
+                st.NextCursor = page.NextCursor;
+                foreach (var kv in page.ReplyPreviews ?? [])
+                {
+                    st.Replies[kv.Key] = kv.Value;
+                }
             }
         });
     }
@@ -902,11 +999,14 @@ public sealed class CommentThreadView
         {
             var page = await ops.LoadReplies!(rootId, cursor).ConfigureAwait(false);
             if (page == null) return;
-            if (!st.Replies.TryGetValue(rootId, out var list))
+            lock (st.Gate)
             {
-                st.Replies[rootId] = list = [];
+                if (!st.Replies.TryGetValue(rootId, out var list))
+                {
+                    st.Replies[rootId] = list = [];
+                }
+                list.AddRange(page.Roots);
             }
-            list.AddRange(page.Roots);
         });
     }
 
