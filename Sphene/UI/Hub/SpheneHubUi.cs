@@ -93,6 +93,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// list shows compact feed rows; clicking one opens just that entry
     /// with its full discussion.</summary>
     private (string OwnerUid, long Id)? _openChronicle;
+    private readonly PublicProfileService _publicProfiles;
+    private string? _publicUid;
+    private byte[] _publicAvatarBytes = [];
+    private byte[] _publicBannerBytes = [];
+    private string? _publicAvatarB64;
+    private string? _publicBannerB64;
+    private string _publicSearchInput = string.Empty;
+    private string? _publicSearchCommitted;
+    private string? _publicFollowBusy;
     /// <summary>Shown in the Chronicles surface when a deep-linked post can't
     /// resolve after the list loaded - deleted or no longer visible.</summary>
     private string? _chronicleNotice;
@@ -177,7 +186,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     /// <summary>Contextual post/event/photo editors · anchored flyouts on the community page.</summary>
     private CommunityComposers CommunityComposers
-        => _communityComposers ??= new CommunityComposers(_apiController, Mediator, _logger, _communityMedia);
+        => _communityComposers ??= CreateCommunityComposers();
+
+    private CommunityComposers CreateCommunityComposers()
+    {
+        var composers = new CommunityComposers(_apiController, Mediator, _logger, _communityMedia);
+        composers.OnAuthorClick = NavigateToAuthor;
+        return composers;
+    }
     private readonly SyncshellCommunityView.CommunityPageState _communityPage = new();
     /// <summary>Shared comment-thread widget for the friend journal surface.</summary>
     private readonly CommentThreadView _blogComments = new();
@@ -285,9 +301,26 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SyncshellCommunitySection? CommunitySection = null, long? CommunityItemId = null,
         /// <summary>Chronicle deep-link - the reader opens this post on the
         /// location's owner (friend or self) and focuses the comment.</summary>
-        long? ChroniclePostId = null, long? FocusCommentId = null);
-    private readonly List<HubLocation> _navBack = [];
-    private readonly List<HubLocation> _navForward = [];
+        long? ChroniclePostId = null, long? FocusCommentId = null,
+        /// <summary>Public-profile surface - the uid whose shared profile
+        /// is on screen (only while Page == PublicProfile).</summary>
+        string? PublicUid = null);
+    /// <summary>Back/forward history - each entry pairs the location with
+    /// the content scroll offset it was captured at, so back/forward lands
+    /// where the user actually was (best effort: the offset clamps to the
+    /// restored page's real height).</summary>
+    private readonly List<(HubLocation Location, float ScrollY)> _navBack = [];
+    private readonly List<(HubLocation Location, float ScrollY)> _navForward = [];
+    /// <summary>The shared content child's live scroll offset - refreshed
+    /// every frame inside the child so captures are right regardless of
+    /// which surface triggered the navigation.</summary>
+    private float _contentScrollY;
+    /// <summary>Scroll offset to apply on the first draw of a restored
+    /// location; null resets to the top like a fresh navigation.</summary>
+    private float? _pendingScrollRestore;
+    /// <summary>List scroll offset stashed when a chronicle reader opens
+    /// in place - closing the reader lands back there, not at the top.</summary>
+    private float _preReaderScrollY;
 
     public SpheneHubUi(ILogger<SpheneHubUi> logger, SpheneMediator mediator,
         PerformanceCollectorService performanceCollectorService,
@@ -308,7 +341,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         ChangelogService changelogService,
         ChatService chatService, CommunityMediaClientService communityMedia,
         LifestreamTravelService lifestreamTravel, Interop.Ipc.IpcManager ipcManager,
-        Services.Gifs.IGifProvider gifProvider)
+        Services.Gifs.IGifProvider gifProvider, PublicProfileService publicProfiles)
         : base(logger, mediator, "Sphene Hub###SpheneHubUI", performanceCollectorService)
     {
         _lifestreamTravel = lifestreamTravel;
@@ -319,6 +352,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _changelogService = changelogService;
         _chatService = chatService;
         _communityMedia = communityMedia;
+        _publicProfiles = publicProfiles;
         SyncshellCommunityView.MediaClient = communityMedia;
         MarkdownComposer.MediaClient = communityMedia;
         _gifProvider = gifProvider;
@@ -388,6 +422,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     _joinSyncshellUi.PrefillTarget(msg.JoinGid);
                 }
             }
+            else if (msg.PublicProfileUid is { } pubUid)
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+                    PublicUid: pubUid, ChroniclePostId: msg.ChroniclePostId,
+                    FocusCommentId: msg.FocusCommentId));
+            }
             else if (msg.ChroniclePostId is { } chronId)
             {
                 // Chronicle deep-link: own notifications land on the profile's
@@ -408,12 +448,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
                 else
                 {
-                    // Owner resolvable to neither self nor a pair/co-member -
-                    // unreachable profiles get an honest reason, not silence.
-                    Mediator.Publish(new NotificationMessage("Chronicle unavailable",
-                        "This Chronicle can't be opened - it may have been deleted or is no longer visible to you.",
-                        SpheneConfiguration.Models.NotificationType.Warning,
-                        TimeSpan.FromSeconds(6)));
+                    // Not self and not a pair - the public profile page is the
+                    // reader's next stop; a revoked profile lands on its
+                    // neutral unavailable state instead of a dead end.
+                    NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+                        PublicUid: owner, ChroniclePostId: chronId,
+                        FocusCommentId: msg.FocusCommentId));
                 }
             }
             else if (msg.Friend != null)
@@ -987,15 +1027,35 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             contentMin = ImGui.GetWindowPos();
             contentMax = contentMin + ImGui.GetWindowSize();
+            _contentScrollY = ImGui.GetScrollY();
             // One scroll child serves every page · a stale offset would shift
             // fresh content down. Snap to the top on each location change so
             // pages (and embedded tab switches, folded into the location's
-            // SubPage) start at their header.
+            // SubPage) start at their header. Back/forward entries carry the
+            // scroll offset they were captured at - restoring it lands the
+            // user where they left, clamped to the restored content height.
             var drawn = CurrentLocation;
             if (_lastDrawnLocation != drawn)
             {
+                var scroll = _pendingScrollRestore ?? 0f;
+                if (_pendingScrollRestore == null)
+                {
+                    if (_lastDrawnLocation?.ChroniclePostId == null
+                        && drawn.ChroniclePostId != null)
+                    {
+                        // Reader opens in place - stash the list offset so
+                        // closing it lands back at the same position.
+                        _preReaderScrollY = _contentScrollY;
+                    }
+                    else if (_lastDrawnLocation?.ChroniclePostId != null
+                        && drawn.ChroniclePostId == null)
+                    {
+                        scroll = _preReaderScrollY;
+                    }
+                }
                 _lastDrawnLocation = drawn;
-                ImGui.SetScrollY(0f);
+                _pendingScrollRestore = null;
+                ImGui.SetScrollY(scroll);
             }
             switch (_activePage)
             {
@@ -1007,6 +1067,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     break;
                 case SpheneHubPage.Community:
                     DrawCommunityPage(accentCommunity);
+                    break;
+                case SpheneHubPage.PublicProfile:
+                    DrawPublicProfilePage(accentCommunity);
                     break;
                 case SpheneHubPage.Profile:
                     DrawProfilePage(accentMe);
@@ -1079,27 +1142,69 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         ResetTransientState();
     }
 
-    private HubLocation CurrentLocation => new(_activePage, _selectedGroupGid, _viewingFriend,
-        _activePage switch
-        {
-            SpheneHubPage.Settings => (int)_settingsUi.ActiveSettingsPageValue,
-            SpheneHubPage.Supporter => (int)_settingsUi.ActiveSettingsPageValue,
-            SpheneHubPage.ModSharing => (int)_modSharingUi.ActiveSubPageValue,
-            SpheneHubPage.CharacterData => (int)_charaDataHubUi.ActiveSubPageValue,
-            SpheneHubPage.DataAnalysis => (int)_dataAnalysisUi.ActiveSubPageValue,
-            SpheneHubPage.Syncshells => _selectedGroupGid != null
-                ? (int)_syncshellDetailTab : (int)_syncshellSubPage,
-            SpheneHubPage.Community => _communityTab,
-            _ => null
-        },
-        _activePage == SpheneHubPage.Housing ? _housingPageView.SelectedKey : null,
-        null,
-        _activePage == SpheneHubPage.News ? _viewingAnnouncementId : null,
-        _activePage == SpheneHubPage.News && _announcementEditMode,
-        _activePage == SpheneHubPage.Syncshells && _selectedGroupGid != null
-            ? _communityPage.Tab : null,
-        _activePage == SpheneHubPage.Syncshells && _selectedGroupGid != null
-            ? _communityPage.EventId ?? _communityPage.FocusItemId : null);
+    private HubLocation CurrentLocation => BuildCurrentLocation();
+
+    /// <summary>Snapshots the live surface into a location for the history
+    /// stacks - page + embedded sub-state + the open chronicle reader and a
+    /// pending comment focus, so back/forward lands where the user was, not
+    /// just on the right page.</summary>
+    private HubLocation BuildCurrentLocation()
+    {
+        // The open chronicle reader rides the location on every
+        // reader-hosting page - own profile, friend profile, public
+        // profile - matched by owner, so a back press re-opens the same
+        // entry instead of the bare list.
+        var chronId = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
+            && ChronicleOwnerOnPage(openOwner)
+            ? openId : (long?)null;
+        // FocusCommentId stays unset - the pending focus lives in the
+        // thread state keyed by target and survives navigation on its own.
+        // Capturing it here would flip the location identity when the
+        // focus is consumed and yank the scroll back to the top.
+        return new HubLocation(_activePage, _selectedGroupGid, _viewingFriend,
+            _activePage switch
+            {
+                SpheneHubPage.Settings => (int)_settingsUi.ActiveSettingsPageValue,
+                SpheneHubPage.Supporter => (int)_settingsUi.ActiveSettingsPageValue,
+                SpheneHubPage.ModSharing => (int)_modSharingUi.ActiveSubPageValue,
+                SpheneHubPage.CharacterData => (int)_charaDataHubUi.ActiveSubPageValue,
+                SpheneHubPage.DataAnalysis => (int)_dataAnalysisUi.ActiveSubPageValue,
+                SpheneHubPage.Syncshells => _selectedGroupGid != null
+                    ? (int)_syncshellDetailTab : (int)_syncshellSubPage,
+                SpheneHubPage.Community => _communityTab,
+                // Profile-tab surfaces carry their tab in SubPage so
+                // back/forward lands on the same tab - without it the
+                // friend-change path resets to the Profile tab every time.
+                SpheneHubPage.Friends => _friendPageTab,
+                SpheneHubPage.Profile => _profilePageTab,
+                _ => null
+            },
+            _activePage == SpheneHubPage.Housing ? _housingPageView.SelectedKey : null,
+            null,
+            _activePage == SpheneHubPage.News ? _viewingAnnouncementId : null,
+            _activePage == SpheneHubPage.News && _announcementEditMode,
+            _activePage == SpheneHubPage.Syncshells && _selectedGroupGid != null
+                ? _communityPage.Tab : null,
+            _activePage == SpheneHubPage.Syncshells && _selectedGroupGid != null
+                ? _communityPage.EventId ?? _communityPage.FocusItemId : null,
+            chronId,
+            null,
+            _activePage == SpheneHubPage.PublicProfile ? _publicUid : null);
+    }
+
+    /// <summary>Whether the open chronicle's owner is this page's host -
+    /// own uid on Profile, the viewed pair on Friends, the public uid on
+    /// PublicProfile. Readers elsewhere never claim the slot.</summary>
+    private bool ChronicleOwnerOnPage(string ownerUid) => _activePage switch
+    {
+        SpheneHubPage.Profile => string.Equals(ownerUid, _apiController.UID,
+            StringComparison.Ordinal),
+        SpheneHubPage.Friends => string.Equals(ownerUid,
+            _viewingFriend?.UserData.UID, StringComparison.Ordinal),
+        SpheneHubPage.PublicProfile => string.Equals(ownerUid, _publicUid,
+            StringComparison.Ordinal),
+        _ => false,
+    };
 
     /// <summary>Folds a settings-page switch into the hub history · only for changes that happened on
     /// the embedded surface while the hub shows the settings page, so the standalone Settings window
@@ -1108,7 +1213,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private void OnSettingsPageChanged(SettingsUi.SettingsPage previous, SettingsUi.SettingsPage next, bool embedded)
     {
         if (!embedded || _activePage is not (SpheneHubPage.Settings or SpheneHubPage.Supporter)) return;
-        _navBack.Add(new HubLocation(_activePage, null, null, (int)previous));
+        _navBack.Add((new HubLocation(_activePage, null, null, (int)previous),
+            _contentScrollY));
         _navForward.Clear();
     }
 
@@ -1117,7 +1223,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         ModSharingUi.ModSharingPage next, bool embedded)
     {
         if (!embedded || _activePage != SpheneHubPage.ModSharing) return;
-        _navBack.Add(new HubLocation(SpheneHubPage.ModSharing, null, null, (int)previous));
+        _navBack.Add((new HubLocation(SpheneHubPage.ModSharing, null, null,
+            (int)previous), _contentScrollY));
         _navForward.Clear();
     }
 
@@ -1126,7 +1233,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         CharaDataHubUi.CharaDataPage next, bool embedded)
     {
         if (!embedded || _activePage != SpheneHubPage.CharacterData) return;
-        _navBack.Add(new HubLocation(SpheneHubPage.CharacterData, null, null, (int)previous));
+        _navBack.Add((new HubLocation(SpheneHubPage.CharacterData, null, null,
+            (int)previous), _contentScrollY));
         _navForward.Clear();
     }
 
@@ -1135,7 +1243,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         DataAnalysisUi.DataAnalysisPage next, bool embedded)
     {
         if (!embedded || _activePage != SpheneHubPage.DataAnalysis) return;
-        _navBack.Add(new HubLocation(SpheneHubPage.DataAnalysis, null, null, (int)previous));
+        _navBack.Add((new HubLocation(SpheneHubPage.DataAnalysis, null, null,
+            (int)previous), _contentScrollY));
         _navForward.Clear();
     }
 
@@ -1161,28 +1270,31 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         CloseEmbeddedViewers();
         var current = CurrentLocation;
         if (current.Equals(target)) return;
-        _navBack.Add(current);
+        _navBack.Add((current, _contentScrollY));
         _navForward.Clear();
+        _pendingScrollRestore = null;
         ApplyLocation(target);
     }
 
     private void NavigateBack()
     {
         if (_navBack.Count == 0) return;
-        _navForward.Add(CurrentLocation);
-        var target = _navBack[^1];
+        _navForward.Add((CurrentLocation, _contentScrollY));
+        var (target, scrollY) = _navBack[^1];
         _navBack.RemoveAt(_navBack.Count - 1);
         CloseEmbeddedViewers();
+        _pendingScrollRestore = scrollY;
         ApplyLocation(target);
     }
 
     private void NavigateForward()
     {
         if (_navForward.Count == 0) return;
-        _navBack.Add(CurrentLocation);
-        var target = _navForward[^1];
+        _navBack.Add((CurrentLocation, _contentScrollY));
+        var (target, scrollY) = _navForward[^1];
         _navForward.RemoveAt(_navForward.Count - 1);
         CloseEmbeddedViewers();
+        _pendingScrollRestore = scrollY;
         ApplyLocation(target);
     }
 
@@ -1247,9 +1359,29 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // Chronicle deep-links: the reader opens once the post list resolves
         // the id; the comment focus waits in the thread view until the
         // discussion loads it (auto-paginating roots/replies meanwhile).
+        // Public-profile state: uid swap clears the per-uid texture cache and
+        // drops an open reader that belongs to the previous profile; leaving
+        // the page entirely clears the surface.
+        var nextPublicUid = target.Page == SpheneHubPage.PublicProfile
+            ? target.PublicUid : null;
+        if (!string.Equals(nextPublicUid, _publicUid, StringComparison.Ordinal))
+        {
+            if (_openChronicle is { } oc
+                && !string.Equals(oc.OwnerUid, nextPublicUid, StringComparison.Ordinal))
+            {
+                _openChronicle = null;
+            }
+            _publicAvatarBytes = [];
+            _publicBannerBytes = [];
+            _publicAvatarB64 = null;
+            _publicBannerB64 = null;
+        }
+        _publicUid = nextPublicUid;
         if (target.ChroniclePostId is { } chronId)
         {
-            var ownerUid = target.Page == SpheneHubPage.Friends
+            var ownerUid = target.Page == SpheneHubPage.PublicProfile
+                ? target.PublicUid
+                : target.Page == SpheneHubPage.Friends
                 ? target.Friend?.UserData.UID
                 : _apiController.UID;
             if (ownerUid != null)
@@ -1372,7 +1504,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     }
                     break;
                 case SpheneHubPage.Community:
-                    _communityTab = Math.Clamp(subPage, 0, 5);
+                    _communityTab = Math.Clamp(subPage, 0, 7);
                     break;
                 case SpheneHubPage.Friends:
                     _pendingFriendTab = Math.Clamp(subPage, 0, 4);
@@ -2278,6 +2410,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             Visibility = p.Visibility ?? profile.Visibility,
             Links = p.Links ?? profile.Links,
             Base64RowImage = p.RowImageBase64 ?? profile.Base64RowImage,
+            PublicProfile = p.PublicProfile ?? profile.PublicProfile,
         };
     }
 
@@ -2649,6 +2782,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             Visibility = patch.Visibility ?? _profilePatch.Visibility,
             RowImageBase64 = patch.RowImageBase64 ?? _profilePatch.RowImageBase64,
             Links = patch.Links ?? _profilePatch.Links,
+            PublicProfile = patch.PublicProfile ?? _profilePatch.PublicProfile,
         };
     }
 
@@ -3059,7 +3193,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     // actor in the key - reaction/comment rows can share the
                     // same target id across different users.
                     if (FeedItemRow.Draw($"feed-{item.Kind}-{item.Id}-{item.ActorUid}", item, "hub:",
-                            fallbackAccent: accent))
+                            fallbackAccent: accent, onActorClick: NavigateToAuthor))
                     {
                         NavigateFeedItem(item);
                     }
@@ -5120,6 +5254,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
                 DrawCommunityTabs(accentCommunity);
                 break;
+            case SpheneHubPage.PublicProfile:
+                DrawPublicProfileChrome(accentCommunity, heroHost);
+                break;
             case SpheneHubPage.Profile:
                 DrawProfileChrome(accentMe, heroHost);
                 break;
@@ -5226,6 +5363,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     icon: FontAwesomeIcon.Bolt, accent: accent);
                 DrawCommunityActivity(items, accent);
                 break;
+            case 6:
+                DrawFollowingFeed(accent);
+                return;
+            case 7:
+                DrawPeopleSearch(accent);
+                return;
             default:
                 var only = CommunityTabKind(_communityTab);
                 SpheneUI.Text.SectionHeader(
@@ -5336,6 +5479,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             (FontAwesomeIcon.Calendar, "Events"),
             (FontAwesomeIcon.BookOpen, "Chronicles"),
             (FontAwesomeIcon.Bolt, "Activity"),
+            (FontAwesomeIcon.Rss, "Following"),
+            (FontAwesomeIcon.Users, "People"),
         ];
 
         var needed = 0f;
@@ -5813,9 +5958,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // Title-less Chronicles show their body snippet as the title line.
         var cardTitle = string.IsNullOrWhiteSpace(item.Title)
             ? item.Snippet ?? string.Empty : item.Title;
+        // The leading actor segment is split off as its own hit target so a
+        // name click opens the profile while the rest of the card deep-links.
+        var actorLinkable = item.ActorUid != null
+            && !string.IsNullOrWhiteSpace(item.ActorDisplayName);
         DrawNewsCard(badge, badgeColor, cardTitle, item.Snippet, item.TimestampUtc,
             FeedThumb(item), accent, () => NavigateFeedItem(item), fallbackIcon,
-            FeedMeta(item), id: $"{item.GroupGID}-{item.Id}");
+            actorLinkable ? FeedMetaTail(item) : FeedMeta(item),
+            id: $"{item.GroupGID}-{item.Id}",
+            actorName: actorLinkable ? item.ActorDisplayName : null,
+            actorUid: item.ActorUid, onActorClick: NavigateToAuthor);
     }
 
     /// <summary>
@@ -5991,7 +6143,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 continue;
             }
             if (FeedItemRow.Draw($"commact-{item.Kind}-{item.Id}-{item.ActorUid}",
-                    item, "hub:", fallbackAccent: accent))
+                    item, "hub:", fallbackAccent: accent,
+                    onActorClick: NavigateToAuthor))
             {
                 NavigateFeedItem(item);
             }
@@ -6054,16 +6207,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// author carries the origin; activity rows lead with the actor.</summary>
     private static string FeedMeta(SyncshellCommunityFeedItemDto item)
     {
+        var actor = item.ActorDisplayName;
+        return string.IsNullOrEmpty(actor)
+            ? FeedMetaTail(item)
+            : $"{actor} · {FeedMetaTail(item)}";
+    }
+
+    /// <summary>The meta line without the leading actor segment - used when
+    /// the actor name is drawn as its own hit target next to it.</summary>
+    private static string FeedMetaTail(SyncshellCommunityFeedItemDto item)
+    {
         var when = FeedWhen(item.TimestampUtc);
         var shell = CommunityFeedShellName(item);
-        var actor = item.ActorDisplayName;
-        if (!string.IsNullOrEmpty(actor))
-        {
-            return shell == null || item.Kind == SyncshellFeedItemKind.Blog
-                ? $"{actor} · {when}"
-                : $"{actor} · {shell} · {when}";
-        }
-        return shell == null ? when : $"{shell} · {when}";
+        return shell == null || item.Kind == SyncshellFeedItemKind.Blog
+            ? when : $"{shell} · {when}";
     }
 
     /// <summary>"2h ago" for the past, "in 3d" for the near future - events
@@ -6106,7 +6263,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private static void DrawNewsCard(string badge, Vector4 badgeColor, string title,
         string? desc, DateTime? date, IDalamudTextureWrap? thumb,
         Vector4 accent, Action? onClick,
-        FontAwesomeIcon? fallbackIcon = null, string? meta = null, string? id = null)
+        FontAwesomeIcon? fallbackIcon = null, string? meta = null, string? id = null,
+        string? actorName = null, string? actorUid = null,
+        Action<string>? onActorClick = null)
     {
         var scale = SpheneUI.Scale;
         var w = SpheneUI.Controls.BoundedAvailX();
@@ -6122,9 +6281,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var clicked = onClick != null
             && ImGui.InvisibleButton("##nc", new Vector2(w, h));
         var hovered = onClick != null && ImGui.IsItemHovered();
+        // The actor link sits inside the card's own hit rect - it can only
+        // steal HoveredId when the card button opts into overlap.
+        if (onClick != null)
+        {
+            ImGui.SetItemAllowOverlap();
+        }
         ImGui.PopID();
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
+        // The actor hit zone repositions the cursor absolutely - keep the
+        // post-card cursor so the next card doesn't slide under this one.
+        var resumeCursor = ImGui.GetCursorScreenPos();
 
         dl.AddRectFilled(min, max,
             SpheneUI.ColorUtils.ToU32(SpheneUI.Layout.NavRailBandColor()), radius);
@@ -6180,10 +6348,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             badge);
 
         // Text column · title leads, meta sits at the top-right, the
-        // description wraps underneath into two lines.
+        // description wraps underneath into two lines. A linkable actor name
+        // leads the meta block as its own hit target.
+        var actorLink = onActorClick != null && actorUid != null
+            && !string.IsNullOrWhiteSpace(actorName);
         var metaText = meta ?? (date.HasValue
             ? FeedItemRow.RelativeTime(date.Value.ToUniversalTime()) : null);
-        var metaW = metaText != null ? ImGui.CalcTextSize(metaText).X : 0f;
+        var metaSep = actorLink && metaText != null ? " · " : null;
+        var actorW = actorLink ? ImGui.CalcTextSize(actorName!).X : 0f;
+        var sepW = metaSep != null ? ImGui.CalcTextSize(metaSep).X : 0f;
+        var metaW = actorW + sepW
+            + (metaText != null ? ImGui.CalcTextSize(metaText).X : 0f);
         var tx = visMax.X + pad;
         var tr = max.X - pad * 2f;
         var ty = visMin.Y;
@@ -6205,10 +6380,46 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
         }
         dl.PopClipRect();
-        if (metaText != null)
+        var actorClicked = false;
+        if (metaW > 0f)
         {
-            dl.AddText(new Vector2(tr - metaW, ty + 1f * scale),
-                SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), metaText);
+            var mx = tr - metaW;
+            var my = ty + 1f * scale;
+            if (actorLink)
+            {
+                var actorMin = new Vector2(mx, my);
+                var actorHovered = ImGui.IsMouseHoveringRect(actorMin,
+                    actorMin + new Vector2(actorW, lineH));
+                dl.AddText(actorMin, SpheneUI.ColorUtils.ToU32(
+                    actorHovered ? accent : SpheneUI.Colors.TextMuted), actorName!);
+                ImGui.PushID($"nca{cardId}");
+                ImGui.SetCursorScreenPos(actorMin);
+                actorClicked = ImGui.InvisibleButton("##actor",
+                    new Vector2(actorW, lineH));
+                ImGui.PopID();
+                ImGui.SetCursorScreenPos(resumeCursor);
+                if (actorHovered)
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                    SpheneUI.AttachTooltip("View profile");
+                }
+                if (actorClicked)
+                {
+                    onActorClick!(actorUid!);
+                }
+                mx += actorW;
+            }
+            if (metaSep != null)
+            {
+                dl.AddText(new Vector2(mx, my),
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), metaSep);
+                mx += sepW;
+            }
+            if (metaText != null)
+            {
+                dl.AddText(new Vector2(mx, my),
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), metaText);
+            }
         }
 
         if (onClick != null)
@@ -6226,7 +6437,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             }
-            if (clicked)
+            if (clicked && !actorClicked)
             {
                 onClick();
             }
@@ -7432,7 +7643,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             var item = _friendActivityItems[i];
             if (FeedItemRow.Draw($"fact-{item.Kind}-{item.Id}-{i}", item,
-                    "hub:", fallbackAccent: accent))
+                    "hub:", fallbackAccent: accent,
+                    onActorClick: NavigateToAuthor))
             {
                 NavigateFeedItem(item);
             }
@@ -10623,6 +10835,518 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             return;
         }
         _ = FetchCommunityAsync(gid);
+    }
+
+    /// <summary>Author-name deep-link shared by feed rows, chronicle headers
+    /// and comment authors - self keeps the own profile page, pairs the
+    /// friend page, everyone else the public profile surface.</summary>
+    private void NavigateToAuthor(string uid)
+    {
+        if (string.IsNullOrEmpty(uid)) return;
+        if (string.Equals(uid, _apiController.UID, StringComparison.Ordinal))
+        {
+            NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null));
+            return;
+        }
+        if (FindPairByUid(uid) is { } authorPair)
+        {
+            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, authorPair));
+            return;
+        }
+        // Always land on the public page - it resolves to the explicit
+        // "unavailable" state for unshared profiles and old servers alike,
+        // instead of the click silently doing nothing.
+        NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+            PublicUid: uid));
+    }
+
+    /// <summary>Decodes one public-profile image field; the caller caches
+    /// bytes per (uid, payload-hash) so a changed or redacted payload
+    /// re-decodes instead of serving the warm previous image.</summary>
+    private static byte[] PublicMedia(string? base64)
+    {
+        if (string.IsNullOrEmpty(base64)) return [];
+        try { return Convert.FromBase64String(base64); }
+        catch (FormatException) { return []; }
+    }
+
+    /// <summary>Stable content key for a base64 payload - an ordinal hash
+    /// suffix keeps texture keys honest when a same-uid image is replaced.</summary>
+    private static int ContentKey(string? base64)
+        => base64 == null ? 0 : StringComparer.Ordinal.GetHashCode(base64);
+
+    /// <summary>Fixed chrome of the public profile page - the same hero
+    /// language as friend/own profiles (banner, avatar, name, bio, tags)
+    /// plus the unilateral follow action. Unresolved entries skeleton; a
+    /// profile revoked since the click keeps a quiet placeholder hero.</summary>
+    private void DrawPublicProfileChrome(Vector4 accent,
+        SpheneUI.Profile.HeroHost heroHost)
+    {
+        var theme = SpheneTheme.Current;
+        var (resolved, rawDto) = _publicUid != null
+            ? _publicProfiles.EnsureProfile(_publicUid)
+            : (true, null);
+        if (!resolved)
+        {
+            SpheneUI.Profile.HeroSkeleton(accent, host: heroHost);
+            return;
+        }
+        var dto = _publicProfiles.RedactIfNsfw(rawDto);
+        var name = dto?.User.PreferredName ?? "Profile unavailable";
+        // The transient SpheneProfileData only feeds the hero's field reads
+        // (bio + tags, both already masked server-side) - status stays empty
+        // by contract and it never enters the pair profile caches.
+        var profile = new SpheneProfileData(false, dto?.IsNsfw ?? false,
+            dto?.ProfilePictureBase64 ?? string.Empty, string.Empty,
+            dto?.Description ?? string.Empty, string.Empty,
+            dto?.Tags ?? string.Empty, dto?.BannerImageBase64 ?? string.Empty);
+        // Content-keyed caches: a changed payload under the SAME uid re-decodes
+        // and re-keys the texture - a replaced/revoked image can never linger.
+        var picB64 = dto?.ProfilePictureBase64;
+        if (!string.Equals(picB64, _publicAvatarB64, StringComparison.Ordinal))
+        {
+            _publicAvatarB64 = picB64;
+            _publicAvatarBytes = PublicMedia(picB64);
+        }
+        var bannerB64 = dto?.BannerImageBase64;
+        if (!string.Equals(bannerB64, _publicBannerB64, StringComparison.Ordinal))
+        {
+            _publicBannerB64 = bannerB64;
+            _publicBannerBytes = PublicMedia(bannerB64);
+        }
+        var avatar = _publicAvatarBytes.Length == 0 || _publicUid == null ? null
+            : SpheneUI.Media.Texture(
+                $"public-avatar:{_publicUid}:{ContentKey(_publicAvatarB64)}",
+                () => _publicAvatarBytes);
+        var banner = _publicBannerBytes.Length == 0 || _publicUid == null ? null
+            : SpheneUI.Media.Texture(
+                $"public-banner:{_publicUid}:{ContentKey(_publicBannerB64)}",
+                () => _publicBannerBytes);
+        var actions = dto != null
+            ? new List<SpheneUI.Profile.HeroAction>
+            {
+                new(dto.Following ? FontAwesomeIcon.UserCheck : FontAwesomeIcon.UserPlus,
+                    dto.Following ? "Following" : "Follow",
+                    dto.Following
+                        ? "You follow this profile - click to unfollow"
+                        : "Follow this profile's public Chronicles - no pair needed",
+                    () => TogglePublicFollow(dto)),
+            }
+            : null;
+        SpheneUI.Profile.Hero(name, string.Empty, profile, avatar, banner,
+            profile.ProfileTheme.Value, accent, theme.AccentBlue,
+            isNsfw: dto?.IsNsfw ?? false, actions: actions, host: heroHost);
+    }
+
+    /// <summary>Optimistic follow/unfollow with a busy guard - a rejected
+    /// toggle rolls back inside <see cref="PublicProfileService"/> and the
+    /// user hears why.</summary>
+    private void TogglePublicFollow(PublicProfileDto dto)
+    {
+        var uid = dto.User.UID;
+        if (_publicFollowBusy != null) return;
+        _publicFollowBusy = uid;
+        var wantFollow = !dto.Following;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var ok = await _publicProfiles.SetFollowAsync(uid, wantFollow)
+                    .ConfigureAwait(false);
+                if (!ok)
+                {
+                    Mediator.Publish(new NotificationMessage(
+                        wantFollow ? "Couldn't follow" : "Couldn't unfollow",
+                        wantFollow
+                            ? "This profile isn't open to new follows right now."
+                            : "The unfollow didn't reach the server - try again.",
+                        SpheneConfiguration.Models.NotificationType.Warning,
+                        TimeSpan.FromSeconds(5)));
+                }
+            }
+            finally { _publicFollowBusy = null; }
+        });
+    }
+
+    /// <summary>Scrollable body of the public profile page - the shared
+    /// hero's content zone: public chronicles as rows, or the open reader
+    /// for one. Revoked profiles land on the neutral unavailable card.</summary>
+    private void DrawPublicProfilePage(Vector4 accent)
+    {
+        if (_publicUid == null)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Question,
+                "No profile selected",
+                "Open a shared profile from People search or an author name.");
+            return;
+        }
+        var uid = _publicUid;
+        var (resolved, rawDto) = _publicProfiles.EnsureProfile(uid);
+        if (!resolved)
+        {
+            SpheneUI.Layout.Surface(() =>
+            {
+                SpheneUI.Fx.SkeletonLine();
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                SpheneUI.Fx.SkeletonLine(0.6f);
+            }, id: "public-profile-loading");
+            return;
+        }
+        var dto = _publicProfiles.RedactIfNsfw(rawDto);
+        if (dto == null)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.UserLock,
+                "Profile not public",
+                "This profile isn't shared in the Community Hub - it may be private, removed, or not supported by this server.",
+                "Back", NavigateBack, FontAwesomeIcon.ArrowLeft, accent);
+            return;
+        }
+        var displayName = dto.User.PreferredName;
+        var avatarWrap = _publicAvatarBytes.Length == 0 ? null
+            : SpheneUI.Media.Texture(
+                $"public-avatar:{uid}:{ContentKey(_publicAvatarB64)}",
+                () => _publicAvatarBytes);
+        var chronicles = dto.Chronicles;
+        var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
+            && string.Equals(openOwner, uid, StringComparison.Ordinal)
+            ? chronicles.FirstOrDefault(b => b.Id == openId) : null;
+        if (openPost != null)
+        {
+            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
+            {
+                _openChronicle = null;
+            }
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            var post = openPost;
+            var ops = CommunityComposers.BuildBlogCommentOps(uid, post.Id,
+                () =>
+                {
+                    _publicProfiles.InvalidateProfile(uid);
+                    return Task.CompletedTask;
+                },
+                authorUid => CommunityNameFor(authorUid, null, null), CommentProfile);
+            SpheneUI.Layout.Surface(() =>
+            {
+                Sphene.UI.Chronicles.ChronicleReaderView.Draw(post, uid,
+                    displayName, avatarWrap, accent, _blogComments, ops,
+                    excerptLines: 8,
+                    isExpanded: id => _expandedChronicles.Contains(id),
+                    toggleExpanded: id => ToggleChronicleExpanded(id),
+                    onAuthorClick: NavigateToAuthor);
+            }, id: $"public-chronicle-{post.Id}", border: true, accentColor: accent);
+            return;
+        }
+        if (_openChronicle is { OwnerUid: var staleOwner }
+            && string.Equals(staleOwner, uid, StringComparison.Ordinal))
+        {
+            _openChronicle = null;
+            _chronicleNotice = ChronicleMissingNotice;
+        }
+        if (_chronicleNotice != null)
+        {
+            SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+        }
+        if (chronicles.Count == 0)
+        {
+            SpheneUI.Layout.Surface(() =>
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen,
+                    "No public Chronicles",
+                    "Nothing published publicly yet - public Chronicles will land here.");
+            }, id: "public-chronicles-empty");
+            return;
+        }
+        SyncshellCommunityView.RailHeader("Chronicles", FontAwesomeIcon.FeatherAlt,
+            chronicles.Count, accent);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        for (var i = 0; i < chronicles.Count; i++)
+        {
+            if (i > 0)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
+            var captured = chronicles[i];
+            var item = new SyncshellCommunityFeedItemDto(
+                string.Empty, null, null, SyncshellFeedItemKind.Blog,
+                captured.Id,
+                string.IsNullOrWhiteSpace(captured.Title)
+                    ? "Untitled Chronicle" : captured.Title,
+                null, captured.UpdatedAt,
+                ActorUid: uid, ActorDisplayName: displayName,
+                ThumbnailMediaHash: captured.CoverMediaHash);
+            if (FeedItemRow.Draw($"public-chron-{uid}-{captured.Id}", item,
+                    "pub:", accent, ChronicleRowMeta(captured),
+                    onActorClick: NavigateToAuthor))
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+                    PublicUid: uid, ChroniclePostId: captured.Id));
+            }
+        }
+    }
+
+    /// <summary>Community → Following - public chronicles from followed
+    /// profiles only; its own store and cursor, never the All feed's.</summary>
+    private void DrawFollowingFeed(Vector4 accent)
+    {
+        if (!_publicProfiles.Enabled)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Rss,
+                "Following isn't available",
+                "This server doesn't support public profiles yet - update the server to follow people.");
+            return;
+        }
+        _publicProfiles.EnsureFollowingRequested();
+        var items = _publicProfiles.FollowingItems;
+        SpheneUI.Text.SectionHeader("Following",
+            icon: FontAwesomeIcon.Rss, accent: accent);
+        SpheneUI.Text.MutedWrapped(
+            "Public Chronicles from profiles you follow - following is unilateral and grants no pair rights.");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        if (_publicProfiles.FollowingLoading && items.Count == 0)
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
+            }
+        }
+        else if (items.Count == 0 && _publicProfiles.FollowingRefreshFailed)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                "Couldn't load the feed",
+                "The Following feed could not be reached - try again now.",
+                "Retry", () => _ = _publicProfiles.RefreshFollowing(),
+                FontAwesomeIcon.SyncAlt, accent);
+        }
+        else if (items.Count == 0)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Rss,
+                "Not following anyone yet",
+                "Public Chronicles from profiles you follow land here - find people in the People tab.",
+                "Find people",
+                () => NavigateTo(new HubLocation(SpheneHubPage.Community, null, null, 7)),
+                FontAwesomeIcon.Users, accent);
+        }
+        else
+        {
+            for (var i = 0; i < items.Count; i++)
+            {
+                // NSFW-author rows redact title/snippet/thumb at read time -
+                // a live settings flip takes effect the same frame.
+                var item = _publicProfiles.RedactIfNsfw(items[i]);
+                if (FeedItemRow.Draw($"follow-{item.Kind}-{item.Id}-{item.ActorUid}",
+                        item, "hub:", fallbackAccent: accent,
+                        onActorClick: NavigateToAuthor))
+                {
+                    NavigateFeedItem(item);
+                }
+                if (i + 1 < items.Count)
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
+            }
+            if (_publicProfiles.FollowingPageFailed)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                SpheneUI.Text.Colored("Couldn't load more.", SpheneUI.Palette.Warning);
+            }
+            if (_publicProfiles.FollowingHasMore)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                using (ImRaii.Disabled(_publicProfiles.FollowingLoading))
+                {
+                    if (SpheneUI.Controls.Button(
+                            _publicProfiles.FollowingPageFailed
+                                ? "Retry##followmore" : "Load more##followmore"))
+                    {
+                        _ = _publicProfiles.LoadMoreFollowingAsync();
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Community → People - the public profile search. Results
+    /// stay slim (identity, avatar, NSFW flag, follow state); a row click
+    /// opens the public profile page, a follow toggle flips in place.</summary>
+    private void DrawPeopleSearch(Vector4 accent)
+    {
+        if (!_publicProfiles.Enabled)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Users,
+                "People search isn't available",
+                "This server doesn't support public profiles yet - update the server to search people.");
+            return;
+        }
+        SpheneUI.Text.SectionHeader("People",
+            icon: FontAwesomeIcon.Users, accent: accent);
+        SpheneUI.Text.MutedWrapped(
+            "Search profiles shared in the Community Hub by display name.");
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        using (ImRaii.PushId("people-search"))
+        {
+            // EnterReturnsTrue: changed fires once on submit, not per edit.
+            var submitted = SpheneUI.Controls.InputTextWithHint("##query",
+                "Search public profiles by name…", ref _publicSearchInput, 64,
+                ImGuiInputTextFlags.EnterReturnsTrue);
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+            // A changed query may supersede a still-flying request - only a
+            // repeat of the committed query waits for the current flight.
+            var canSearch = !string.IsNullOrWhiteSpace(_publicSearchInput)
+                && (!_publicProfiles.SearchLoading
+                    || !string.Equals(_publicSearchInput.Trim(),
+                        _publicSearchCommitted, StringComparison.Ordinal));
+            using (ImRaii.Disabled(!canSearch))
+            {
+                if (SpheneUI.Controls.Button("Search")) submitted = true;
+            }
+            if (submitted && canSearch)
+            {
+                _publicSearchCommitted = _publicSearchInput.Trim();
+                _publicProfiles.Search(_publicSearchCommitted);
+            }
+        }
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        var results = _publicProfiles.SearchResults;
+        if (_publicSearchCommitted == null)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Users,
+                "Find people",
+                "Profiles shared in the Community Hub show up here by display name.");
+            return;
+        }
+        // A transport failure is its own state - it must not read as
+        // "no matches"; visible page rows stay and retry reloads page one.
+        if (_publicProfiles.SearchFailed)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                "Search unavailable",
+                results.Count == 0
+                    ? "The people search could not be reached - try again now."
+                    : "The next page could not be loaded - try again now.",
+                "Retry", () => _publicProfiles.Search(_publicSearchCommitted),
+                FontAwesomeIcon.SyncAlt, accent);
+            if (results.Count == 0) return;
+        }
+        else if (results.Count == 0 && _publicProfiles.SearchLoading)
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
+            }
+            return;
+        }
+        else if (results.Count == 0)
+        {
+            SpheneUI.Layout.EmptyState(FontAwesomeIcon.UserSlash,
+                "No shared profiles found",
+                "No public profile matches that name - only profiles that opted into the Community Hub appear.");
+            return;
+        }
+        // Bounded revalidation while the tab sits open - a missed push or
+        // a revocation between pushes is caught inside the window.
+        _publicProfiles.EnsureSearchFresh();
+        for (var i = 0; i < results.Count; i++)
+        {
+            var hit = _publicProfiles.RedactIfNsfw(results[i]);
+            DrawPeopleSearchRow(hit, accent);
+            if (i + 1 < results.Count)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
+        }
+        if (_publicProfiles.SearchHasMore)
+        {
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            using (ImRaii.Disabled(_publicProfiles.SearchLoading))
+            {
+                if (SpheneUI.Controls.Button("Load more",
+                        new Vector2(-1, 0)))
+                {
+                    _publicProfiles.LoadMoreSearch();
+                }
+            }
+        }
+        else if (_publicProfiles.SearchLoading && results.Count > 0)
+        {
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+            SpheneUI.Fx.SkeletonLine(0.5f);
+        }
+    }
+
+    /// <summary>One search-result row - avatar, name, follow state. The row
+    /// opens the profile; the follow button is its own hit target.</summary>
+    private void DrawPeopleSearchRow(PublicProfileSummaryDto hit, Vector4 accent)
+    {
+        SpheneUI.Layout.Surface(() =>
+        {
+            var rowH = 28f * SpheneUI.Scale;
+            if (hit.AvatarMediaHash is { } avatarHash && _communityMedia != null)
+            {
+                var hash = avatarHash;
+                // TryGetBytes is the non-blocking path - a miss kicks the
+                // background download and the row repaints when bytes land.
+                var wrap = SpheneUI.Media.Texture(
+                    $"pub-avatar:{hit.User.UID}:{hash}",
+                    () => _communityMedia.TryGetBytes(hash) ?? []);
+                SpheneUI.Media.Avatar(wrap, rowH);
+                if (ImGui.IsItemClicked())
+                {
+                    NavigateTo(new HubLocation(SpheneHubPage.PublicProfile,
+                        null, null, PublicUid: hit.User.UID));
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                }
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+            }
+            var clicked = SpheneUI.Text.Link(hit.User.PreferredName);
+            SpheneUI.AttachTooltip("View profile");
+            if (hit.IsNsfw)
+            {
+                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+                SpheneUI.Layout.Badge("NSFW", SpheneUI.Palette.Warning);
+            }
+            var rightW = 96f * SpheneUI.Scale;
+            var avail = ImGui.GetContentRegionAvail().X;
+            if (avail > rightW + 20f * SpheneUI.Scale)
+            {
+                ImGui.SameLine(ImGui.GetCursorPosX() + avail - rightW);
+                var label = hit.Following ? "Following" : "Follow";
+                using (ImRaii.Disabled(_publicFollowBusy != null))
+                {
+                    if (SpheneUI.Controls.Button($"{label}##pf-{hit.User.UID}",
+                            new Vector2(rightW, 0)))
+                    {
+                        TogglePublicFollowSummary(hit);
+                    }
+                }
+            }
+            if (clicked)
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+                    PublicUid: hit.User.UID));
+            }
+        }, id: $"person-{hit.User.UID}", border: true, accentColor: accent);
+    }
+
+    /// <summary>Follow toggle straight from a search row - same path as the
+    /// profile hero, optimistic inside <see cref="PublicProfileService"/>.</summary>
+    private void TogglePublicFollowSummary(PublicProfileSummaryDto hit)
+    {
+        if (_publicFollowBusy != null) return;
+        _publicFollowBusy = hit.User.UID;
+        var wantFollow = !hit.Following;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _publicProfiles.SetFollowAsync(hit.User.UID, wantFollow)
+                    .ConfigureAwait(false);
+            }
+            finally { _publicFollowBusy = null; }
+        });
     }
 
     }

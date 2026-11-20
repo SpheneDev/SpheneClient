@@ -1,6 +1,7 @@
 using Sphene.API.Data;
 using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
+using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
 using Sphene.API.Dto.Visibility;
 using Sphene.API.Dto.CharaData;
@@ -88,6 +89,39 @@ public partial class ApiController
         var normalized = NormalizeIdentityInput(dto);
         if (!IsConnected) return new UserProfileExtrasDto(normalized.User, null, null);
         return await _spheneHub!.InvokeAsync<UserProfileExtrasDto>(nameof(UserGetProfileExtras), normalized).ConfigureAwait(false);
+    }
+
+    /// <summary>Public-profile surfaces - the slim Community Hub contract,
+    /// kept deliberately separate from the pair-facing profile reads.</summary>
+    public async Task<List<PublicProfileSummaryDto>> UserSearchPublicProfiles(PublicProfileSearchDto dto)
+    {
+        if (!IsConnected) return [];
+        return await _spheneHub!.InvokeAsync<List<PublicProfileSummaryDto>>(
+            nameof(UserSearchPublicProfiles), dto).ConfigureAwait(false);
+    }
+
+    public async Task<PublicProfileDto?> UserGetPublicProfile(UserDto dto)
+    {
+        var normalized = NormalizeIdentityInput(dto);
+        if (!IsConnected) return null;
+        return await _spheneHub!.InvokeAsync<PublicProfileDto?>(
+            nameof(UserGetPublicProfile), normalized).ConfigureAwait(false);
+    }
+
+    public async Task<bool> UserSetProfileFollow(UserProfileFollowDto dto)
+    {
+        var normalized = new UserProfileFollowDto(
+            NormalizeIdentityInput(new UserDto(dto.User)).User, dto.Follow);
+        if (!IsConnected) return false;
+        return await _spheneHub!.InvokeAsync<bool>(
+            nameof(UserSetProfileFollow), normalized).ConfigureAwait(false);
+    }
+
+    public async Task<SyncshellCommunityFeedPageDto> UserGetFollowingFeed(FeedPageRequestDto dto)
+    {
+        if (!IsConnected) return new SyncshellCommunityFeedPageDto([], null);
+        return await _spheneHub!.InvokeAsync<SyncshellCommunityFeedPageDto>(
+            nameof(UserGetFollowingFeed), dto).ConfigureAwait(false);
     }
 
     public async Task<UserProfileGalleryImageDto?> UserUpsertProfileGalleryImage(UserProfileGalleryImageUpdateDto dto)

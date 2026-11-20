@@ -36,6 +36,10 @@ internal sealed class CommunityComposers
         MarkdownComposer.StudioPicker = PickImageBytesAsync;
     }
 
+    /// <summary>Host-supplied author-name deep-link - bound onto every
+    /// comment ops the composers build so author names can open profiles.</summary>
+    public Action<string>? OnAuthorClick { get; set; }
+
     /// <summary>PhotoStudio-backed picker for the shared markdown composer -
     /// resolves to the prepared image bytes or null when cancelled.</summary>
     public Task<byte[]?> PickImageBytesAsync()
@@ -580,6 +584,7 @@ internal sealed class CommunityComposers
             }),
             DisplayName = displayName,
             Profile = getProfile,
+            OnAuthorClick = OnAuthorClick,
         };
         return ops;
     }
@@ -731,6 +736,7 @@ internal sealed class CommunityComposers
             }),
             DisplayName = displayName,
             Profile = getProfile,
+            OnAuthorClick = OnAuthorClick,
         };
         return wrapped;
     }

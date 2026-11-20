@@ -64,6 +64,25 @@ public static partial class SpheneUI
             return lo <= 0 ? "…" : line[..lo].TrimEnd() + "…";
         }
 
+        /// <summary>
+        /// Inline navigational text - plain themed text, no button chrome or
+        /// icon, that tints accent on hover, shows a hand cursor and reports
+        /// the click. For names/titles that deep-link; pair with
+        /// <see cref="AttachTooltip"/> for the destination hint.
+        /// </summary>
+        public static bool Link(string text)
+        {
+            var pos = ImGui.GetCursorScreenPos();
+            var size = ImGui.CalcTextSize(text);
+            var hovered = ImGui.IsMouseHoveringRect(pos, pos + size);
+            Colored(text, hovered ? Colors.Accent : null);
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            }
+            return ImGui.IsItemClicked();
+        }
+
         /// <summary>Text in an explicit color; null keeps the themed text color.</summary>
         public static void Colored(string text, Vector4? color)
         {

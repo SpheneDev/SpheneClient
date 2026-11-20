@@ -565,6 +565,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddSingleton<SupporterNameplateService>();
             collection.AddSingleton<NotificationInboxService>();
             collection.AddSingleton<CommunityFeedService>();
+            collection.AddSingleton<PublicProfileService>();
             collection.AddSingleton<CommunityMediaClientService>();
             collection.AddSingleton<AnnouncementService>();
             collection.AddSingleton<ChatService>();
@@ -638,6 +639,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
             collection.AddHostedService(p => p.GetRequiredService<SupporterNameplateService>());
             collection.AddHostedService(p => p.GetRequiredService<NotificationInboxService>());
             collection.AddHostedService(p => p.GetRequiredService<CommunityFeedService>());
+            collection.AddHostedService(p => p.GetRequiredService<PublicProfileService>());
             collection.AddHostedService(p => p.GetRequiredService<AnnouncementService>());
             collection.AddHostedService(p => p.GetRequiredService<ChatService>());
             collection.AddHostedService(p => p.GetRequiredService<Services.Gifs.KlipyGifProvider>());

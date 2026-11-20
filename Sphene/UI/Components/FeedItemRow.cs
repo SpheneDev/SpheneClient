@@ -17,10 +17,12 @@ internal static class FeedItemRow
 {
     /// <summary>Draws the row; returns true when clicked.
     /// <paramref name="extraMeta"/> appends a caller-supplied segment to the
-    /// meta line (e.g. "12 views · 3 comments" on Chronicle list rows).</summary>
+    /// meta line (e.g. "12 views · 3 comments" on Chronicle list rows).
+    /// <paramref name="onActorClick"/> turns the actor-name segment into a
+    /// separate hit target (profile link) - the row click stays on the card.</summary>
     public static bool Draw(string id, SyncshellCommunityFeedItemDto item,
         string texturePrefix, Vector4? fallbackAccent = null,
-        string? extraMeta = null)
+        string? extraMeta = null, Action<string>? onActorClick = null)
     {
         var scale = SpheneUI.Scale;
         var accent = SyncshellCommunityView.ParseAccent(item.AccentColor)
@@ -46,9 +48,16 @@ internal static class FeedItemRow
         ImGui.PushID(id);
         var clicked = ImGui.InvisibleButton("##feedrow", new Vector2(w, h));
         var hovered = ImGui.IsItemHovered();
+        // The actor-name hit zone is submitted after the row button and must
+        // be allowed to steal HoveredId - without this flag the row claims
+        // hover first and the link can never fire.
+        ImGui.SetItemAllowOverlap();
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
         ImGui.PopID();
+        // The actor hit zone is re-positioned by absolute cursor later - the
+        // post-row cursor must be restored or the next row overlaps this one.
+        var resumeCursor = ImGui.GetCursorScreenPos();
 
         var dl = ImGui.GetWindowDrawList();
         var radius = SpheneUI.Metrics.ButtonRadius;
@@ -115,17 +124,70 @@ internal static class FeedItemRow
         // author name carries the origin. v1 rows keep "shell · time".
         var shellName = string.IsNullOrWhiteSpace(item.GroupAlias)
             ? item.GroupGID : item.GroupAlias!;
-        var meta = !string.IsNullOrWhiteSpace(item.ActorDisplayName)
-            && item.ActorDisplayName is { } actor
-            ? (item.Kind == SyncshellFeedItemKind.Blog
-                ? $"{actor} · {RelativeTime(item.TimestampUtc)}"
-                : $"{actor} · {shellName} · {RelativeTime(item.TimestampUtc)}")
+        var actorName = item.ActorDisplayName;
+        var actorLinkable = onActorClick != null && item.ActorUid != null
+            && !string.IsNullOrWhiteSpace(actorName);
+        var metaTail = item.Kind == SyncshellFeedItemKind.Blog
+            ? RelativeTime(item.TimestampUtc)
             : $"{shellName} · {RelativeTime(item.TimestampUtc)}";
+        var meta = actorLinkable || string.IsNullOrWhiteSpace(actorName)
+            ? $"{shellName} · {RelativeTime(item.TimestampUtc)}"
+            : (item.Kind == SyncshellFeedItemKind.Blog
+                ? $"{actorName} · {RelativeTime(item.TimestampUtc)}"
+                : $"{actorName} · {metaTail}");
         if (!string.IsNullOrEmpty(extraMeta))
         {
             meta += " · " + extraMeta;
         }
-        dl.AddText(new Vector2(textX, titleY + lineH),
+        var metaY = titleY + lineH;
+        if (actorLinkable)
+        {
+            // Split meta: the actor name is its own hit rect + accent tint,
+            // the remainder stays muted - the author action never overlaps
+            // the row click.
+            var actorW = MathF.Min(
+                ImGui.CalcTextSize(actorName).X + 4f * scale, textRight - textX);
+            var actorRect = ImGui.GetID($"{id}actor");
+            var actorHovered = ImGui.IsMouseHoveringRect(
+                new Vector2(textX, metaY), new Vector2(textX + actorW, metaY + lineH));
+            dl.AddText(new Vector2(textX, metaY),
+                SpheneUI.ColorUtils.ToU32(actorHovered
+                    ? accent : SpheneUI.Colors.TextMuted),
+                SpheneUI.Text.Ellipsize(actorName!, MathF.Max(24f, actorW)));
+            var tailX = textX + actorW + 2f * scale;
+            dl.AddText(new Vector2(tailX, metaY),
+                SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted),
+                SpheneUI.Text.Ellipsize("· " + metaTail + (string.IsNullOrEmpty(extraMeta)
+                    ? string.Empty : " · " + extraMeta), MathF.Max(24f, textRight - tailX)));
+            dl.PopClipRect();
+            // The row button above opted into overlap, so this hit zone can
+            // claim hover/click inside its own rect despite submitting later.
+            ImGui.PushID(actorRect);
+            ImGui.SetCursorScreenPos(new Vector2(textX, metaY));
+            var actorClicked = ImGui.InvisibleButton("##actor",
+                new Vector2(actorW, lineH));
+            ImGui.PopID();
+            ImGui.SetCursorScreenPos(resumeCursor);
+            if (actorHovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                SpheneUI.AttachTooltip("View profile");
+            }
+            if (actorClicked)
+            {
+                onActorClick!(item.ActorUid!);
+            }
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                if (!actorHovered && !string.IsNullOrWhiteSpace(item.Snippet))
+                {
+                    SpheneUI.AttachTooltip(item.Snippet!);
+                }
+            }
+            return clicked && !actorClicked;
+        }
+        dl.AddText(new Vector2(textX, metaY),
             SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted),
             SpheneUI.Text.Ellipsize(meta, MathF.Max(40f, textRight - textX)));
         dl.PopClipRect();

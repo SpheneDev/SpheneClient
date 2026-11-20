@@ -35,6 +35,9 @@ public sealed class CommentThreadView
         /// <summary>Resolves the author's community profile for the inline
         /// avatar - null keeps the text-only fallback.</summary>
         public Func<string, SpheneProfileData?>? Profile { get; set; }
+        /// <summary>Author-name deep-link - when set, non-deleted author
+        /// names render as profile links instead of plain text.</summary>
+        public Action<string>? OnAuthorClick { get; set; }
         /// <summary>Member/friend identities for @-mention suggestions -
         /// forwarded from the host edit ops; null hides the picker.</summary>
         public Func<IReadOnlyList<MarkdownComposer.MentionCandidate>>? MentionCandidates { get; set; }
@@ -416,14 +419,33 @@ public sealed class CommentThreadView
 
         // header line: avatar + vertically centered name/stamp - bare
         // on the host surface; SameLine lands back on the avatar's top
-        // edge, so each following item re-applies the offset via nameTop
+        // edge, so each following item re-applies the offset via nameTop.
+        // Avatar and name are the profile deep-link - no button chrome.
+        var authorClick = authorUid != null ? ops.OnAuthorClick : null;
         if (DrawAuthorAvatar(authorUid, ops, AuthorAvatarSize))
         {
+            if (authorClick != null)
+            {
+                if (ImGui.IsItemClicked()) authorClick(authorUid!);
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                }
+                SpheneUI.AttachTooltip("View profile");
+            }
             ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
             ImGui.SetCursorPosY(ImGui.GetCursorPosY()
                 + (AuthorAvatarSize - ImGui.GetTextLineHeight()) * 0.5f);
         }
-        SpheneUI.Text.Plain(name);
+        if (authorClick != null)
+        {
+            if (SpheneUI.Text.Link(name)) authorClick(authorUid!);
+            SpheneUI.AttachTooltip("View profile");
+        }
+        else
+        {
+            SpheneUI.Text.Plain(name);
+        }
         var nameTop = ImGui.GetItemRectMin().Y;
         ImGui.SameLine();
         // GetItemRectMin is screen-space - SetCursorPosY takes

@@ -40,7 +40,7 @@ public static class ChronicleReaderView
         CommentThreadView comments, CommentThreadView.CommentOps? ops,
         string? previewNote = null, int excerptLines = 0,
         Func<long, bool>? isExpanded = null, Action<long>? toggleExpanded = null,
-        Action? actions = null)
+        Action? actions = null, Action<string>? onAuthorClick = null)
     {
         var scale = SpheneUI.Scale;
         if (previewNote != null)
@@ -69,7 +69,8 @@ public static class ChronicleReaderView
         // Header row - author identity left; visibility badge, status badge
         // and the caller's action strip as one right-docked group. A table
         // does the geometry, so nothing can be pushed outside the card.
-        DrawHeaderRow(post, authorDisplayName, avatarWrap, accent, actions);
+        DrawHeaderRow(post, authorDisplayName, avatarWrap, accent, actions,
+            onAuthorClick != null ? () => onAuthorClick(authorUid) : null);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
         // Optional title - a real heading (display font, theme text color,
@@ -150,7 +151,7 @@ public static class ChronicleReaderView
     /// card's padded edge. No cursor math, no coordinate mixing.</summary>
     private static void DrawHeaderRow(UserProfileBlogPostDto post,
         string authorDisplayName, IDalamudTextureWrap? avatarWrap, Vector4 accent,
-        Action? actions)
+        Action? actions, Action? onAuthorClick)
     {
         var avSize = ImGui.GetFrameHeight();
         var lineH = ImGui.GetTextLineHeight();
@@ -180,12 +181,29 @@ public static class ChronicleReaderView
                 FontAwesomeIcon.FeatherAlt, accent, avSize * 0.5f);
         }
         ImGui.Dummy(new Vector2(avSize, avSize));
+        if (onAuthorClick != null)
+        {
+            if (ImGui.IsItemClicked()) onAuthorClick();
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            }
+            SpheneUI.AttachTooltip("View profile");
+        }
         ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY()
             + MathF.Max(0f, (avSize - lineH) * 0.5f));
         using (ImRaii.Group())
         {
-            SpheneUI.Text.Plain(authorDisplayName);
+            if (onAuthorClick != null)
+            {
+                if (SpheneUI.Text.Link(authorDisplayName)) onAuthorClick();
+                SpheneUI.AttachTooltip("View profile");
+            }
+            else
+            {
+                SpheneUI.Text.Plain(authorDisplayName);
+            }
             ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
             SpheneUI.Text.Muted(
                 "· " + SpheneUI.Text.FormatDateTime(post.UpdatedAt.ToLocalTime()));

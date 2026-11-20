@@ -183,8 +183,13 @@ public enum SpheneHubPage
     Supporter = 10,
     Housing = 11,
     News = 12,
-    Community = 13
+    Community = 13,
+    PublicProfile = 14
 }
+
+/// <summary>A public-profile follow edge changed - followers of the
+/// "Following" feed and open profile views refresh against the new set.</summary>
+public record PublicFollowChangedMessage(string TargetUid, bool Following) : MessageBase;
 public enum SyncshellHubSubPage
 {
     List = 0,
@@ -226,7 +231,12 @@ public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid 
     /// is null/self, the friend's page otherwise) and scrolls the discussion to
     /// <paramref name="FocusCommentId"/> when set.</summary>
     string? ChronicleOwnerUid = null, long? ChroniclePostId = null,
-    long? FocusCommentId = null) : MessageBase;
+    long? FocusCommentId = null,
+    /// <summary>Public-profile deep-link - opens the Community-Hub-visible
+    /// profile for this uid (neutral unavailable state when not shared).
+    /// Optional <paramref name="ChroniclePostId"/>/<paramref name="FocusCommentId"/>
+    /// land inside the public reader.</summary>
+    string? PublicProfileUid = null) : MessageBase;
 
 /// <summary>The user opened a DM conversation - unread surfaces (inbox row,
 /// badges) for that peer should clear.</summary>

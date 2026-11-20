@@ -24,6 +24,7 @@ public class EditProfileUi
     private readonly SpheneProfileManager _spheneProfileManager;
     private readonly List<SyncshellCommunityView.CommunityLinkDraft> _linksBuffer = [];
     private int _profileVisibility;
+    private bool _publicProfile;
     private bool _linksSeeded;
 
     /// <summary>When set, profile patches route here instead of
@@ -49,6 +50,7 @@ public class EditProfileUi
         }
 
         _profileVisibility = profile.Visibility;
+        _publicProfile = profile.PublicProfile;
         if (!_linksSeeded)
         {
             SeedLinks(profile);
@@ -159,6 +161,15 @@ public class EditProfileUi
     {
         SpheneUI.Layout.HeadedRowGroup("Privacy", () =>
         {
+            // Public sharing is a server capability - on an old server the
+            // toggle stays hidden rather than writing a flag nothing reads.
+            if (_apiController.ServerInfo.PublicProfilesEnabled)
+            {
+                PublicProfileToggle();
+                SpheneUI.GroupState.RowEnd();
+                SpheneUI.Rows.Note(
+                    "Signed-in Sphene users can find this profile in the Community Hub and follow it. The section switches below still apply to what they see.");
+            }
             VisibilityToggle(ProfileVisibility.HideProfilePicture, "Show profile picture");
             VisibilityToggle(ProfileVisibility.HideBanner, "Show banner");
             VisibilityToggle(ProfileVisibility.HideDescription, "Show description");
@@ -174,6 +185,28 @@ public class EditProfileUi
             "Choose which profile sections paired users can see.",
             SpheneUI.Colors.Warning,
             id: "profile-privacy");
+    }
+
+    /// <summary>Opt-in Community Hub visibility - a dedicated flag, separate
+    /// from the field mask below. Stages through the same draft pipeline.</summary>
+    private void PublicProfileToggle()
+    {
+        var show = _publicProfile;
+        if (SpheneUI.Controls.Toggle("Show profile in Community Hub", ref show))
+        {
+            _publicProfile = show;
+            var dto = new UserProfileDto(new UserData(_apiController.UID),
+                Disabled: false, IsNSFW: null, ProfilePictureBase64: null,
+                Description: null, PublicProfile: show);
+            if (CommitOverride != null)
+            {
+                CommitOverride(dto);
+            }
+            else
+            {
+                _ = _apiController.UserSetProfile(dto);
+            }
+        }
     }
 
     private void VisibilityToggle(ProfileVisibility flag, string label)

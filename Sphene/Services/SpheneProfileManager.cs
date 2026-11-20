@@ -159,7 +159,7 @@ public class SpheneProfileManager : MediatorSubscriberBase
                 profile.StatusMessage ?? string.Empty, profile.Tags ?? string.Empty,
                 profile.BannerImageBase64 ?? string.Empty, profile.Theme ?? string.Empty,
                 profile.Visibility ?? 0, profile.RowImageBase64 ?? string.Empty,
-                profile.Links);
+                profile.Links, profile.PublicProfile ?? false);
             if (profileData.IsNSFW && !_SpheneConfigService.Current.ProfilesAllowNsfw && !string.Equals(_apiController.UID, data.UID, StringComparison.Ordinal))
             {
                 _spheneProfiles[data] = _nsfwProfileData;
