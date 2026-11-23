@@ -121,6 +121,12 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // Set window flags for a draggable icon
         Flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse |
                 ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoMove;
+
+        // Visibility is owned by the ShowSpheneIcon setting only. WindowHost
+        // closes any focused window that respects the close hotkey on Escape
+        // - after an icon click focus sticks/reverts to the icon, so the next
+        // Escape would silently kill it until the setting is re-toggled.
+        RespectCloseHotkey = false;
         
         if (_hasStoredIconPosition)
         {
@@ -1013,6 +1019,18 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         
         // Draw context menu
         DrawContextMenu();
+
+        // WindowHost also closes any focused window on gamepad "FaceRight"
+        // regardless of RespectCloseHotkey. The icon needs mouse input only,
+        // so release ImGui focus whenever no click, drag or flyout is in
+        // flight - the icon can then never be closed by a hotkey path.
+        if (!_wasClicked && !_isDragging
+            && !SpheneUI.Popups.IsFlyoutOpen("icon-menu")
+            && !SpheneUI.Popups.IsFlyoutOpen("icon-inbox")
+            && ImGui.IsWindowFocused(ImGuiFocusedFlags.RootAndChildWindows))
+        {
+            ImGui.ClearWindowFocus();
+        }
     }
 
     private void RefreshTooltipCache(bool iconLocked)
