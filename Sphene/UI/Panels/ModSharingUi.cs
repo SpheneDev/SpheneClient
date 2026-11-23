@@ -283,7 +283,7 @@ public sealed class ModSharingUi : WindowMediatorSubscriberBase
                 _ = _apiController.UserUpdatePenumbraReceivePreference(allowPenumbraMods);
             }
             SpheneUI.Controls.HelpText("When disabled, incoming Penumbra mod packages are ignored and no install popups are shown.");
-        }, title: "Incoming Packages", accentColor: accent);
+        }, title: "Incoming Packages", icon: FontAwesomeIcon.Download, accentColor: accent);
 
         SpheneUI.Layout.VerticalSpace();
 

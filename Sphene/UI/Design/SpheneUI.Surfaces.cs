@@ -209,14 +209,15 @@ public static partial class SpheneUI
             bool border, Vector4? accentColor, float? rounding, string caller)
         {
             var scale = SpheneUI.Scale;
-            var padding = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
+            var padY = Spacing.CardPadding.Scaled;
             var radius = (rounding ?? AccentCardRounding) * scale;
             var cardMin = ImGui.GetCursorScreenPos();
             var cardRightX = SurfaceRightBound(cardMin, scale);
-            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
+            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padX * 2f);
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
             ContentRegion(innerWidth, id ?? "surface", content);
-            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
+            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padY);
             var drawList = ImGui.GetWindowDrawList();
             if (accentColor.HasValue)
             {
@@ -267,8 +268,9 @@ public static partial class SpheneUI
         /// channel split is needed. The fill lifts a step over the rail-band
         /// tone so the card reads as a raised panel; <paramref name="accentColor"/>
         /// adds the accent top seam and an accent-tinted edge.
-        /// <paramref name="padding"/> overrides <see cref="Spacing.CardPadding"/>
-        /// for tighter layouts. <paramref name="fill"/>/<paramref name="borderAlpha"/>
+        /// <paramref name="padding"/> overrides <see cref="Spacing.CardPadding"/>/
+        /// <see cref="Spacing.CardPaddingX"/> (both axes) for tighter layouts.
+        /// <paramref name="fill"/>/<paramref name="borderAlpha"/>
         /// restyle the panel (e.g. a darker inset for the comment body) -
         /// fill defaults to the lifted rail-band tone, border alpha to 0.45.
         /// </summary>
@@ -277,7 +279,8 @@ public static partial class SpheneUI
             Vector4? fill = null, float? borderAlpha = null)
         {
             var scale = SpheneUI.Scale;
-            var pad = (padding ?? Spacing.CardPadding).Scaled;
+            var padX = (padding ?? Spacing.CardPaddingX).Scaled;
+            var padY = (padding ?? Spacing.CardPadding).Scaled;
             var radius = AccentCardRounding * scale;
             var w = MathF.Max(40f * scale, Controls.BoundedAvailX());
             var cardMin = ImGui.GetCursorScreenPos();
@@ -325,10 +328,10 @@ public static partial class SpheneUI
             // nested table inside a host cell's open channel split kills
             // the draw-list splitter (TableBeginCell → SetCurrentChannel).
             // Bounds + wrap like SurfaceFlat: no table, no channels.
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(pad, pad));
-            var innerRight = cardMin.X + w - pad;
-            ContentBounds.Push(new Vector2(cardMin.X + pad, innerRight));
-            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + w - pad * 2f);
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
+            var innerRight = cardMin.X + w - padX;
+            ContentBounds.Push(new Vector2(cardMin.X + padX, innerRight));
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + w - padX * 2f);
             try
             {
                 using (ImRaii.Group())
@@ -341,7 +344,7 @@ public static partial class SpheneUI
                 ImGui.PopTextWrapPos();
                 ContentBounds.Pop();
             }
-            var measured = ImGui.GetItemRectMax().Y - cardMin.Y + pad;
+            var measured = ImGui.GetItemRectMax().Y - cardMin.Y + padY;
             _innerCardHeights[id] = measured;
             if (_innerCardHeights.Count > 1024)
             {
@@ -370,24 +373,25 @@ public static partial class SpheneUI
                 return;
             }
             var scale = SpheneUI.Scale;
-            var padding = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
+            var padY = Spacing.CardPadding.Scaled;
             var radius = (rounding ?? AccentCardRounding) * scale;
 
             var drawList = ImGui.GetWindowDrawList();
             var cardMin = ImGui.GetCursorScreenPos();
             var cardRightX = SurfaceRightBound(cardMin, scale);
-            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
+            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padX * 2f);
 
             using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
             using (ImRaii.Group())
             {
                 ContentRegion(innerWidth, id ?? "surface", content);
             }
 
-            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
+            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padY);
             drawList.ChannelsSetCurrent(0);
 
             // An accent tint turns the quiet surface into the page's
@@ -461,20 +465,21 @@ public static partial class SpheneUI
                 return;
             }
             var scale = SpheneUI.Scale;
-            var padding = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
+            var padY = Spacing.CardPadding.Scaled;
             var radius = (rounding ?? AccentCardRounding) * scale;
 
             var drawList = ImGui.GetWindowDrawList();
             var cardMin = ImGui.GetCursorScreenPos();
             var cardRightX = SurfaceRightBound(cardMin, scale);
-            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
+            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padX * 2f);
 
             using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
-            ContentBounds.Push(new Vector2(cardMin.X + padding,
-                cardMin.X + padding + innerWidth));
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
+            ContentBounds.Push(new Vector2(cardMin.X + padX,
+                cardMin.X + padX + innerWidth));
             try
             {
                 using (ImRaii.Group())
@@ -487,7 +492,7 @@ public static partial class SpheneUI
                 ContentBounds.Pop();
             }
 
-            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
+            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padY);
             drawList.ChannelsSetCurrent(0);
 
             var fill = accentColor.HasValue
@@ -520,7 +525,7 @@ public static partial class SpheneUI
                 return;
             }
             var scale = SpheneUI.Scale;
-            var padX = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
             var padY = Spacing.X8.Scaled;
             var radius = (rounding ?? AccentCardRounding) * scale;
 

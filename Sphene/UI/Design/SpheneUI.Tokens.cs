@@ -116,6 +116,15 @@ public static partial class SpheneUI
             _ => X16,
         };
 
+        /// <summary>Horizontal inner padding of cards - about half of
+        /// <see cref="CardPadding"/> so card content uses its width.</summary>
+        public static Space CardPaddingX => Density.Current switch
+        {
+            DensityProfile.Compact => X4,
+            DensityProfile.Comfortable => X10,
+            _ => X8,
+        };
+
         /// <summary>Outer page padding inside the content scroll area.</summary>
         public static Space PagePadding => Density.Current switch
         {

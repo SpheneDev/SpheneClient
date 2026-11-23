@@ -3019,7 +3019,6 @@ internal static partial class SyncshellCommunityView
     internal sealed record WidgetVis(bool Visible, string Label, Action<bool> Toggle);
 
     internal static void RailHeader(string label, FontAwesomeIcon icon, int? count, Vector4 accent,
-        WidgetVis? vis = null,
         params (FontAwesomeIcon Icon, string Tooltip, Action OnClick)?[] actions)
     {
         var lineY = ImGui.GetCursorScreenPos().Y;
@@ -3039,14 +3038,10 @@ internal static partial class SyncshellCommunityView
                 actionCount++;
             }
         }
-        if (actionCount > 0 || vis != null)
+        if (actionCount > 0)
         {
             var gap = 4f * SpheneUI.Scale;
             var total = -gap;
-            if (vis != null)
-            {
-                total += SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Eye).X + gap;
-            }
             foreach (var a in actions)
             {
                 if (a.HasValue)
@@ -3058,11 +3053,6 @@ internal static partial class SyncshellCommunityView
             var y = lineY;
             ImGui.SetCursorScreenPos(new Vector2(x, y));
             var first = true;
-            if (vis != null)
-            {
-                DrawVisToggle(vis, accent);
-                first = false;
-            }
             foreach (var a in actions)
             {
                 if (!a.HasValue)
@@ -3085,53 +3075,10 @@ internal static partial class SyncshellCommunityView
         SpheneUI.Layout.Separator();
     }
 
-    /// <summary>Subtle eye toggle docked into a widget header · muted eye
-    /// while the section is visible, an amber slashed eye when it is hidden
-    /// so staff spot staff-only tabs at a glance.</summary>
-    private static void DrawVisToggle(WidgetVis vis, Vector4 accent)
-    {
-        var size = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Eye);
-        if (ImGui.InvisibleButton("##vis-toggle", size))
-        {
-            vis.Toggle(!vis.Visible);
-        }
-        var hovered = ImGui.IsItemHovered();
-        var min = ImGui.GetItemRectMin();
-        var max = ImGui.GetItemRectMax();
-        var dl = ImGui.GetWindowDrawList();
-        var icon = vis.Visible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash;
-        var tint = vis.Visible
-            ? (hovered ? accent : SpheneUI.Colors.TextMuted)
-            : SpheneUI.Colors.Warning;
-        if (hovered || !vis.Visible)
-        {
-            var fill = SpheneUI.ColorUtils.WithAlpha(
-                vis.Visible ? accent : SpheneUI.Colors.Warning, hovered ? 0.16f : 0.10f);
-            dl.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(fill), size.Y * 0.3f);
-        }
-        using (SpheneUI.Icons.PushFont())
-        {
-            var iconStr = icon.ToIconString();
-            var iconSize = ImGui.CalcTextSize(iconStr);
-            dl.AddText(new Vector2(min.X + (size.X - iconSize.X) * 0.5f,
-                min.Y + (size.Y - iconSize.Y) * 0.5f),
-                SpheneUI.ColorUtils.ToU32(tint), iconStr);
-        }
-        if (hovered)
-        {
-            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-        }
-        SpheneUI.AttachTooltip(vis.Visible
-            ? $"{vis.Label} is visible to visitors · click to hide (staff only)"
-            : $"{vis.Label} is hidden · staff only, click to show visitors");
-    }
-
     /// <summary>
-    /// One page block as a tonal widget · the surface carries its own header,
-    /// so the header hairline lands as an inset line inside the block and the
-    /// whole unit reads as one bounded region without a visible card border.
-    /// Every page block uses this · teasers, text sections and the collection
-    /// feeds alike · so the page reads as one stack of equal-shaped cards.
+    /// One page block as a headed card · every page block uses this · teasers,
+    /// text sections and the collection feeds alike · so the page reads as one
+    /// stack of equal-shaped cards sharing the app-wide header band.
     /// Content must stay inside the surface: no nested <c>Surface</c>/
     /// <c>RowGroup</c>/<c>SurfaceFlat</c> · draw-list channels cannot nest,
     /// so inner blocks use <see cref="SpheneUI.Layout.Separator"/> hairlines
@@ -3141,11 +3088,20 @@ internal static partial class SyncshellCommunityView
         Vector4 accent, Action content, WidgetVis? vis = null,
         params (FontAwesomeIcon Icon, string Tooltip, Action OnClick)?[] actions)
     {
-        SpheneUI.Layout.Surface(() =>
+        var allActions = actions;
+        if (vis != null)
         {
-            RailHeader(label, icon, count, accent, vis, actions);
-            content();
-        }, id: $"community-widget-{id}");
+            var v = vis;
+            allActions = new (FontAwesomeIcon Icon, string Tooltip, Action OnClick)?[actions.Length + 1];
+            allActions[0] = (v.Visible ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash,
+                v.Visible
+                    ? $"{v.Label} is visible to visitors · click to hide (staff only)"
+                    : $"{v.Label} is hidden · staff only, click to show visitors",
+                () => v.Toggle(!v.Visible));
+            Array.Copy(actions, 0, allActions, 1, actions.Length);
+        }
+        SpheneUI.Layout.HeadedSurface(label, content, icon, accent: accent,
+            count: count, id: $"community-widget-{id}", actions: allActions);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
     }
 
@@ -3339,8 +3295,8 @@ internal static partial class SyncshellCommunityView
             SpheneUI.ColorUtils.WithAlpha(accent, hovered ? 0.16f : 0.09f)), radius);
 
         // 16:9 preview image fills the flyer when present - banner as
-        // fallback, matching EventCard's preference order. A bottom scrim
-        // keeps the date/title/meta legible over the image.
+        // fallback. A bottom scrim keeps the date/title/meta legible over
+        // the image.
         var thumbHash = ev.PreviewMediaHash ?? ev.ImageMediaHash;
         IDalamudTextureWrap? wrap = null;
         if (thumbHash != null || ev.ImageBase64 != null)
@@ -4678,8 +4634,7 @@ internal static partial class SyncshellCommunityView
         var profile = community.Profile;
         var patch = edit.Ops!.Patch!;
 
-        RailHeader("Activation", FontAwesomeIcon.PowerOff, null, accent);
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Activation", () =>
         {
             var enabled = profile.IsEnabled;
             if (SpheneUI.Controls.Toggle("Community page enabled", ref enabled))
@@ -4708,38 +4663,39 @@ internal static partial class SyncshellCommunityView
                 patch(c => c with { IsListedPublicly = listed });
             }
             SpheneUI.Controls.HelpText("Make this syncshell discoverable in the community listing.");
-        }, id: "community-set-activation");
+        }, FontAwesomeIcon.PowerOff, accent: accent, id: "community-set-activation");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X10);
 
         DrawCommunityLocationEditor(community, edit, page, accent);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X10);
 
-        RailHeader("Visible sections", FontAwesomeIcon.Eye, null, accent);
-        SpheneUI.Text.Muted("Sections visitors can open · hidden ones stay editable here:");
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         var visible = community.VisibleSections
             ?? Enum.GetValues<SyncshellCommunitySection>().ToList();
         var visibleSet = new HashSet<SyncshellCommunitySection>(visible);
-        foreach (var (section, label, _) in SectionOrder)
+        SpheneUI.Layout.HeadedSurface("Visible sections", () =>
         {
-            var on = visibleSet.Contains(section);
-            if (SpheneUI.Controls.SegmentButton(label,
-                    on ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash,
-                    accent: on ? accent : SpheneUI.Colors.TextMuted, active: on))
+            foreach (var (section, label, _) in SectionOrder)
             {
-                if (on) visibleSet.Remove(section);
-                else visibleSet.Add(section);
-                var ordered = visibleSet
-                    .OrderBy(s => Array.FindIndex(SectionOrder, e => e.Section == s)).ToList();
-                patch(c => c with { VisibleSections = ordered });
+                var on = visibleSet.Contains(section);
+                if (SpheneUI.Controls.SegmentButton(label,
+                        on ? FontAwesomeIcon.Eye : FontAwesomeIcon.EyeSlash,
+                        accent: on ? accent : SpheneUI.Colors.TextMuted, active: on))
+                {
+                    if (on) visibleSet.Remove(section);
+                    else visibleSet.Add(section);
+                    var ordered = visibleSet
+                        .OrderBy(s => Array.FindIndex(SectionOrder, e => e.Section == s)).ToList();
+                    patch(c => c with { VisibleSections = ordered });
+                }
+                ImGui.SameLine();
             }
-            ImGui.SameLine();
-        }
-        ImGui.NewLine();
+            ImGui.NewLine();
+        }, FontAwesomeIcon.Eye,
+            description: "Sections visitors can open · hidden ones stay editable here:",
+            accent: accent, id: "community-set-visible");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X10);
 
-        RailHeader("Design", FontAwesomeIcon.Palette, null, accent);
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Design", () =>
         {
             var accentOn = profile.AccentColor != null;
             if (SpheneUI.Controls.Toggle("Custom accent color", ref accentOn))
@@ -4760,7 +4716,7 @@ internal static partial class SyncshellCommunityView
                     patch(c => c with { Profile = c.Profile with { AccentColor = ToHexRgb(color) } });
                 }
             }
-        }, id: "community-set-design");
+        }, FontAwesomeIcon.Palette, accent: accent, id: "community-set-design");
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X10);
 
         DrawOverviewWidgetsEditor(community, patch, accent);
@@ -4778,111 +4734,113 @@ internal static partial class SyncshellCommunityView
     private static void DrawCommunityLocationEditor(SyncshellCommunityDto community,
         SyncshellCommunityEdit edit, CommunityPageState page, Vector4 accent)
     {
-        RailHeader("Community location", FontAwesomeIcon.Home, null, accent);
-        var travel = edit.Travel;
-        var composer = page.LocationEditor;
-        var scale = SpheneUI.Scale;
-        if (!ReferenceEquals(page.LocationEditorSeed, community))
+        SpheneUI.Layout.HeadedSurface("Community location", () =>
         {
-            page.LocationEditorSeed = community;
-            composer.SeedDestinationFields(community.CommunityDestination);
-            page.LocationPublish = community.CommunityDestinationPublished;
-            page.LocationSaving = false;
-        }
-
-        var stored = community.CommunityDestination;
-        SpheneUI.Text.MutedWrapped(community.CommunityDestinationPublished && stored != null
-            ? "Published - members and permitted visitors see it on the page and can travel there."
-            : stored != null
-                ? "Configured but not published - only staff can see it."
-                : "No community location configured.");
-
-        var kinds = new[] { "No location", "Use Syncshell property", "Custom housing address" };
-        SpheneUI.Controls.Combo("##cl-kind", kinds, s => s ?? string.Empty,
-            onSelected: p => composer.DestKind = p is string s
-                ? Array.IndexOf(kinds, s) : 0,
-            initialSelectedItem: kinds[Math.Clamp(composer.DestKind, 0, kinds.Length - 1)],
-            preferredWidth: 260f * scale);
-
-        if (composer.DestKind != 0 && travel == null)
-        {
-            SpheneUI.Text.MutedWrapped("Address services aren't available on this surface.");
-        }
-        else
-        {
-            switch (composer.DestKind)
+            var travel = edit.Travel;
+            var composer = page.LocationEditor;
+            var scale = SpheneUI.Scale;
+            if (!ReferenceEquals(page.LocationEditorSeed, community))
             {
-                case 1:
-                    DrawBoundPropertyPicker(composer, travel!, scale);
-                    break;
-                case 2:
-                    DrawCustomAddressEditor(composer, travel!, scale);
-                    break;
-                default:
-                    if (stored != null)
-                    {
-                        SpheneUI.Text.MutedWrapped(
-                            "Saving removes the stored address and unpublishes the location.");
-                    }
-                    break;
+                page.LocationEditorSeed = community;
+                composer.SeedDestinationFields(community.CommunityDestination);
+                page.LocationPublish = community.CommunityDestinationPublished;
+                page.LocationSaving = false;
             }
 
-            if (composer.DestKind != 0)
-            {
-                SpheneUI.Controls.InputTextWithHint("##cl-label", "Label (optional)…",
-                    ref composer.DestLabel, EventDestinationValidator.MaxDisplayLabelLength,
-                    preferredWidth: 340f * scale);
-            }
-        }
+            var stored = community.CommunityDestination;
+            SpheneUI.Text.MutedWrapped(community.CommunityDestinationPublished && stored != null
+                ? "Published - members and permitted visitors see it on the page and can travel there."
+                : stored != null
+                    ? "Configured but not published - only staff can see it."
+                    : "No community location configured.");
 
-        var built = composer.BuildDestination();
-        if (composer.DestKind != 0)
-        {
-            if (built != null)
+            var kinds = new[] { "No location", "Use Syncshell property", "Custom housing address" };
+            SpheneUI.Controls.Combo("##cl-kind", kinds, s => s ?? string.Empty,
+                onSelected: p => composer.DestKind = p is string s
+                    ? Array.IndexOf(kinds, s) : 0,
+                initialSelectedItem: kinds[Math.Clamp(composer.DestKind, 0, kinds.Length - 1)],
+                preferredWidth: 260f * scale);
+
+            if (composer.DestKind != 0 && travel == null)
             {
-                SpheneUI.Text.Muted($"{DestinationTitle(built, travel)} - {DestinationSubtitle(built, travel)}");
+                SpheneUI.Text.MutedWrapped("Address services aren't available on this surface.");
             }
             else
             {
-                SpheneUI.Text.Colored(composer.DestKind == 1
-                    ? "Pick a property to publish."
-                    : "Complete all required fields - the address can't be saved yet.",
-                    SpheneUI.Colors.Danger);
+                switch (composer.DestKind)
+                {
+                    case 1:
+                        DrawBoundPropertyPicker(composer, travel!, scale);
+                        break;
+                    case 2:
+                        DrawCustomAddressEditor(composer, travel!, scale);
+                        break;
+                    default:
+                        if (stored != null)
+                        {
+                            SpheneUI.Text.MutedWrapped(
+                                "Saving removes the stored address and unpublishes the location.");
+                        }
+                        break;
+                }
+
+                if (composer.DestKind != 0)
+                {
+                    SpheneUI.Controls.InputTextWithHint("##cl-label", "Label (optional)…",
+                        ref composer.DestLabel, EventDestinationValidator.MaxDisplayLabelLength,
+                        preferredWidth: 340f * scale);
+                }
             }
-        }
 
-        if (composer.DestKind == 0)
-        {
-            page.LocationPublish = false;
-        }
-        using (ImRaii.Disabled(built == null && composer.DestKind != 0 && stored == null))
-        {
-            SpheneUI.Controls.Toggle("Publish community location", ref page.LocationPublish);
-        }
-        SpheneUI.Controls.HelpText(
-            "Off · the address stays a staff-only draft. Publishing is always an explicit choice.");
-
-        // Save intent - clear (kind 0) sends the None sentinel; a valid build
-        // replaces the snapshot; an invalid build writes null = keep stored.
-        var destChanged = composer.DestKind == 0
-            ? stored != null
-            : !SameDestination(built, stored);
-        var dirty = destChanged
-            || page.LocationPublish != community.CommunityDestinationPublished;
-        EventDestinationDto? saveDest = composer.DestKind == 0
-            ? new EventDestinationDto { Kind = (int)EventDestinationKind.None }
-            : built;
-        using (ImRaii.Disabled(!dirty || page.LocationSaving || edit.OnSetCommunityLocation == null))
-        {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Save location"))
+            var built = composer.BuildDestination();
+            if (composer.DestKind != 0)
             {
-                page.LocationSaving = true;
-                edit.OnSetCommunityLocation?.Invoke(saveDest, page.LocationPublish);
+                if (built != null)
+                {
+                    SpheneUI.Text.Muted($"{DestinationTitle(built, travel)} - {DestinationSubtitle(built, travel)}");
+                }
+                else
+                {
+                    SpheneUI.Text.Colored(composer.DestKind == 1
+                        ? "Pick a property to publish."
+                        : "Complete all required fields - the address can't be saved yet.",
+                        SpheneUI.Colors.Danger);
+                }
             }
-        }
-        SpheneUI.AttachTooltip(edit.OnSetCommunityLocation == null
-            ? "Not available on this surface"
-            : "Writes the address snapshot + publish state to the server");
+
+            if (composer.DestKind == 0)
+            {
+                page.LocationPublish = false;
+            }
+            using (ImRaii.Disabled(built == null && composer.DestKind != 0 && stored == null))
+            {
+                SpheneUI.Controls.Toggle("Publish community location", ref page.LocationPublish);
+            }
+            SpheneUI.Controls.HelpText(
+                "Off · the address stays a staff-only draft. Publishing is always an explicit choice.");
+
+            // Save intent - clear (kind 0) sends the None sentinel; a valid build
+            // replaces the snapshot; an invalid build writes null = keep stored.
+            var destChanged = composer.DestKind == 0
+                ? stored != null
+                : !SameDestination(built, stored);
+            var dirty = destChanged
+                || page.LocationPublish != community.CommunityDestinationPublished;
+            EventDestinationDto? saveDest = composer.DestKind == 0
+                ? new EventDestinationDto { Kind = (int)EventDestinationKind.None }
+                : built;
+            using (ImRaii.Disabled(!dirty || page.LocationSaving || edit.OnSetCommunityLocation == null))
+            {
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Save, "Save location"))
+                {
+                    page.LocationSaving = true;
+                    edit.OnSetCommunityLocation?.Invoke(saveDest, page.LocationPublish);
+                }
+            }
+            SpheneUI.AttachTooltip(edit.OnSetCommunityLocation == null
+                ? "Not available on this surface"
+                : "Writes the address snapshot + publish state to the server");
+        }, FontAwesomeIcon.Home, accent: accent, id: "community-set-location");
     }
 
     /// <summary>Field-level equality for destination drafts - drives the
@@ -4906,9 +4864,7 @@ internal static partial class SyncshellCommunityView
         var layout = community.OverviewWidgets?.Count > 0
             ? community.OverviewWidgets.ToList()
             : DefaultOverviewWidgets.ToList();
-        RailHeader("Overview layout", FontAwesomeIcon.ThLarge, null, accent);
-        SpheneUI.Text.Muted("The Overview digest renders its widgets in this order:");
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Overview layout", () =>
         {
             var scale = SpheneUI.Scale;
             for (var i = 0; i < layout.Count; i++)
@@ -4947,7 +4903,9 @@ internal static partial class SyncshellCommunityView
                     }
                 }
             }
-        }, id: "community-set-widgets");
+        }, FontAwesomeIcon.ThLarge,
+            description: "The Overview digest renders its widgets in this order:",
+            accent: accent, id: "community-set-widgets");
     }
 
     /// <summary>Buffered custom-section rows · Done commits the whole list.</summary>
@@ -4957,9 +4915,7 @@ internal static partial class SyncshellCommunityView
         page.SectionsBuffer ??= (community.Profile.Sections ?? [])
             .Select(s => new CommunitySectionDraft { Title = s.Title, Body = s.Body }).ToList();
         var buf = page.SectionsBuffer;
-        RailHeader("Custom sections", FontAwesomeIcon.LayerGroup, buf.Count, accent);
-        SpheneUI.Text.Muted("Free-form titled cards inside the About area:");
-        SpheneUI.Layout.Surface(() =>
+        SpheneUI.Layout.HeadedSurface("Custom sections", () =>
         {
             var scale = SpheneUI.Scale;
             for (var i = 0; i < buf.Count; i++)
@@ -5020,7 +4976,9 @@ internal static partial class SyncshellCommunityView
                     });
                 }
             }
-        }, id: "community-set-sections");
+        }, FontAwesomeIcon.LayerGroup,
+            description: "Free-form titled cards inside the About area:",
+            accent: accent, count: buf.Count, id: "community-set-sections");
     }
 
     /// <summary>

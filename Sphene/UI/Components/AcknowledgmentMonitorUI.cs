@@ -144,7 +144,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             {
                 _showMetricsDetails = !_showMetricsDetails;
             }
-        }, "System Status", SpheneUI.Palette.NetworkActive);
+        }, "System Status", SpheneUI.Palette.NetworkActive, icon: FontAwesomeIcon.Heartbeat);
     }
 
     // Draws session information section
@@ -166,7 +166,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             {
                 _showSessionDetails = !_showSessionDetails;
             }
-        }, "Session Information", SpheneUI.Palette.NetworkActive);
+        }, "Session Information", SpheneUI.Palette.NetworkActive, icon: FontAwesomeIcon.Info);
     }
 
     // Draws detailed session information
@@ -249,7 +249,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
                     }
                 }
             }
-        }, "Session Details", SpheneUI.Palette.NetworkActive);
+        }, "Session Details", SpheneUI.Palette.NetworkActive, icon: FontAwesomeIcon.ClipboardList);
     }
 
     // Draws the detailed metrics section
@@ -288,7 +288,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             }
 
             SpheneUI.Text.Plain($"Last Updated: {_metrics.LastUpdated:HH:mm:ss}");
-        }, "Detailed Metrics", SpheneUI.Palette.NetworkActive);
+        }, "Detailed Metrics", SpheneUI.Palette.NetworkActive, icon: FontAwesomeIcon.ChartBar);
     }
 
     // Draws the configuration section
@@ -344,7 +344,7 @@ public class AcknowledgmentMonitorUI : WindowMediatorSubscriberBase
             {
                 DrawAdvancedSettings();
             }
-        }, "Configuration", SpheneUI.Palette.EtherealPurple);
+        }, "Configuration", SpheneUI.Palette.EtherealPurple, icon: FontAwesomeIcon.Cog);
     }
 
     // Draws the advanced settings section

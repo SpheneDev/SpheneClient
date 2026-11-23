@@ -123,7 +123,7 @@ internal sealed class JoinSyncshellUI : IMediatorSubscriber, IDisposable
             SpheneUI.Controls.InputTextWithHint("##syncshellpw", "Password or invite (optional)", ref _syncshellPassword, 50, ImGuiInputTextFlags.Password);
             SpheneUI.AttachTooltip("ID and password are case sensitive. MSS- is part of the ID unless a vanity ID is used."
                 + " Leave the password empty for public or approval-gated syncshells.");
-        }, "Join a Syncshell", accentColor: SpheneUI.Palette.CrystalBlue);
+        }, "Join a Syncshell", icon: FontAwesomeIcon.UserPlus, accentColor: SpheneUI.Palette.CrystalBlue);
 
         if (_joinTask is { IsCompleted: true })
         {
@@ -201,7 +201,7 @@ internal sealed class JoinSyncshellUI : IMediatorSubscriber, IDisposable
                 SpheneUI.Layout.Callout("The request could not be sent - you may already be a member, banned, or the policy changed.",
                     FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow);
             }
-        }, "Approval required", accentColor: SpheneUI.Palette.EtherealPurple);
+        }, "Approval required", icon: FontAwesomeIcon.UserClock, accentColor: SpheneUI.Palette.EtherealPurple);
     }
 
     /// <summary>Pulls the caller's application state for the probed shell.</summary>
@@ -226,12 +226,10 @@ internal sealed class JoinSyncshellUI : IMediatorSubscriber, IDisposable
             SpheneUI.Text.Big(info.GroupAliasOrGID);
             ImGui.SameLine();
             SpheneUI.Text.Muted($"· hosted by {info.OwnerAliasOrUID}");
-        }, "You're about to join", accentColor: SpheneUI.Palette.CrystalBlue);
+        }, "You're about to join", icon: FontAwesomeIcon.Check, accentColor: SpheneUI.Palette.CrystalBlue);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-        SpheneUI.Text.SectionHeader("Suggested Permissions",
-            "Suggestions only · anything you don't adopt keeps your own default.");
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Suggested Permissions", () =>
         {
             PermSuggestionRow("sounds", "Sound sync",
                 info.GroupPermissions.IsPreferDisableSounds(), _ownPermissions.DisableGroupSounds,
@@ -242,7 +240,9 @@ internal sealed class JoinSyncshellUI : IMediatorSubscriber, IDisposable
             PermSuggestionRow("vfx", "VFX sync",
                 info.GroupPermissions.IsPreferDisableVFX(), _ownPermissions.DisableGroupVFX,
                 v => _ownPermissions.DisableGroupVFX = v);
-        }, id: "join-suggested-perms");
+        }, FontAwesomeIcon.Lightbulb,
+            description: "Suggestions only · anything you don't adopt keeps your own default.",
+            id: "join-suggested-perms");
 
     }
 

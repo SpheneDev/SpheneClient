@@ -272,8 +272,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.SectionHeader("Welcome to Sphene Network", icon: Dalamud.Interface.FontAwesomeIcon.Star);
-
             SpheneUI.Text.Wrapped("Experience seamless character synchronization across the realm through the power of Living Memory. " +
                           "Share your complete appearance and glamour with trusted companions in real-time.");
 
@@ -285,14 +283,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Layout.Callout("Only modifications channeled through Penumbra can be transmitted. " +
                                  "Ensure all your customizations flow through Penumbra's systems for perfect synchronization.",
                 Dalamud.Interface.FontAwesomeIcon.ExclamationTriangle, ImGuiColors.DalamudYellow, "Important");
-        });
+        }, title: "Welcome to Sphene Network", icon: FontAwesomeIcon.Star);
 
         _pluginInstaller.DrawOtherPluginState();
 
         SpheneUI.Layout.VerticalSpace();
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.SectionHeader("Restore from Backup", icon: Dalamud.Interface.FontAwesomeIcon.FileImport);
             SpheneUI.Text.ColoredWrapped("Have a previous Sphene backup? Restore all your settings, pairs, and secret keys instantly.", ImGuiColors.DalamudGrey);
             SpheneUI.Layout.VerticalSpace();
             if (SpheneUI.Controls.PrimaryButton("Import Config Backup",
@@ -307,14 +304,13 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 _backupShrinkUPath = string.Empty;
                 _importResultMessage = null;
             }
-        });
+        }, title: "Restore from Backup", icon: FontAwesomeIcon.FileImport);
     }
 
     private void DrawShrinkUPageContent()
     {
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.SectionHeader("ShrinkU", icon: Dalamud.Interface.FontAwesomeIcon.Tools);
             SpheneUI.Text.Wrapped("Manage texture backups and convert formats to keep your Penumbra-based mods healthy. ShrinkU is bundled with Sphene and integrates with the same Window System.");
 
             SpheneUI.Layout.VerticalSpace();
@@ -341,7 +337,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.DalamudGrey3, "Integration Toggle");
 
             SpheneUI.Layout.VerticalSpace();
-        });
+        }, title: "ShrinkU", icon: FontAwesomeIcon.Tools);
     }
 
     private void DrawAgreementPageContent()
@@ -408,9 +404,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.SectionHeader("Memory Archive Configuration", icon: Dalamud.Interface.FontAwesomeIcon.Database);
-
-            SpheneUI.Layout.VerticalSpace();
             if (!_uiShared.HasValidPenumbraModPath)
             {
                 SpheneUI.Layout.Callout("Please configure a valid Penumbra mod directory path before proceeding.",
@@ -430,7 +423,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.VerticalSpace();
                 _uiShared.DrawCacheDirectorySetting();
             }
-        });
+        }, title: "Memory Archive Configuration", icon: FontAwesomeIcon.Database);
 
         if (!_cacheMonitor.IsScanRunning && !string.IsNullOrEmpty(_configService.Current.CacheFolder) && _uiShared.HasValidPenumbraModPath && Directory.Exists(_configService.Current.CacheFolder))
         {
@@ -457,7 +450,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 SpheneUI.Layout.VerticalSpace();
                 SpheneUI.Text.ColoredWrapped("The File Compactor reduces storage requirements for downloaded content while providing faster loading times. " +
                     "This setting can be changed later in Sphene settings.", ImGuiColors.DalamudGrey3);
-            });
+            }, title: "File Compactor", icon: FontAwesomeIcon.FileArchive);
         }
     }
 
@@ -467,9 +460,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
     {
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.SectionHeader("Network Authentication", icon: Dalamud.Interface.FontAwesomeIcon.Shield);
-
-            SpheneUI.Layout.VerticalSpace();
             SpheneUI.Text.Wrapped("Establish your identity within the Sphene Network to access synchronization services.");
 
             SpheneUI.Layout.VerticalSpace();
@@ -477,14 +467,12 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                 $"For the primary Network node \"{WebAPI.ApiController.MainServer}\", authentication is managed through our Discord community. " +
                 "Join the Discord and follow the authentication protocols in #sphene-registration.",
                 Dalamud.Interface.FontAwesomeIcon.InfoCircle, ImGuiColors.HealerGreen, "Main Server Authentication");
-        });
+        }, title: "Network Authentication", icon: FontAwesomeIcon.Shield);
 
         SpheneUI.Layout.VerticalSpace();
 
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.SectionHeader("Community & Support", icon: Dalamud.Interface.FontAwesomeIcon.Users);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
             // brand links fill the card width in thirds · taller for bigger
             // glyphs · Ko-fi carries the perks half as a joined split button
@@ -520,7 +508,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
             SpheneUI.Text.ColoredWrapped(
                 "Ko-fi donations unlock nameplate perks - tap the perks half for the live preview.",
                 ImGuiColors.DalamudGrey3);
-        });
+        }, title: "Community & Support", icon: FontAwesomeIcon.Users);
 
         SpheneUI.Layout.VerticalSpace();
 
@@ -537,8 +525,6 @@ public partial class IntroUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Layout.SectionCard(() =>
             {
-                SpheneUI.Text.SectionHeader("Authentication Key", icon: Dalamud.Interface.FontAwesomeIcon.Key);
-
                 ImGui.SetNextItemWidth(-1);
                 SpheneUI.Controls.InputTextWithHint("##secretKey", "Enter your 64-character authentication key...", ref _secretKey, 64);
 
@@ -560,7 +546,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                     SpheneUI.Layout.VerticalSpace();
                     ConnectivityOptionBlock.DrawWineForceWebSocketsOption(selectedServer, _serverConfigurationManager, _uiShared, "IntroWineForceWebSockets");
                 }
-            });
+            }, title: "Authentication Key", icon: FontAwesomeIcon.Key);
         }
         else
         {
@@ -593,7 +579,7 @@ public partial class IntroUi : WindowMediatorSubscriberBase
                         }
                     }
                 }
-            });
+            }, title: "Discord Authentication", icon: FontAwesomeIcon.SignInAlt);
         }
     }
 

@@ -73,10 +73,11 @@ public static partial class SpheneUI
         {
             var scale = SpheneUI.Scale;
             var drawList = ImGui.GetWindowDrawList();
-            var pad = Spacing.CardPadding.Scaled * 0.75f;
+            var padX = Spacing.CardPaddingX.Scaled * 0.75f;
+            var padY = Spacing.CardPadding.Scaled * 0.75f;
             var slot = 28f * scale;
             var lineH = ImGui.GetTextLineHeight();
-            var h = pad * 2f + slot + (sub != null ? 3f * scale + lineH : 0f);
+            var h = padY * 2f + slot + (sub != null ? 3f * scale + lineH : 0f);
             var w = width > 0f ? width : Controls.BoundedAvailX();
             var radius = Metrics.ControlRadius;
 
@@ -96,7 +97,7 @@ public static partial class SpheneUI
             var lift = Fx.HoverLiftT(ImGui.GetID($"{id}##lift"), min, max);
             Fx.HoverLift(drawList, min, max, lift, radius, tint);
 
-            var slotMin = new Vector2(min.X + pad, min.Y + pad);
+            var slotMin = new Vector2(min.X + padX, min.Y + padY);
             var slotMax = slotMin + new Vector2(slot, slot);
             var glyphCol = ColorUtils.LerpColor(Colors.TextSecondary, tint, 0.3f + 0.7f * lift);
             SlotIcon(drawList, slotMin, slot, icon, glyphCol);
@@ -108,7 +109,7 @@ public static partial class SpheneUI
                 chevW = ImGui.CalcTextSize(chev).X;
             }
             var textX = slotMax.X + Spacing.Row.Scaled;
-            var textRight = max.X - pad - (showChevron ? chevW + Spacing.Row.Scaled : 0f);
+            var textRight = max.X - padX - (showChevron ? chevW + Spacing.Row.Scaled : 0f);
             var titleY = slotMin.Y + (slot - lineH) * 0.5f;
             drawList.PushClipRect(new Vector2(textX, min.Y), new Vector2(textRight, max.Y), true);
             drawList.AddText(new Vector2(textX, titleY),
@@ -128,7 +129,7 @@ public static partial class SpheneUI
                     var chevCol = hovered
                         ? ColorUtils.LerpColor(tint, Vector4.One, 0.3f)
                         : Colors.TextMuted;
-                    drawList.AddText(new Vector2(max.X - pad - chevW,
+                    drawList.AddText(new Vector2(max.X - padX - chevW,
                             min.Y + (h - lineH) * 0.5f),
                         ColorUtils.ToU32(chevCol), chev);
                 }

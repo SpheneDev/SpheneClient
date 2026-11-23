@@ -144,7 +144,7 @@ public sealed class HousingPageView
                 first = false;
                 DrawPropertyRow(e);
             }
-        }, "Your Properties",
+        }, "Your Properties", icon: FontAwesomeIcon.Home,
             description: "Everything the game says you own - select one to manage its bound syncshells.");
     }
 
@@ -370,7 +370,7 @@ public sealed class HousingPageView
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 DrawBindingSettings(gid, existing, saving);
             }
-        }, group.GroupAliasOrGID);
+        }, group.GroupAliasOrGID, icon: FontAwesomeIcon.Users);
     }
 
     /// <summary>Fixed-size zone segments · they never stretch with the window

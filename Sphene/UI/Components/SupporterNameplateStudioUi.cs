@@ -125,6 +125,8 @@ public sealed class SupporterNameplateStudioUi
                 ]);
             SpheneUI.Layout.SectionCard(
                 () => SupporterPerks.DrawList(),
+                title: "Supporter perks",
+                icon: FontAwesomeIcon.Gift,
                 accentColor: SpheneUI.Palette.SpheneGold,
                 description: "Supporter status is synced automatically once your Ko-fi donation is linked to your Discord account.");
             SpheneUI.Layout.VerticalSpace();
@@ -602,8 +604,8 @@ public sealed class SupporterNameplateStudioUi
                         ProfileRowFx.HoverMask & ~SpheneProfileTheme.RequiredRowFx, accent);
                     SpheneUI.Profile.FxChips("While idle", ref _rowIdleFx,
                         ProfileRowFx.IdleMask & ~SpheneProfileTheme.RequiredRowFx, accent);
-                }, "List row effects", accent,
-                    "Stack as many as you like · they show on your entry in your friends' lists.");
+                }, "List row effects", accent, icon: FontAwesomeIcon.Magic,
+                    description: "Stack as many as you like · they show on your entry in your friends' lists.");
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
                 // shipped backdrops - a click only stages, Apply commits
@@ -672,8 +674,8 @@ public sealed class SupporterNameplateStudioUi
                                 "custom", "Custom", from, via, to)));
                     }
                     SpheneUI.AttachTooltip("Generates the fade strip and stages it as your row background");
-                }, "Row background", accent,
-                    "Generated strips and gradients shown behind your entry.");
+                }, "Row background", accent, icon: FontAwesomeIcon.Image,
+                    description: "Generated strips and gradients shown behind your entry.");
 
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
                 SpheneUI.Layout.SectionCard(() =>
@@ -698,8 +700,8 @@ public sealed class SupporterNameplateStudioUi
                             _stagedRowImage = string.Empty;
                         }
                     }
-                }, "Custom image", accent,
-                    "Your own backdrop · staged here, applied below.");
+                }, "Custom image", accent, icon: FontAwesomeIcon.FileUpload,
+                    description: "Your own backdrop · staged here, applied below.");
             });
             ImGui.Unindent(catalogInset);
         }
@@ -1022,8 +1024,6 @@ public sealed class SupporterNameplateStudioUi
             DrawMarkGroup(supporter);
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             DrawLabelGroup(supporter);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            DrawIconLabelGroup(supporter);
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
             DrawAdvancedSection();
             ImGui.Unindent(catalogInset);
@@ -1611,11 +1611,7 @@ public sealed class SupporterNameplateStudioUi
     {
         FullWidth(() =>
         {
-            SpheneUI.Text.SectionHeader("Mark",
-                "Symbol and colors next to your name · click a chip to stage it on the preview.",
-                icon: FontAwesomeIcon.PenFancy,
-                accent: SpheneUI.Palette.SpheneGold);
-            SpheneUI.Layout.RowGroup(() =>
+            SpheneUI.Layout.HeadedRowGroup("Mark", () =>
             {
                 var cfg = _configService.Current;
                 var symbolChar = cfg.SupporterSymbolChar ?? string.Empty;
@@ -1683,7 +1679,9 @@ public sealed class SupporterNameplateStudioUi
                     }
                     SpheneUI.AttachTooltip("Where the mark sits relative to your name. Both repeats the symbol on the right.");
                 }
-            }, id: "studio-mark");
+            }, FontAwesomeIcon.PenFancy,
+                description: "Symbol and colors next to your name · click a chip to stage it on the preview.",
+                accent: SpheneUI.Palette.SpheneGold, id: "studio-mark");
         });
     }
 
@@ -1727,10 +1725,7 @@ public sealed class SupporterNameplateStudioUi
     {
         FullWidth(() =>
         {
-            SpheneUI.Text.SectionHeader("Label",
-                "Custom text shown together with the mark.", icon: FontAwesomeIcon.Font,
-                accent: SpheneUI.Palette.SpheneGold);
-            SpheneUI.Layout.RowGroup(() =>
+            SpheneUI.Layout.HeadedRowGroup("Label", () =>
             {
                 using (ImRaii.Disabled(!supporter))
                 {
@@ -1777,58 +1772,9 @@ public sealed class SupporterNameplateStudioUi
                             }), dockRight: false);
                     }
                 }
-            }, id: "studio-label");
-        });
-    }
-
-    private void DrawIconLabelGroup(bool supporter)
-    {
-        FullWidth(() =>
-        {
-            SpheneUI.Text.SectionHeader("Icon Label",
-                "Overlay text next to the Sphene icon.", icon: FontAwesomeIcon.Tag,
-                accent: SpheneUI.Palette.CrystalBlue);
-            SpheneUI.Layout.RowGroup(() =>
-            {
-                using (ImRaii.Disabled(!supporter
-                    || !(_pendingIcon?.Enabled ?? _configService.Current.SupporterIconEnabled)))
-                {
-                    var cfg = _configService.Current;
-                    var iconLabelEnabled = _draft?.IconLabelEnabled ?? cfg.SupporterIconLabelEnabled;
-                    if (SpheneUI.Controls.Toggle("Icon label##studioIconLabelEnabled", ref iconLabelEnabled))
-                    {
-                        StageDraft(d => d.IconLabelEnabled = iconLabelEnabled);
-                    }
-                    SpheneUI.AttachTooltip("Draws the configured label text next to the Sphene icon (overlay, not part of the nameplate).");
-
-                    if (iconLabelEnabled)
-                    {
-                        BeginSupporterRow("Text", true);
-                        var iconLabelText = _draft?.IconLabelText ?? cfg.SupporterIconLabelText ?? string.Empty;
-                        if (SpheneUI.Controls.InputText("##studioIconLabelText", ref iconLabelText, 30,
-                                dockRight: true))
-                        {
-                            StageDraft(d => d.IconLabelText = iconLabelText);
-                        }
-                        SpheneUI.AttachTooltip("Text drawn next to the Sphene icon. Set independently from the nameplate label.");
-
-                        BeginSupporterRow("Colors", true);
-                        BeginSupporterSwatchCluster(2);
-                        DrawIconLabelColorPicker("studioIconLabelFg",
-                            _draft?.IconLabelColor ?? cfg.SupporterIconLabelColor,
-                            color => StageDraft(d => d.IconLabelColor = color));
-                        ImGui.SameLine(0, SpheneUI.Metrics.Gap);
-                        DrawIconLabelEdgePicker("studioIconLabelEdge",
-                            _draft?.IconLabelEdgeEnabled ?? cfg.SupporterIconLabelEdgeEnabled,
-                            _draft?.IconLabelEdgeColor ?? cfg.SupporterIconLabelEdgeColor,
-                            (enabled, color) => StageDraft(d =>
-                            {
-                                d.IconLabelEdgeEnabled = enabled;
-                                d.IconLabelEdgeColor = color;
-                            }));
-                    }
-                }
-            }, id: "studio-iconlabel");
+            }, FontAwesomeIcon.Font,
+                description: "Custom text shown together with the mark.",
+                accent: SpheneUI.Palette.SpheneGold, id: "studio-label");
         });
     }
 
@@ -2274,54 +2220,6 @@ public sealed class SupporterNameplateStudioUi
             DrawSupporterPaletteCells(SortedUiGlowKeys(), ResolveUiGlowColor,
                 colorKey, enabled, key => apply(true, key), frame: true,
                 applyNone: () => apply(false, colorKey));
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    private static void DrawIconLabelColorPicker(string id, uint color, Action<uint> apply)
-    {
-        var preview = ImGui.ColorConvertU32ToFloat4(color);
-        var popupId = "##" + id + "_picker";
-        if (SpheneUI.Controls.ColorSwatch(popupId + "_btn", preview))
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip("Fill color of the icon label text. Click to pick a color.");
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            if (SpheneUI.Controls.ColorPicker(popupId, ref preview))
-            {
-                apply(ImGui.ColorConvertFloat4ToU32(preview));
-            }
-            SpheneUI.Popups.EndStyled();
-        }
-    }
-
-    private static void DrawIconLabelEdgePicker(string id, bool enabled, uint color, Action<bool, uint> apply)
-    {
-        var popupId = "##" + id + "_picker";
-        var clicked = enabled
-            ? SpheneUI.Controls.FrameSwatch(popupId + "_btn", ImGui.ColorConvertU32ToFloat4(color))
-            : SpheneUI.Controls.GlyphSwatch(popupId + "_btn", "-");
-        if (clicked)
-        {
-            ImGui.OpenPopup(popupId);
-        }
-        SpheneUI.AttachTooltip(enabled
-            ? "Outline color drawn as a frame around the icon label text. Click to change or disable."
-            : "Label outline disabled. Click to pick a color.");
-        if (SpheneUI.Popups.BeginStyled(popupId))
-        {
-            if (SpheneUI.Controls.Selectable("None", !enabled))
-            {
-                apply(false, color);
-                ImGui.CloseCurrentPopup();
-            }
-            var preview = ImGui.ColorConvertU32ToFloat4(color);
-            if (SpheneUI.Controls.ColorPicker(popupId, ref preview))
-            {
-                apply(true, ImGui.ColorConvertFloat4ToU32(preview));
-            }
             SpheneUI.Popups.EndStyled();
         }
     }

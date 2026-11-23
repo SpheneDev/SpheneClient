@@ -90,7 +90,7 @@ public sealed class CreateSyncshellUI : IMediatorSubscriber, IDisposable
         {
             SpheneUI.Controls.InputTextWithHint("##alias", "Syncshell alias (optional, 3-50 characters)", ref _groupAlias, 50);
             SpheneUI.AttachTooltip("Shown instead of the generated ID. Leave empty to use only the ID.");
-        }, "Create a Syncshell");
+        }, "Create a Syncshell", icon: FontAwesomeIcon.Plus);
 
         if (_createTask is { IsCompleted: true })
         {
@@ -107,8 +107,7 @@ public sealed class CreateSyncshellUI : IMediatorSubscriber, IDisposable
         }
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-        SpheneUI.Text.SectionHeader("Details");
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Details", () =>
         {
             SpheneUI.Rows.Value("Syncshells you own",
                 $"up to {_apiController.ServerInfo.MaxGroupsCreatedByUser}", FontAwesomeIcon.Users);
@@ -122,7 +121,7 @@ public sealed class CreateSyncshellUI : IMediatorSubscriber, IDisposable
             PermRow("Animation sync", !def.DisableGroupAnimations);
             PermRow("Sound sync", !def.DisableGroupSounds);
             PermRow("VFX sync", !def.DisableGroupVFX);
-        }, id: "create-details");
+        }, FontAwesomeIcon.InfoCircle, id: "create-details");
         SpheneUI.Text.MutedWrapped(
             "New members join with these defaults · change them anytime in Settings.");
     }
@@ -181,17 +180,17 @@ public sealed class CreateSyncshellUI : IMediatorSubscriber, IDisposable
             ImGui.SameLine();
             CopyButton("Copy password", _lastCreatedGroup.Password);
             SpheneUI.Text.MutedWrapped("Share these with the people you want to invite. The password can be changed later.");
-        }, "Syncshell created");
+        }, "Syncshell created", icon: FontAwesomeIcon.Check);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.Row);
-        SpheneUI.Text.SectionHeader("Suggested defaults",
-            "What your preferred syncshell permissions suggested for new members.");
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Suggested defaults", () =>
         {
             PermRow("Animation sync", !_lastCreatedGroup!.GroupUserPreferredPermissions.IsDisableAnimations());
             PermRow("Sound sync", !_lastCreatedGroup!.GroupUserPreferredPermissions.IsDisableSounds());
             PermRow("VFX sync", !_lastCreatedGroup!.GroupUserPreferredPermissions.IsDisableVFX());
-        }, id: "create-defaults");
+        }, FontAwesomeIcon.Lightbulb,
+            description: "What your preferred syncshell permissions suggested for new members.",
+            id: "create-defaults");
     }
 
     private static void PermRow(string label, bool enabled)

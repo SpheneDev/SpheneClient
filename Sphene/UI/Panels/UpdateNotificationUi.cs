@@ -95,7 +95,7 @@ public class UpdateNotificationUi : WindowMediatorSubscriberBase
                 SpheneUI.Tables.NextColumn();
                 SpheneUI.Text.Colored(_updateInfo.LatestVersion.ToString(), ImGuiColors.HealerGreen);
             }
-        });
+        }, title: "Versions", icon: FontAwesomeIcon.CodeBranch);
 
         // Instructions
         SpheneUI.Text.Wrapped(

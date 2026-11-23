@@ -129,16 +129,16 @@ internal sealed partial class CharaDataHubUi
         }
 
         SpheneUI.Layout.SectionCard(() => DrawEditCharaDataGeneral(dataDto, updateDto),
-            title: "General", accentColor: SpheneUI.Palette.EtherealPurple);
+            title: "General", icon: FontAwesomeIcon.IdCard, accentColor: SpheneUI.Palette.EtherealPurple);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.SectionCard(() => DrawEditCharaDataAccessAndSharing(updateDto),
-            title: "Access and Sharing", accentColor: SpheneUI.Palette.EtherealPurple);
+            title: "Access and Sharing", icon: FontAwesomeIcon.ShareAlt, accentColor: SpheneUI.Palette.EtherealPurple);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.SectionCard(() => DrawEditCharaDataAppearance(dataDto, updateDto),
-            title: "Appearance", accentColor: SpheneUI.Palette.EtherealPurple);
+            title: "Appearance", icon: FontAwesomeIcon.Palette, accentColor: SpheneUI.Palette.EtherealPurple);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.SectionCard(() => DrawEditCharaDataPoses(updateDto),
-            title: "Poses", accentColor: SpheneUI.Palette.EtherealPurple);
+            title: "Poses", icon: FontAwesomeIcon.Running, accentColor: SpheneUI.Palette.EtherealPurple);
     }
 
     private void DrawEditCharaDataAccessAndSharing(CharaDataExtendedUpdateDto updateDto)

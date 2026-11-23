@@ -24,6 +24,18 @@ public static class ReactionBar
         (ReactionKind.Sad, FontAwesomeIcon.SadTear, "Sad"),
     ];
 
+    /// <summary>The icon a kind renders with - single source of truth so
+    /// surfaces outside the bar (e.g. feed activity rows) show the same
+    /// symbol instead of a generic heart.</summary>
+    public static FontAwesomeIcon IconFor(ReactionKind kind)
+    {
+        for (var i = 0; i < Kinds.Length; i++)
+        {
+            if (Kinds[i].Kind == kind) return Kinds[i].Icon;
+        }
+        return FontAwesomeIcon.Smile;
+    }
+
     /// <summary>Inline chip row for one target - summary may be null while
     /// loading (renders the kinds with zero counts).</summary>
     public static void DrawInline(ReactionTargetKind targetKind, long targetId,

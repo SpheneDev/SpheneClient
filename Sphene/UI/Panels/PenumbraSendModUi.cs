@@ -314,13 +314,13 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             SpheneUI.Tables.SetColumn(0);
             SpheneUI.Layout.SectionCard(
                 () => DrawModLibrary(filtered, accent, idSuffix, colBottom),
-                title: "1 · Mod Library", accentColor: accent);
+                title: "1 · Mod Library", icon: FontAwesomeIcon.Box, accentColor: accent);
 
             SpheneUI.Tables.SetColumn(1);
             var recipientsCardBottom = MathF.Max(ImGui.GetCursorScreenPos().Y + 170f * scale, colBottom);
             SpheneUI.Layout.SectionCard(
                 () => DrawRecipientPicker(candidatePairs, recipientsCardBottom, accent, idSuffix),
-                title: "2 · Recipients", accentColor: accent);
+                title: "2 · Recipients", icon: FontAwesomeIcon.Users, accentColor: accent);
 
             SpheneUI.Lint.CheckFillBottom(colBottom, "SendMods.Table");
         }

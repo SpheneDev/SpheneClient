@@ -1023,7 +1023,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         if (SpheneUI.Layout.BeginNavContent("sphenehub",
                 scrollable: !ownsScrolling, padded: !communityEdge,
                 contentInset: communityEdge ? 12f * SpheneUI.Scale : -1f,
-                fixedContent: o => PageFixedChrome(o, accentMe, accentCommunity)))
+                fixedContent: o => PageFixedChrome(o, accentMe, accentCommunity),
+                scrollHints: false))
         {
             contentMin = ImGui.GetWindowPos();
             contentMax = contentMin + ImGui.GetWindowSize();
@@ -2651,7 +2652,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 SpheneUI.AttachTooltip("Blend the bottom color over your banner image instead of replacing it");
             }
         }, "Appearance", accent,
-            "Colors and banner blending your profile card shows to you and paired users.");
+            "Colors and banner blending your profile card shows to you and paired users.",
+            icon: FontAwesomeIcon.Palette);
 
         var toastPos = ImGui.GetWindowPos();
         var toastSize = ImGui.GetWindowSize();
@@ -2997,7 +2999,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 FontAwesomeIcon.Clock, SpheneUI.Palette.NetworkWarning,
                 () => SpheneUI.Popups.ToggleFlyout("hub-inbox"));
 
-        }, title: "Overview", accentColor: accent);
+        }, title: "Overview", icon: FontAwesomeIcon.ChartBar, accentColor: accent);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
@@ -3115,53 +3117,23 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
             }
-        }, title: "Latest moments", accentColor: accent);
+        }, title: "Latest moments", icon: FontAwesomeIcon.Images,
+            accentColor: accent);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
     /// <summary>
     /// The community activity feed: news, events and photos across the
-    /// user's syncshells, newest first. The header row carries the title,
-    /// a "Community overview" link into the Community page and refresh;
-    /// each row deep-links into the owning shell's community page.
+    /// user's syncshells, newest first. The header carries title +
+    /// refresh; the latest 10 activities sit in a compact internal scroll
+    /// viewport above a persistent "Community overview" footer link; each
+    /// row deep-links into the owning shell's community page.
     /// </summary>
     private void DrawHomeFeedCard(Vector4 accent)
     {
         _communityFeed.EnsureRequested();
         SpheneUI.Layout.SectionCard(() =>
         {
-            // Header row · title left, overview link + refresh docked to the
-            // card edge. The cluster wraps onto a second row (still
-            // right-aligned) when the card is too narrow to share the line.
-            ImGui.SetCursorPosY(ImGui.GetCursorPosY()
-                + MathF.Max(0f, (ImGui.GetFrameHeight() - ImGui.GetTextLineHeight()) * 0.5f));
-            SpheneUI.Text.Colored("Community feed", accent);
-            var linkW = SpheneUI.Icons.TextButtonWidth(
-                FontAwesomeIcon.ArrowRight, "Community overview");
-            var refreshW = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.SyncAlt).X;
-            var clusterGap = SpheneUI.Spacing.X4.Scaled;
-            var clusterW = linkW + clusterGap + refreshW;
-            SpheneUI.Controls.SameLineIfFits(clusterW + SpheneUI.Spacing.X8.Scaled);
-            SpheneUI.Controls.DockToCardEdge(clusterW);
-            if (SpheneUI.Controls.SegmentButton("Community overview##feednav",
-                    FontAwesomeIcon.ArrowRight, accent: accent))
-            {
-                NavigateTo(new HubLocation(SpheneHubPage.Community, null, null,
-                    SubPage: 0));
-            }
-            SpheneUI.AttachTooltip("Open the full community overview");
-            ImGui.SameLine(0f, clusterGap);
-            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_communityFeed.IsLoading))
-            {
-                if (SpheneUI.Icons.Button(FontAwesomeIcon.SyncAlt))
-                {
-                    _ = _communityFeed.Refresh();
-                }
-            }
-            SpheneUI.AttachTooltip("Refresh feed");
-
-            ImGuiHelpers.ScaledDummy(0, 7);
-
             var items = _communityFeed.Items;
             if (_communityFeed.IsLoading && items.Count == 0)
             {
@@ -3192,43 +3164,88 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
             else
             {
-                for (var i = 0; i < items.Count; i++)
+                // Latest 10 activities inside a compact internal viewport -
+                // the widget stays overview-sized, the full stream lives on
+                // the Community page behind the footer link. Height tracks
+                // the window: grows with available space until every shown
+                // row fits (no hard cut), shrinks into internal scroll when
+                // short. FillToViewBottomHeight is scroll-invariant, so the
+                // size only follows window height, never page scroll.
+                var shown = Math.Min(items.Count, 10);
+                var availW = SpheneUI.Controls.BoundedAvailX();
+                var contentH = 0f;
+                for (var i = 0; i < shown; i++)
                 {
-                    var item = items[i];
-                    // actor in the key - reaction/comment rows can share the
-                    // same target id across different users.
-                    if (FeedItemRow.Draw($"feed-{item.Kind}-{item.Id}-{item.ActorUid}", item, "hub:",
-                            fallbackAccent: accent, onActorClick: NavigateToAuthor))
+                    contentH += FeedItemRow.MeasureHeight(items[i], availW);
+                    if (i + 1 < shown)
                     {
-                        NavigateFeedItem(item);
-                    }
-                    if (i + 1 < items.Count)
-                    {
-                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                        contentH += SpheneUI.Spacing.X4.Scaled;
                     }
                 }
-                if (_communityFeed.PageFailed)
+                // Reserve covers everything below the viewport: the card's
+                // bottom padding, the footer (hairline + gap + button) and
+                // the page's bottom padding - otherwise the card overshoots
+                // the window and the page gains a few px of phantom scroll.
+                var footerReserve = ImGui.GetFrameHeight()
+                    + SpheneUI.Spacing.X8.Scaled + 8f * SpheneUI.Scale
+                    + SpheneUI.Spacing.CardPadding.Scaled
+                    + SpheneUI.Spacing.PagePadding.Scaled;
+                var feedH = Math.Clamp(
+                    SpheneUI.Layout.FillToViewBottomHeight(footerReserve),
+                    MathF.Min(96f * SpheneUI.Scale, contentH), contentH);
+                if (SpheneUI.Layout.BeginScrollArea("home-feed-scroll",
+                        new Vector2(0f, feedH), contentPadding: Vector2.Zero))
                 {
-                    // A failed page append leaves the visible rows and the
-                    // cursor untouched - the same page retries here.
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                    SpheneUI.Text.Colored("Couldn't load more.",
-                        SpheneUI.Palette.Warning);
-                }
-                if (_communityFeed.HasMore)
-                {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-                    using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_communityFeed.IsLoading))
+                    for (var i = 0; i < shown; i++)
                     {
-                        if (SpheneUI.Controls.Button(
-                                _communityFeed.PageFailed ? "Retry##feedmore" : "Load more##feedmore"))
+                        var item = items[i];
+                        // actor in the key - reaction/comment rows can share
+                        // the same target id across different users.
+                        if (FeedItemRow.Draw($"feed-{item.Kind}-{item.Id}-{item.ActorUid}", item, "hub:",
+                                fallbackAccent: accent, onActorClick: NavigateToAuthor,
+                                profileFor: ProfileForUid, shellAvatarFor: ShellAvatar))
                         {
-                            _ = _communityFeed.LoadMoreAsync();
+                            NavigateFeedItem(item);
+                        }
+                        if (i + 1 < shown)
+                        {
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                         }
                     }
+                    SpheneUI.Layout.EndScrollArea(scrollHints: false);
                 }
+
+                // Persistent footer - outside the scroll viewport so it
+                // stays visible while the list scrolls. Replaces the old
+                // header overview link; one navigation action is enough.
+                var footPos = ImGui.GetCursorScreenPos();
+                var footW = SpheneUI.Controls.BoundedAvailX();
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                ImGui.GetWindowDrawList().AddLine(
+                    footPos + new Vector2(0f, 2f * SpheneUI.Scale),
+                    footPos + new Vector2(footW, 2f * SpheneUI.Scale),
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                        SpheneUI.Colors.Border, 0.5f)));
+                if (SpheneUI.Controls.SegmentButton("Community overview##feednav",
+                        FontAwesomeIcon.ArrowRight, accent: accent))
+                {
+                    NavigateTo(new HubLocation(SpheneHubPage.Community, null, null,
+                        SubPage: 0));
+                }
+                SpheneUI.AttachTooltip("Open the full community overview");
             }
-        }, accentColor: accent);
+        }, title: "Community feed", icon: FontAwesomeIcon.Newspaper,
+            accentColor: accent,
+            actions: (_communityFeed.IsLoading
+                    ? FontAwesomeIcon.Spinner : FontAwesomeIcon.SyncAlt,
+                "Refresh feed",
+                () =>
+                {
+                    if (!_communityFeed.IsLoading)
+                    {
+                        _ = _communityFeed.Refresh();
+                    }
+                }));
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
@@ -3342,7 +3359,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 SetPage(SpheneHubPage.Syncshells);
             }
-        }, title: "Discover", accentColor: accent);
+        }, title: "Discover", icon: FontAwesomeIcon.Compass, accentColor: accent);
     }
 
     /// <summary>
@@ -3836,7 +3853,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
             }
         }, "Note Transfer", accent,
-            "Copy pair notes between clients or restore a backup - the export goes to your clipboard.");
+            "Copy pair notes between clients or restore a backup - the export goes to your clipboard.",
+            icon: FontAwesomeIcon.FileExport);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
@@ -3846,7 +3864,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 "FriendsNotesOpenNotesPopupOnUserAddition");
             PeopleNotesOptionBlock.DrawAutoPopulateNotesUsingPlayerNamesOption(_configService, _uiShared,
                 "FriendsNotesAutoPopulateNotesUsingPlayerNames");
-        }, "Labels & Popups", accent);
+        }, "Labels & Popups", accent, icon: FontAwesomeIcon.Tags);
     }
 
     /// <summary>
@@ -3905,7 +3923,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     "No matches", $"Nobody on the whitelist matches \"{filter}\".");
             }
         }, "Performance Whitelist", accent,
-            "Whitelisted users are ignored for performance warnings and auto-pause - toggle a friend directly from their row or manage handles here.");
+            "Whitelisted users are ignored for performance warnings and auto-pause - toggle a friend directly from their row or manage handles here.",
+            icon: FontAwesomeIcon.ShieldAlt);
     }
 
     /// <summary>Resolves a handle entry (UID or alias) to a known pair,
@@ -4860,7 +4879,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 url => url.StartsWith("media:", StringComparison.Ordinal)
                     ? MarkdownComposer.MediaImageSource(url) : _announcements.GetCachedImage(url));
             EntityChipList.Draw(ann.Body);
-        });
+        }, title: "Announcement", icon: FontAwesomeIcon.Bullhorn);
 
         if (!string.IsNullOrWhiteSpace(ann.LinkUrl)
             && SpheneUI.Controls.SegmentButton("Read more##ann-link",
@@ -4966,8 +4985,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Text.Muted("Preview");
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X2);
             if (string.IsNullOrWhiteSpace(_editorBody))
             {
                 SpheneUI.Text.Muted("Body preview appears here.");
@@ -4978,7 +4995,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X,
                     _announcements.GetCachedImage);
             }
-        });
+        }, title: "Preview", icon: FontAwesomeIcon.Eye);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
         var busy = _editorBusy;
@@ -5207,7 +5224,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         switch (_activePage)
         {
             case SpheneHubPage.Community:
-                DrawCommunityBanner(accentCommunity);
+                DrawCommunityBanner(accentCommunity, heroHost);
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
                 DrawCommunityTabs(accentCommunity);
                 break;
@@ -5247,50 +5264,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
     /// <summary>
     /// Community - the hub where everything the user's syncshells publish
-    /// lands. Desktop structure: a compact purple banner carries the
-    /// identity, the shared <see cref="SpheneUI.Controls.TabBar"/> strip
-    /// sits on its own row below it, and the body is a two-column layout -
-    /// flexible feed on the left, a constrained information sidebar on the
-    /// right. Only when the content region is genuinely too narrow for both
-    /// does the page fall back to a single column that keeps the stats as
-    /// a compact strip.
+    /// lands. A compact purple banner carries the identity plus the
+    /// joined-shell counters and affordances, the shared
+    /// <see cref="SpheneUI.Controls.TabBar"/> strip sits on its own row
+    /// below it, and the feed runs full width underneath.
     /// </summary>
     private void DrawCommunityPage(Vector4 accent)
     {
         _communityFeed.EnsureRequested();
-        var items = _communityFeed.Items;
-
-        var scale = SpheneUI.Scale;
-        var avail = SpheneUI.Controls.BoundedAvailX();
-        var gap = SpheneUI.Spacing.X12.Scaled;
-        var sideW = Math.Clamp(avail * 0.27f, 210f * scale, 280f * scale);
-        var feedW = avail - sideW - gap;
-
-        if (feedW >= CommunityMinFeedWidth * scale)
-        {
-            var origin = ImGui.GetCursorScreenPos();
-            SpheneUI.Layout.ContentRegion(feedW, "community-main",
-                () => DrawCommunityMainColumn(items, accent));
-            var leftBottom = ImGui.GetCursorScreenPos().Y;
-            ImGui.SetCursorScreenPos(
-                new Vector2(origin.X + feedW + gap, origin.Y));
-            SpheneUI.Layout.ContentRegion(sideW, "community-side",
-                () => DrawCommunitySidebar(accent));
-            var rightBottom = ImGui.GetCursorScreenPos().Y;
-            ImGui.SetCursorScreenPos(
-                new Vector2(origin.X, MathF.Max(leftBottom, rightBottom)));
-        }
-        else
-        {
-            DrawCommunityStatsStrip(accent);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            DrawCommunityMainColumn(items, accent);
-        }
+        DrawCommunityMainColumn(_communityFeed.Items, accent);
     }
-
-    /// <summary>Smallest usable feed width before the sidebar column is
-    /// dropped · unscaled.</summary>
-    private const float CommunityMinFeedWidth = 380f;
 
     /// <summary>The left column: Highlights + section heading + the
     /// selected tab's feed layout, then cursor paging.</summary>
@@ -5301,24 +5284,28 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             case 0:
                 DrawCommunityHighlights(items, accent);
-                SpheneUI.Text.SectionHeader("Recent Activity",
-                    icon: FontAwesomeIcon.Clock, accent: accent);
-                DrawCommunityCardFeed(items, accent, only: null);
+                SpheneUI.Layout.SectionCard(() =>
+                        DrawCommunityCardFeed(items, accent, only: null),
+                    title: "Recent Activity", icon: FontAwesomeIcon.Clock,
+                    accentColor: accent);
                 break;
             case 2:
-                SpheneUI.Text.SectionHeader("Photos",
-                    icon: FontAwesomeIcon.Images, accent: accent);
-                DrawCommunityPhotos(items, accent);
+                SpheneUI.Layout.SectionCard(() =>
+                        DrawCommunityPhotos(items, accent),
+                    title: "Photos", icon: FontAwesomeIcon.Images,
+                    accentColor: accent);
                 break;
             case 3:
-                SpheneUI.Text.SectionHeader("Upcoming events",
-                    icon: FontAwesomeIcon.CalendarAlt, accent: accent);
-                DrawCommunityEvents(items, accent);
+                SpheneUI.Layout.SectionCard(() =>
+                        DrawCommunityEvents(items, accent),
+                    title: "Upcoming events", icon: FontAwesomeIcon.CalendarAlt,
+                    accentColor: accent);
                 break;
             case 5:
-                SpheneUI.Text.SectionHeader("Activity",
-                    icon: FontAwesomeIcon.Bolt, accent: accent);
-                DrawCommunityActivity(items, accent);
+                SpheneUI.Layout.SectionCard(() =>
+                        DrawCommunityActivity(items, accent),
+                    title: "Activity", icon: FontAwesomeIcon.Bolt,
+                    accentColor: accent);
                 break;
             case 6:
                 DrawFollowingFeed(accent);
@@ -5328,12 +5315,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 return;
             default:
                 var only = CommunityTabKind(_communityTab);
-                SpheneUI.Text.SectionHeader(
-                    only == SyncshellFeedItemKind.Blog ? "Latest Chronicles" : "Latest news",
-                    icon: only == SyncshellFeedItemKind.Blog
-                        ? FontAwesomeIcon.BookOpen : FontAwesomeIcon.Bullhorn,
-                    accent: accent);
-                DrawCommunityCardFeed(items, accent, only);
+                var isBlog = only == SyncshellFeedItemKind.Blog;
+                SpheneUI.Layout.SectionCard(() =>
+                        DrawCommunityCardFeed(items, accent, only),
+                    title: isBlog ? "Latest Chronicles" : "Latest news",
+                    icon: isBlog ? FontAwesomeIcon.BookOpen : FontAwesomeIcon.Bullhorn,
+                    accentColor: accent);
                 break;
         }
 
@@ -5361,50 +5348,54 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     };
 
     /// <summary>
-    /// The compact hub banner · a purple-magenta gradient card carrying the
-    /// Community identity only: icon plate, display title and a one-line
-    /// subtitle. The right third is the dedicated visual area reserved for
-    /// a future custom banner image - until then a restrained gradient with
-    /// a faint watermark glyph fills it. No statistics, no tabs, no feed
-    /// artwork: those live below the banner / in the sidebar.
+    /// The community banner · a pane-wide bleed like the profile heroes,
+    /// but restrained: a faint accent wash dissolving into the window
+    /// surface instead of a gradient card. Identity (icon plate, title,
+    /// subtitle) stays aligned with the padded content; the counters and
+    /// affordances the removed sidebar cards held sit on a dark
+    /// translucent chip docked to the right edge - it hides rather than
+    /// colliding with the identity block on very narrow windows.
     /// </summary>
-    private static void DrawCommunityBanner(Vector4 accent)
+    private void DrawCommunityBanner(Vector4 accent,
+        SpheneUI.Profile.HeroHost host)
     {
         var scale = SpheneUI.Scale;
         var dl = ImGui.GetWindowDrawList();
         var min = ImGui.GetCursorScreenPos();
         var w = SpheneUI.Controls.BoundedAvailX();
-        var pad = 14f * scale;
+        var pad = SpheneUI.Spacing.PagePadding.Scaled;
         var lineH = ImGui.GetTextLineHeight();
-        var radius = 12f * scale;
         var plate = 32f * scale;
 
         var bannerH = pad + plate + 6f * scale + lineH + pad;
-        var max = min + new Vector2(w, bannerH);
-        ImGui.Dummy(new Vector2(w, bannerH));
+        // The bleed starts at the pane's top edge, `pad` above the padded
+        // cursor - reserve only the height below the cursor or the flow
+        // would gain an extra pad of phantom space under the hairline.
+        ImGui.Dummy(new Vector2(w, bannerH - pad));
 
-        var surface = SpheneUI.Layout.NavRailBandColor();
+        // Full-bleed wash: window surface under a faint accent gradient
+        // that dissolves toward the bottom - the hero language without
+        // card chrome.
+        var bMin = host.Min;
+        var bMax = new Vector2(host.Max.X, host.Min.Y + bannerH);
+        var surface = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
         var (deep, hi) = SpheneUI.Colors.AccentRamp(accent);
-        var magenta = SpheneUI.ColorUtils.LerpColor(hi, SpheneUI.Palette.SpheneMagenta, 0.5f);
-        dl.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(surface), radius);
-        SpheneUI.Media.FillRoundedGradient(dl, min, max,
-            SpheneUI.ColorUtils.WithAlpha(deep, 0.45f),
-            SpheneUI.ColorUtils.WithAlpha(magenta, 0.60f),
-            SpheneUI.ColorUtils.WithAlpha(surface, 0.94f),
-            SpheneUI.ColorUtils.WithAlpha(deep, 0.78f), radius);
+        SpheneUI.Media.FillRoundedGradient(dl, bMin, bMax,
+            SpheneUI.ColorUtils.WithAlpha(deep, 0.16f),
+            SpheneUI.ColorUtils.WithAlpha(hi, 0.09f),
+            surface, surface, 0f);
+        var fadeH = bannerH * 0.45f;
+        SpheneUI.Media.FillRoundedGradient(dl,
+            new Vector2(bMin.X, bMax.Y - fadeH), bMax,
+            SpheneUI.ColorUtils.WithAlpha(surface, 0f),
+            SpheneUI.ColorUtils.WithAlpha(surface, 0f),
+            surface, surface, 0f);
+        dl.AddLine(new Vector2(bMin.X, bMax.Y), bMax,
+            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                SpheneUI.Colors.Border, 0.4f)));
 
-        dl.PushClipRect(min, max, true);
-        var glyph = FontAwesomeIcon.Users.ToIconString();
-        dl.AddText(UiBuilder.IconFont, bannerH * 2.0f,
-            new Vector2(max.X - bannerH * 2.1f, max.Y - bannerH * 1.9f),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(hi, 0.10f)),
-            glyph);
-        dl.PopClipRect();
-        dl.AddRect(min, max, SpheneUI.ColorUtils.ToU32(
-            SpheneUI.ColorUtils.WithAlpha(hi, 0.28f)), radius);
-
-        var tx = min.X + pad;
-        var ty = min.Y + pad;
+        var tx = min.X;
+        var ty = min.Y;
         SpheneUI.Layout.SlotIcon(dl, new Vector2(tx, ty), plate,
             FontAwesomeIcon.Users, new Vector4(1f, 1f, 1f, 0.92f));
         using (SpheneUI.DisplayFont.Push())
@@ -5415,8 +5406,72 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         ty += plate + 6f * scale;
         dl.AddText(new Vector2(tx, ty),
-            SpheneUI.ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.82f)),
+            SpheneUI.ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.72f)),
             "News, events, photos and Chronicles from your joined and followed syncshells - all in one place.");
+
+        // Stats + affordances on a dark translucent chip, right-docked.
+        var (shells, members, online) = CommunityStats();
+        var stats = $"{shells} communities · {members} members · {online} online";
+        var statsW = ImGui.CalcTextSize(stats).X;
+        var glyph = FontAwesomeIcon.Users.ToIconString();
+        float glyphW;
+        using (SpheneUI.Icons.PushFont())
+        {
+            glyphW = ImGui.CalcTextSize(glyph).X;
+        }
+        var frameH = ImGui.GetFrameHeight();
+        var gap = 8f * scale;
+        var chipPad = 6f * scale;
+        var zoneW = glyphW + gap + statsW + gap + frameH + gap + frameH;
+        var chipW = zoneW + chipPad * 2f;
+        var chipH = frameH + chipPad * 2f;
+        var chipMin = new Vector2(bMax.X - pad - chipW,
+            bMin.Y + (bannerH - chipH) * 0.5f);
+        var chipMax = chipMin + new Vector2(chipW, chipH);
+        var identityRight = tx + plate + 10f * scale
+            + ImGui.CalcTextSize("Community").X;
+        if (chipMin.X > identityRight + 16f * scale)
+        {
+            var chipRadius = chipH * 0.5f;
+            dl.AddRectFilled(chipMin, chipMax, SpheneUI.ColorUtils.ToU32(
+                SpheneUI.ColorUtils.WithAlpha(Vector4.Zero, 0.34f)), chipRadius);
+            dl.AddRect(chipMin, chipMax, SpheneUI.ColorUtils.ToU32(
+                SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.Border, 0.35f)),
+                chipRadius);
+
+            var zoneX = chipMin.X + chipPad;
+            var cy = chipMin.Y + chipH * 0.5f;
+            using (SpheneUI.Icons.PushFont())
+            {
+                dl.AddText(new Vector2(zoneX, cy - lineH * 0.5f),
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
+                        hi, 0.85f)), glyph);
+            }
+            dl.AddText(new Vector2(zoneX + glyphW + gap, cy - lineH * 0.5f),
+                SpheneUI.ColorUtils.ToU32(new Vector4(1f, 1f, 1f, 0.82f)), stats);
+
+            var btnX = zoneX + glyphW + gap + statsW + gap;
+            var btnY = cy - frameH * 0.5f;
+            ImGui.SetCursorScreenPos(new Vector2(btnX, btnY));
+            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(
+                _communityFeed.IsLoading))
+            {
+                if (SpheneUI.Icons.Button(FontAwesomeIcon.SyncAlt))
+                {
+                    _ = _communityFeed.Refresh();
+                }
+            }
+            SpheneUI.AttachTooltip("Refresh feed");
+            ImGui.SetCursorScreenPos(new Vector2(btnX + frameH + gap, btnY));
+            if (SpheneUI.Icons.Button(FontAwesomeIcon.Compass))
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.Syncshells, null, null));
+            }
+            SpheneUI.AttachTooltip("Discover communities");
+            // The dummy above owns the flow - park the cursor back below
+            // the banner so the next element never lands inside it.
+            ImGui.SetCursorScreenPos(min + new Vector2(0f, bannerH));
+        }
     }
 
     /// <summary>
@@ -5532,179 +5587,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         return (_pairManager.GroupPairs.Count, members, online);
     }
 
-    /// <summary>The right column: a "Your communities" information card
-    /// with the real stats and a manual refresh, then a compact quick-links
-    /// card of existing navigation targets.</summary>
-    private void DrawCommunitySidebar(Vector4 accent)
-    {
-        var (shells, members, online) = CommunityStats();
-        SpheneUI.Layout.SectionCard(() =>
-        {
-            DrawCommunityStatRow(FontAwesomeIcon.Users, "Communities", shells, accent);
-            DrawCommunityHairline();
-            DrawCommunityStatRow(FontAwesomeIcon.UserFriends, "Members", members, accent);
-            DrawCommunityHairline();
-            DrawCommunityStatRow(FontAwesomeIcon.Signal, "Online", online, accent);
-            DrawCommunityHairline();
-            DrawCommunityLinkRow(FontAwesomeIcon.SyncAlt, "Refresh feed", accent,
-                onClick: () => _ = _communityFeed.Refresh(),
-                disabled: _communityFeed.IsLoading);
-        }, title: "Your communities", accentColor: accent,
-            description: "Across your joined and followed syncshells", id: "community-stats");
-
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-
-        SpheneUI.Layout.SectionCard(() =>
-        {
-            DrawCommunityLinkRow(FontAwesomeIcon.CalendarAlt, "Upcoming events", accent,
-                onClick: () => NavigateTo(new HubLocation(SpheneHubPage.Community, null, null, 3)));
-            DrawCommunityLinkRow(FontAwesomeIcon.Compass, "Discover communities", accent,
-                onClick: () => NavigateTo(new HubLocation(SpheneHubPage.Syncshells, null, null)));
-        }, title: "Quick links", accentColor: accent, id: "community-links");
-    }
-
-    /// <summary>One stat row inside the sidebar card · tinted icon, muted
-    /// label and the value docked flush at the card edge.</summary>
-    private static void DrawCommunityStatRow(FontAwesomeIcon icon, string label,
-        int value, Vector4 accent)
-    {
-        var scale = SpheneUI.Scale;
-        SpheneUI.Icons.Icon(icon, SpheneUI.ColorUtils.WithAlpha(accent, 0.85f));
-        ImGui.SameLine(0, 8f * scale);
-        SpheneUI.Text.Muted(label);
-        var text = $"{value}";
-        SpheneUI.Controls.DockToCardEdge(ImGui.CalcTextSize(text).X);
-        SpheneUI.Text.Colored(text, SpheneUI.Colors.TextPrimary);
-    }
-
-    /// <summary>Inset hairline separating sidebar rows.</summary>
-    private static void DrawCommunityHairline()
-    {
-        var dl = ImGui.GetWindowDrawList();
-        var pos = ImGui.GetCursorScreenPos();
-        var w = SpheneUI.Controls.BoundedAvailX();
-        dl.AddLine(pos, pos + new Vector2(w, 0f),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                SpheneUI.Colors.Border, 0.5f)));
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-    }
-
-    /// <summary>Clickable sidebar row · icon + label + a chevron that fades
-    /// in on hover, in the same accent hover language as feature tiles.</summary>
-    private static void DrawCommunityLinkRow(FontAwesomeIcon icon, string label,
-        Vector4 accent, Action onClick, bool disabled = false)
-    {
-        var scale = SpheneUI.Scale;
-        var dl = ImGui.GetWindowDrawList();
-        var w = SpheneUI.Controls.BoundedAvailX();
-        var lineH = ImGui.GetTextLineHeight();
-        var h = lineH + 8f * scale;
-
-        ImGui.PushID($"commlink-{label}");
-        var clicked = ImGui.InvisibleButton("##row", new Vector2(w, h));
-        var hovered = ImGui.IsItemHovered() && !disabled;
-        ImGui.PopID();
-        var min = ImGui.GetItemRectMin();
-        var max = ImGui.GetItemRectMax();
-
-        if (hovered)
-        {
-            dl.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(
-                SpheneUI.ColorUtils.WithAlpha(accent, 0.08f)), 6f * scale);
-        }
-
-        var tx = min.X + 6f * scale;
-        var ty = min.Y + (h - lineH) * 0.5f;
-        var glyph = icon.ToIconString();
-        float iconW;
-        using (SpheneUI.Icons.PushFont())
-        {
-            iconW = ImGui.CalcTextSize(glyph).X;
-        }
-        var labelColor = disabled
-            ? SpheneUI.Colors.TextMuted
-            : hovered ? SpheneUI.Colors.TextPrimary : SpheneUI.Colors.TextSecondary;
-        using (SpheneUI.Icons.PushFont())
-        {
-            dl.AddText(new Vector2(tx, ty),
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                    accent, disabled ? 0.35f : 0.85f)), glyph);
-        }
-        dl.AddText(new Vector2(tx + iconW + 8f * scale, ty),
-            SpheneUI.ColorUtils.ToU32(labelColor), label);
-
-        var chevron = FontAwesomeIcon.ChevronRight.ToIconString();
-        float chevronW;
-        using (SpheneUI.Icons.PushFont())
-        {
-            chevronW = ImGui.CalcTextSize(chevron).X;
-        }
-        using (SpheneUI.Icons.PushFont())
-        {
-            dl.AddText(new Vector2(max.X - 6f * scale - chevronW, ty),
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                    accent, hovered ? 0.9f : 0.3f)), chevron);
-        }
-
-        if (hovered)
-        {
-            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-        }
-        if (clicked && !disabled)
-        {
-            onClick();
-        }
-    }
-
-    /// <summary>The collapsed-width stand-in for the sidebar · one slim
-    /// strip with the same real stats and a refresh affordance so the
-    /// information stays accessible when the two-column layout cannot fit.</summary>
-    private void DrawCommunityStatsStrip(Vector4 accent)
-    {
-        var scale = SpheneUI.Scale;
-        var dl = ImGui.GetWindowDrawList();
-        var min = ImGui.GetCursorScreenPos();
-        var w = SpheneUI.Controls.BoundedAvailX();
-        var h = ImGui.GetFrameHeight() + 10f * scale;
-        var max = min + new Vector2(w, h);
-        ImGui.Dummy(new Vector2(w, h));
-
-        var (shells, members, online) = CommunityStats();
-        var hi = SpheneUI.Colors.AccentRamp(accent).Hi;
-        dl.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(
-            SpheneUI.Layout.NavRailBandColor()), 8f * scale);
-        dl.AddRect(min, max, SpheneUI.ColorUtils.ToU32(
-            SpheneUI.ColorUtils.WithAlpha(SpheneUI.Colors.Border, 0.4f)), 8f * scale);
-
-        var tx = min.X + 12f * scale;
-        var ty = min.Y + (h - ImGui.GetTextLineHeight()) * 0.5f;
-        using (SpheneUI.Icons.PushFont())
-        {
-            var glyph = FontAwesomeIcon.Users.ToIconString();
-            dl.AddText(new Vector2(tx, ty),
-                SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(hi, 0.85f)), glyph);
-            tx += ImGui.CalcTextSize(glyph).X + 8f * scale;
-        }
-        dl.AddText(new Vector2(tx, ty),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextSecondary),
-            $"{shells} communities · {members} members · {online} online");
-
-        var frameH = ImGui.GetFrameHeight();
-        ImGui.SetCursorScreenPos(new Vector2(max.X - 10f * scale - frameH,
-            min.Y + (h - frameH) * 0.5f));
-        using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_communityFeed.IsLoading))
-        {
-            if (SpheneUI.Icons.Button(FontAwesomeIcon.SyncAlt))
-            {
-                _ = _communityFeed.Refresh();
-            }
-        }
-        if (ImGui.IsItemHovered())
-        {
-            SpheneUI.AttachTooltip("Refresh feed");
-        }
-    }
-
     /// <summary>
     /// "Highlights" strip on Overview - up to three compact media tiles the
     /// feed payload honestly supports: the next non-cancelled upcoming
@@ -5734,136 +5616,41 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
         }
 
-        List<(SyncshellCommunityFeedItemDto Item, string Badge)> tiles = [];
-        if (nextEvent != null) tiles.Add((nextEvent, "Upcoming event"));
-        if (latestNews != null) tiles.Add((latestNews, "Latest news"));
-        if (latestPhoto != null) tiles.Add((latestPhoto, "Latest photo"));
-        if (tiles.Count == 0)
+        List<(SyncshellCommunityFeedItemDto Item, string Slot)> rows = [];
+        if (nextEvent != null) rows.Add((nextEvent, "Upcoming event"));
+        if (latestNews != null) rows.Add((latestNews, "Latest news"));
+        if (latestPhoto != null) rows.Add((latestPhoto, "Latest photo"));
+        if (rows.Count == 0)
         {
             return;
         }
 
-        SpheneUI.Text.SectionHeader("Highlights", icon: FontAwesomeIcon.Star, accent: accent);
-        SpheneUI.Layout.CardGrid(tiles, 200f * SpheneUI.Scale,
-            (tile, _) => DrawCommunityHighlightTile(tile.Item, tile.Badge));
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-    }
-
-    /// <summary>One highlight tile · cover media (real thumbnail or a
-    /// kind-tinted fallback fill with a faint glyph) with the slot badge pinned to its
-    /// top-left corner, title and provenance meta below. Click deep-links
-    /// into the owning shell.</summary>
-    private void DrawCommunityHighlightTile(SyncshellCommunityFeedItemDto item,
-        string badge)
-    {
-        var scale = SpheneUI.Scale;
-        var dl = ImGui.GetWindowDrawList();
-        var w = SpheneUI.Controls.BoundedAvailX();
-        var lineH = ImGui.GetTextLineHeight();
-        var mediaH = 92f * scale;
-        var pad = 10f * scale;
-        var h = mediaH + pad * 1.5f + lineH * 2f + 4f * scale;
-        var (kindColor, kindIcon) = CommunityFeedStyle(item.Kind);
-        var shellAccent = SyncshellCommunityView.ParseAccent(item.AccentColor) ?? kindColor;
-        var radius = 10f * scale;
-
-        ImGui.PushID($"commhl-{item.Kind}-{item.GroupGID}-{item.Id}");
-        var clicked = ImGui.InvisibleButton("##tile", new Vector2(w, h));
-        var hovered = ImGui.IsItemHovered();
-        ImGui.PopID();
-        var min = ImGui.GetItemRectMin();
-        var max = ImGui.GetItemRectMax();
-
-        dl.AddRectFilled(min, max, SpheneUI.ColorUtils.ToU32(
-            SpheneUI.Layout.NavRailBandColor()), radius);
-        var lift = SpheneUI.Fx.HoverLiftT(
-            ImGui.GetID($"##commhl-lift-{item.GroupGID}-{item.Id}"), min, max);
-        SpheneUI.Fx.HoverLift(dl, min, max, lift, radius, shellAccent);
-        dl.AddRect(min, max, SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-            hovered ? shellAccent : SpheneUI.Colors.Border, hovered ? 0.7f : 0.4f)), radius);
-
-        var mediaMax = new Vector2(max.X, min.Y + mediaH);
-        var thumb = FeedThumb(item);
-        if (thumb != null)
+        // Same identity-first rows as the feed below - the slot label
+        // rides the context line instead of a badge overlay.
+        SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Media.ImageInRect(dl, thumb, min, mediaMax, ImageFit.Cover,
-                rounding: radius, corners: ImDrawFlags.RoundCornersTop,
-                zoom: 1f + 0.06f * lift);
-        }
-        else
-        {
-            // No art · a restrained kind-tinted fill + faint glyph, the
-            // same fallback language as the photos grid.
-            dl.AddRectFilled(min, mediaMax, SpheneUI.ColorUtils.ToU32(
-                SpheneUI.ColorUtils.WithAlpha(kindColor, 0.12f)), radius,
-                ImDrawFlags.RoundCornersTop);
-            var glyph = kindIcon.ToIconString();
-            var glyphH = lineH * 2.4f;
-            float glyphW;
-            using (ImRaii.PushFont(UiBuilder.IconFont))
+            for (var i = 0; i < rows.Count; i++)
             {
-                glyphW = ImGui.CalcTextSize(glyph).X * (glyphH / ImGui.GetTextLineHeight());
+                if (i > 0)
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
+                var (item, slot) = rows[i];
+                if (FeedItemRow.Draw($"commhl-{item.Kind}-{item.GroupGID}-{item.Id}",
+                        item, "hub:", fallbackAccent: accent, extraMeta: slot,
+                        onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                        shellAvatarFor: ShellAvatar))
+                {
+                    NavigateFeedItem(item);
+                }
             }
-            dl.AddText(UiBuilder.IconFont, glyphH,
-                new Vector2(min.X + (w - glyphW) * 0.5f,
-                    min.Y + (mediaH - glyphH) * 0.5f),
-                SpheneUI.ColorUtils.ToU32(
-                    SpheneUI.ColorUtils.WithAlpha(kindColor, 0.55f)), glyph);
-        }
-
-        var scrim = SpheneUI.ColorUtils.ToU32(
-            SpheneUI.ColorUtils.WithAlpha(SpheneUI.Layout.NavRailBandColor(), 0.9f));
-        dl.AddRectFilledMultiColor(
-            new Vector2(min.X, mediaMax.Y - mediaH * 0.45f), mediaMax, 0u, 0u, scrim, scrim);
-
-        var badgeW = ImGui.CalcTextSize(badge).X + 12f * scale;
-        var badgeH = lineH * 1.25f;
-        var bMin = min + new Vector2(6f * scale, 6f * scale);
-        dl.AddRectFilled(bMin, bMin + new Vector2(badgeW, badgeH),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(kindColor, 0.92f)),
-            badgeH * 0.5f);
-        dl.AddText(bMin + new Vector2(6f * scale, (badgeH - lineH) * 0.5f),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.ContrastTextColor(kindColor)),
-            badge);
-
-        var tx = min.X + pad;
-        var ty = mediaMax.Y + pad * 0.5f;
-        dl.PushClipRect(new Vector2(tx, ty),
-            new Vector2(max.X - pad, max.Y - pad * 0.5f), true);
-        dl.AddText(new Vector2(tx, ty),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextPrimary),
-            SpheneUI.Text.Ellipsize(item.Title, max.X - pad - tx));
-        dl.AddText(new Vector2(tx, ty + lineH + 2f * scale),
-            SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted),
-            SpheneUI.Text.Ellipsize(FeedMeta(item), max.X - pad - tx));
-        dl.PopClipRect();
-
-        if (hovered)
-        {
-            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-        }
-        if (clicked)
-        {
-            NavigateFeedItem(item);
-        }
+        }, title: "Highlights", icon: FontAwesomeIcon.Star, accentColor: accent);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
-    /// <summary>Badge color and kind glyph per feed kind · the shared
-    /// palette of feed cards and highlight tiles.</summary>
-    private static (Vector4 Color, FontAwesomeIcon Icon) CommunityFeedStyle(
-        SyncshellFeedItemKind kind) => kind switch
-    {
-        SyncshellFeedItemKind.News => (SpheneUI.Palette.EtherealPurple, FontAwesomeIcon.Bullhorn),
-        SyncshellFeedItemKind.Photo => (SpheneUI.Palette.CrystalBlue, FontAwesomeIcon.Image),
-        SyncshellFeedItemKind.Event => (SpheneUI.Palette.SpheneGold, FontAwesomeIcon.CalendarAlt),
-        SyncshellFeedItemKind.Blog => (SpheneUI.Palette.SpheneMagenta, FontAwesomeIcon.BookOpen),
-        SyncshellFeedItemKind.Comment => (SpheneUI.Palette.NetworkActive, FontAwesomeIcon.CommentDots),
-        SyncshellFeedItemKind.Reaction => (SpheneUI.Palette.NetworkActive, FontAwesomeIcon.Heart),
-        _ => (SpheneUI.Palette.NetworkActive, FontAwesomeIcon.CalendarCheck),
-    };
-
-    /// <summary>Unified card feed - Overview (all kinds) plus the News and
-    /// Blog tabs, which reuse the same card language.</summary>
+    /// <summary>Unified feed list - Overview (all kinds) plus the News and
+    /// Blog tabs, in the same compact identity-first row language as the
+    /// Home community feed.</summary>
     private void DrawCommunityCardFeed(
         IReadOnlyList<SyncshellCommunityFeedItemDto> items, Vector4 accent,
         SyncshellFeedItemKind? only)
@@ -5875,7 +5662,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 continue;
             }
-            DrawCommunityFeedCard(item, accent);
+            if (any)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
+            if (FeedItemRow.Draw($"commfeed-{item.Kind}-{item.Id}-{item.ActorUid}",
+                    item, "hub:", fallbackAccent: accent,
+                    onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                    shellAvatarFor: ShellAvatar))
+            {
+                NavigateFeedItem(item);
+            }
             any = true;
         }
         if (any)
@@ -5902,29 +5699,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 "Nothing in this tab", "News, photos and events from your joined and followed syncshells land here."),
         };
         SpheneUI.Layout.EmptyState(icon, title, hint, accent: accent);
-    }
-
-    /// <summary>One feed entry as a media card - badge, kind icon and
-    /// provenance meta map the item kind; the click deep-links.</summary>
-    private void DrawCommunityFeedCard(SyncshellCommunityFeedItemDto item, Vector4 accent)
-    {
-        var badge = item.Kind == SyncshellFeedItemKind.Rsvp ? "RSVP"
-            : item.Kind == SyncshellFeedItemKind.Blog ? "Chronicle"
-            : item.Kind.ToString();
-        var (badgeColor, fallbackIcon) = CommunityFeedStyle(item.Kind);
-        // Title-less Chronicles show their body snippet as the title line.
-        var cardTitle = string.IsNullOrWhiteSpace(item.Title)
-            ? item.Snippet ?? string.Empty : item.Title;
-        // The leading actor segment is split off as its own hit target so a
-        // name click opens the profile while the rest of the card deep-links.
-        var actorLinkable = item.ActorUid != null
-            && !string.IsNullOrWhiteSpace(item.ActorDisplayName);
-        DrawNewsCard(badge, badgeColor, cardTitle, item.Snippet, item.TimestampUtc,
-            FeedThumb(item), accent, () => NavigateFeedItem(item), fallbackIcon,
-            actorLinkable ? FeedMetaTail(item) : FeedMeta(item),
-            id: $"{item.GroupGID}-{item.Id}",
-            actorName: actorLinkable ? item.ActorDisplayName : null,
-            actorUid: item.ActorUid, onActorClick: NavigateToAuthor);
     }
 
     /// <summary>
@@ -6016,9 +5790,49 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             dl.AddText(new Vector2(min.X, metaY),
                 SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextPrimary),
                 SpheneUI.Text.Ellipsize(item.Title, tile));
-            dl.AddText(new Vector2(min.X, metaY + lineH),
+
+            // Identity meta: the author's avatar ahead of the
+            // "actor · shell · when" line - resolved through the same
+            // caches the feed rows use (actor profile first, shell avatar
+            // otherwise).
+            var avatarD = lineH;
+            var metaX = min.X;
+            IDalamudTextureWrap? avatar = null;
+            if (item.ActorUid != null
+                && ProfileForUid(item.ActorUid) is { } actorProfile
+                && !string.IsNullOrEmpty(actorProfile.Base64ProfilePicture))
+            {
+                avatar = SpheneUI.Media.Texture(
+                    $"hub:-avatar:{item.ActorUid}:"
+                        + SyncshellCommunityView.MediaVersion(null, actorProfile.Base64ProfilePicture),
+                    actorProfile.ImageData.Value);
+            }
+            if (avatar == null && item.GroupGID != null)
+            {
+                avatar = ShellAvatar(item.GroupGID);
+            }
+            var avatarPos = new Vector2(min.X, metaY + lineH);
+            if (avatar != null)
+            {
+                dl.AddImageRounded(avatar.Handle, avatarPos,
+                    avatarPos + new Vector2(avatarD), Vector2.Zero, Vector2.One,
+                    SpheneUI.ColorUtils.ToU32(Vector4.One), avatarD * 0.5f);
+                dl.AddCircle(avatarPos + new Vector2(avatarD * 0.5f),
+                    avatarD * 0.5f - 0.5f,
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.Border));
+            }
+            else
+            {
+                SpheneUI.Media.PlaceholderInRect(dl, avatarPos,
+                    avatarPos + new Vector2(avatarD), avatarD * 0.5f,
+                    border: true,
+                    icon: item.ActorUid != null
+                        ? FontAwesomeIcon.User : FontAwesomeIcon.Users);
+            }
+            metaX += avatarD + 5f * scale;
+            dl.AddText(new Vector2(metaX, metaY + lineH),
                 SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted),
-                SpheneUI.Text.Ellipsize(FeedMeta(item), tile));
+                SpheneUI.Text.Ellipsize(FeedMeta(item), min.X + tile - metaX));
             dl.PopClipRect();
 
             if (hovered)
@@ -6074,15 +5888,22 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
 
         events.Sort(static (a, b) => a.TimestampUtc.CompareTo(b.TimestampUtc));
+        var any = false;
         foreach (var item in events)
         {
-            var evAccent = SyncshellCommunityView.ParseAccent(item.AccentColor) ?? accent;
-            if (EventCard.Draw($"commev-{item.GroupGID}-{item.Id}", CommunityFeedEvent(item),
-                    evAccent, CommunityFeedShellName(item)))
+            if (any)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
+            if (FeedItemRow.Draw($"commev-{item.GroupGID}-{item.Id}",
+                    item, "hub:",
+                    fallbackAccent: SyncshellCommunityView.ParseAccent(item.AccentColor) ?? accent,
+                    onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                    shellAvatarFor: ShellAvatar))
             {
                 NavigateFeedItem(item);
             }
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            any = true;
         }
     }
 
@@ -6099,13 +5920,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 continue;
             }
+            if (any)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
             if (FeedItemRow.Draw($"commact-{item.Kind}-{item.Id}-{item.ActorUid}",
                     item, "hub:", fallbackAccent: accent,
-                    onActorClick: NavigateToAuthor))
+                    onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                    shellAvatarFor: ShellAvatar))
             {
                 NavigateFeedItem(item);
             }
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             any = true;
         }
         if (any)
@@ -6146,13 +5971,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             () => NavigateTo(new HubLocation(SpheneHubPage.Syncshells, null, null)),
             FontAwesomeIcon.Compass, accent);
     }
-
-    /// <summary>Display-only event DTO for <see cref="EventCard"/> · feed
-    /// rows carry the real start time and location; unknown fields stay empty.</summary>
-    private static SyncshellEventDto CommunityFeedEvent(SyncshellCommunityFeedItemDto item)
-        => new(item.Id, item.GroupGID, item.Title, null, item.TimestampUtc,
-            null, item.Snippet, null, null, item.TimestampUtc, item.TimestampUtc,
-            PreviewMediaHash: item.ThumbnailMediaHash);
 
     private static string? CommunityFeedShellName(SyncshellCommunityFeedItemDto item)
     {
@@ -7581,63 +7399,66 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             });
         }
 
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        if (_friendActivityItems == null)
+        SpheneUI.Layout.SectionCard(() =>
         {
-            for (var i = 0; i < 3; i++)
+            if (_friendActivityItems == null)
             {
-                SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
-            }
-            return;
-        }
-        if (_friendActivityItems.Count == 0)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Bolt,
-                "No recent activity", "Posts and interactions will land here.");
-            return;
-        }
-        for (var i = 0; i < _friendActivityItems.Count; i++)
-        {
-            var item = _friendActivityItems[i];
-            if (FeedItemRow.Draw($"fact-{item.Kind}-{item.Id}-{i}", item,
-                    "hub:", fallbackAccent: accent,
-                    onActorClick: NavigateToAuthor))
-            {
-                NavigateFeedItem(item);
-            }
-            if (i + 1 < _friendActivityItems.Count)
-            {
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            }
-        }
-        if (_friendActivityCursor != null)
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_friendActivityLoading))
-            {
-                if (SpheneUI.Controls.Button("Load more##factmore"))
+                for (var i = 0; i < 3; i++)
                 {
-                    _friendActivityLoading = true;
-                    var uid = pair.UserData.UID;
-                    var cursor = _friendActivityCursor;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            var page = await _apiController.UserGetProfileActivity(
-                                uid, new FeedPageRequestDto(cursor)).ConfigureAwait(false);
-                            _friendActivityItems?.AddRange(page.Items);
-                            _friendActivityCursor = page.NextCursor;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogDebug(ex, "Failed to page profile activity for {UID}", uid);
-                        }
-                        finally { _friendActivityLoading = false; }
-                    });
+                    SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
+                }
+                return;
+            }
+            if (_friendActivityItems.Count == 0)
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.Bolt,
+                    "No recent activity", "Posts and interactions will land here.");
+                return;
+            }
+            for (var i = 0; i < _friendActivityItems.Count; i++)
+            {
+                var item = _friendActivityItems[i];
+                if (i > 0)
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
+                if (FeedItemRow.Draw($"fact-{item.Kind}-{item.Id}-{i}", item,
+                        "hub:", fallbackAccent: accent,
+                        onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                        shellAvatarFor: ShellAvatar))
+                {
+                    NavigateFeedItem(item);
                 }
             }
-        }
+            if (_friendActivityCursor != null)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_friendActivityLoading))
+                {
+                    if (SpheneUI.Controls.Button("Load more##factmore"))
+                    {
+                        _friendActivityLoading = true;
+                        var uid = pair.UserData.UID;
+                        var cursor = _friendActivityCursor;
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var page = await _apiController.UserGetProfileActivity(
+                                    uid, new FeedPageRequestDto(cursor)).ConfigureAwait(false);
+                                _friendActivityItems?.AddRange(page.Items);
+                                _friendActivityCursor = page.NextCursor;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogDebug(ex, "Failed to page profile activity for {UID}", uid);
+                            }
+                            finally { _friendActivityLoading = false; }
+                        });
+                    }
+                }
+            }
+        }, title: "Activity", icon: FontAwesomeIcon.Bolt, accentColor: accent);
     }
 
     /// <summary>The Profile sub-tab of the friend view · connection status and privacy hints.</summary>
@@ -8109,72 +7930,57 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var avatarBytes = profile.ImageData.Value;
         var avatarWrap = avatarBytes.Length == 0 ? null
             : SpheneUI.Media.Texture($"chronicle-author:{me.UID}", () => avatarBytes);
-        // Section header + sibling item surfaces - the Widget helper draws
-        // its own Surface, and draw-list channel splits cannot nest, so the
-        // per-item cards must live BESIDE it, not inside it.
-        SyncshellCommunityView.RailHeader("Chronicles", FontAwesomeIcon.FeatherAlt,
-            extras?.Blog?.Count, accent, null,
-            (FontAwesomeIcon.Plus, "Write a Chronicle", () =>
-            {
-                _chronicleComposer.OpenNew();
-                _blogComposer.ShowPreview = false;
-                _chronicleError = null;
-            }));
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        if (extras == null)
+        // One headed card owns the section; the reader no longer needs a
+        // sibling Surface - the card supplies the chrome and its body is
+        // channel-free (reader content draws without channel splits).
+        SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Layout.Surface(() =>
+            if (extras == null)
             {
                 SpheneUI.Fx.SkeletonLine();
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 SpheneUI.Fx.SkeletonLine(0.6f);
-            }, id: "own-chronicles-loading");
-        }
-        else if (extras.Blog is not { Count: > 0 } blog)
-        {
-            if (_openChronicle is { OwnerUid: var missingOwner }
-                && string.Equals(missingOwner, me.UID, StringComparison.Ordinal))
-            {
-                // A deep-link arrived but the post isn't in the list - deleted
-                // or hidden since the feed row was emitted.
-                _openChronicle = null;
-                _chronicleNotice = ChronicleMissingNotice;
             }
-            if (_chronicleNotice != null)
+            else if (extras.Blog is not { Count: > 0 } blog)
             {
-                SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            }
-            SpheneUI.Layout.Surface(() =>
-            {
+                if (_openChronicle is { OwnerUid: var missingOwner }
+                    && string.Equals(missingOwner, me.UID, StringComparison.Ordinal))
+                {
+                    // A deep-link arrived but the post isn't in the list - deleted
+                    // or hidden since the feed row was emitted.
+                    _openChronicle = null;
+                    _chronicleNotice = ChronicleMissingNotice;
+                }
+                if (_chronicleNotice != null)
+                {
+                    SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen, "No Chronicles yet",
                     "Nothing published yet - your first Chronicle could be a venue announcement, a story hook or just a hello.");
-            }, id: "own-chronicles-empty");
-        }
-        else
-        {
-            var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
-                && string.Equals(openOwner, me.UID, StringComparison.Ordinal)
-                ? blog.FirstOrDefault(b => b.Id == openId) : null;
-            if (openPost != null)
+            }
+            else
             {
-                // Detail reader: just this entry, discussion below - the
-                // excerpt toggle bounds the body, comments always show.
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
+                var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
+                    && string.Equals(openOwner, me.UID, StringComparison.Ordinal)
+                    ? blog.FirstOrDefault(b => b.Id == openId) : null;
+                if (openPost != null)
                 {
-                    _openChronicle = null;
-                }
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                var captured = openPost;
-                var ops = CommunityComposers.BuildBlogCommentOps(me.UID, captured.Id,
-                    () =>
+                    // Detail reader: just this entry, discussion below - the
+                    // excerpt toggle bounds the body, comments always show.
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
                     {
-                        _spheneProfileManager.InvalidateProfileExtras(me);
-                        return Task.CompletedTask;
-                    },
-                    uid => CommunityNameFor(uid, null, null), CommentProfile);
-                SpheneUI.Layout.Surface(() =>
-                {
+                        _openChronicle = null;
+                    }
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    var captured = openPost;
+                    var ops = CommunityComposers.BuildBlogCommentOps(me.UID, captured.Id,
+                        () =>
+                        {
+                            _spheneProfileManager.InvalidateProfileExtras(me);
+                            return Task.CompletedTask;
+                        },
+                        uid => CommunityNameFor(uid, null, null), ProfileForUid);
                     Sphene.UI.Chronicles.ChronicleReaderView.Draw(captured, me.UID,
                         OwnHeroName(), avatarWrap, accent,
                         _blogComments, ops, excerptLines: 8,
@@ -8199,47 +8005,55 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 SpheneUI.AttachTooltip("Delete Chronicle");
                             }
                         });
-                }, id: $"own-chronicle-{captured.Id}", border: true,
-                    accentColor: accent);
-            }
-            else
-            {
-                if (_openChronicle is { OwnerUid: var staleOwner }
-                    && string.Equals(staleOwner, me.UID, StringComparison.Ordinal))
-                {
-                    _openChronicle = null;
-                    _chronicleNotice = ChronicleMissingNotice;
                 }
-                if (_chronicleNotice != null)
+                else
                 {
-                    SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                }
-                for (var i = 0; i < blog.Count; i++)
-                {
-                    if (i > 0)
+                    if (_openChronicle is { OwnerUid: var staleOwner }
+                        && string.Equals(staleOwner, me.UID, StringComparison.Ordinal))
                     {
+                        _openChronicle = null;
+                        _chronicleNotice = ChronicleMissingNotice;
+                    }
+                    if (_chronicleNotice != null)
+                    {
+                        SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
                         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                     }
-                    var captured = blog[i];
-                    // Compact activity-feed row per entry - click opens the
-                    // dedicated reader with the full discussion below.
-                    var item = new SyncshellCommunityFeedItemDto(
-                        string.Empty, null, null, SyncshellFeedItemKind.Blog,
-                        captured.Id,
-                        string.IsNullOrWhiteSpace(captured.Title)
-                            ? "Untitled Chronicle" : captured.Title,
-                        null, captured.UpdatedAt,
-                        ActorDisplayName: OwnHeroName(),
-                        ThumbnailMediaHash: captured.CoverMediaHash);
-                    if (FeedItemRow.Draw($"own-chron-{captured.Id}", item,
-                            "chron:", accent, ChronicleRowMeta(captured)))
+                    for (var i = 0; i < blog.Count; i++)
                     {
-                        _openChronicle = (me.UID, captured.Id);
+                        if (i > 0)
+                        {
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                        }
+                        var captured = blog[i];
+                        // Compact activity-feed row per entry - click opens the
+                        // dedicated reader with the full discussion below.
+                        var item = new SyncshellCommunityFeedItemDto(
+                            string.Empty, null, null, SyncshellFeedItemKind.Blog,
+                            captured.Id,
+                            string.IsNullOrWhiteSpace(captured.Title)
+                                ? "Untitled Chronicle" : captured.Title,
+                            null, captured.UpdatedAt,
+                            ActorUid: me.UID,
+                            ActorDisplayName: OwnHeroName(),
+                            ThumbnailMediaHash: captured.CoverMediaHash);
+                        if (FeedItemRow.Draw($"own-chron-{captured.Id}", item,
+                                "chron:", accent, ChronicleRowMeta(captured),
+                                profileFor: ProfileForUid))
+                        {
+                            _openChronicle = (me.UID, captured.Id);
+                        }
                     }
                 }
             }
-        }
+        }, title: "Chronicles", icon: FontAwesomeIcon.FeatherAlt,
+            accentColor: accent, count: extras?.Blog?.Count,
+            actions: (FontAwesomeIcon.Plus, "Write a Chronicle", () =>
+            {
+                _chronicleComposer.OpenNew();
+                _blogComposer.ShowPreview = false;
+                _chronicleError = null;
+            }));
         _chronicleDeleteConfirm.Draw("own-chronicle-delete", "Delete Chronicle?",
             "This permanently removes the Chronicle, its comments and reactions.",
             confirmLabel: "Delete", danger: true);
@@ -8290,74 +8104,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var avatarBytes = fProfile.ImageData.Value;
         var avatarWrap = avatarBytes.Length == 0 ? null
             : SpheneUI.Media.Texture($"chronicle-author:{pair.UserData.UID}", () => avatarBytes);
-        // Header + sibling cards - see DrawOwnProfileBlog: channel splits
-        // cannot nest, so item surfaces must not sit inside a Widget.
-        SyncshellCommunityView.RailHeader("Chronicles", FontAwesomeIcon.FeatherAlt,
-            extras?.Blog?.Count, accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        if (extras == null)
+        // One headed card owns the section - same structure as the own
+        // profile's Chronicles card (list, reader and states share the body).
+        SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Layout.Surface(() =>
+            if (extras == null)
             {
                 SpheneUI.Fx.SkeletonLine();
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 SpheneUI.Fx.SkeletonLine(0.6f);
-            }, id: "friend-chronicles-loading");
-        }
-        else if (extras.Blog is not { Count: > 0 } blog)
-        {
-            if (_openChronicle is { OwnerUid: var missingOwner }
-                && string.Equals(missingOwner, pair.UserData.UID, StringComparison.Ordinal))
-            {
-                _openChronicle = null;
-                _chronicleNotice = ChronicleMissingNotice;
             }
-            if (_chronicleNotice != null)
+            else if (extras.Blog is not { Count: > 0 } blog)
             {
-                SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            }
-            SpheneUI.Layout.Surface(() =>
-            {
-                SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen, "No Chronicles",
-                    "Chronicles shared on this profile will land here.");
-            }, id: "friend-chronicles-empty");
-        }
-        else
-        {
-            var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
-                && string.Equals(openOwner, pair.UserData.UID, StringComparison.Ordinal)
-                ? blog.FirstOrDefault(b => b.Id == openId) : null;
-            if (openPost != null)
-            {
-                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
-                {
-                    _openChronicle = null;
-                }
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                var post = openPost;
-                var ops = CommunityComposers.BuildBlogCommentOps(pair.UserData.UID, post.Id,
-                    () =>
-                    {
-                        _spheneProfileManager.InvalidateProfileExtras(pair.UserData);
-                        return Task.CompletedTask;
-                    },
-                    uid => CommunityNameFor(uid, null, null), CommentProfile);
-                SpheneUI.Layout.Surface(() =>
-                {
-                    Sphene.UI.Chronicles.ChronicleReaderView.Draw(post,
-                        pair.UserData.UID, SyncshellCommunityView.HumanName(pair.UserData)
-                            ?? "Unknown user", avatarWrap, accent,
-                        _blogComments, ops, excerptLines: 8,
-                        isExpanded: id => _expandedChronicles.Contains(id),
-                        toggleExpanded: id => ToggleChronicleExpanded(id));
-                }, id: $"friend-chronicle-{post.Id}", border: true,
-                    accentColor: accent);
-            }
-            else
-            {
-                if (_openChronicle is { OwnerUid: var staleOwner }
-                    && string.Equals(staleOwner, pair.UserData.UID, StringComparison.Ordinal))
+                if (_openChronicle is { OwnerUid: var missingOwner }
+                    && string.Equals(missingOwner, pair.UserData.UID, StringComparison.Ordinal))
                 {
                     _openChronicle = null;
                     _chronicleNotice = ChronicleMissingNotice;
@@ -8367,43 +8127,90 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
                     SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 }
-                for (var i = 0; i < blog.Count; i++)
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen, "No Chronicles",
+                    "Chronicles shared on this profile will land here.");
+            }
+            else
+            {
+                var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
+                    && string.Equals(openOwner, pair.UserData.UID, StringComparison.Ordinal)
+                    ? blog.FirstOrDefault(b => b.Id == openId) : null;
+                if (openPost != null)
                 {
-                    if (i > 0)
+                    if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
                     {
+                        _openChronicle = null;
+                    }
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    var post = openPost;
+                    var ops = CommunityComposers.BuildBlogCommentOps(pair.UserData.UID, post.Id,
+                        () =>
+                        {
+                            _spheneProfileManager.InvalidateProfileExtras(pair.UserData);
+                            return Task.CompletedTask;
+                        },
+                        uid => CommunityNameFor(uid, null, null), ProfileForUid);
+                    Sphene.UI.Chronicles.ChronicleReaderView.Draw(post,
+                        pair.UserData.UID, SyncshellCommunityView.HumanName(pair.UserData)
+                            ?? "Unknown user", avatarWrap, accent,
+                        _blogComments, ops, excerptLines: 8,
+                        isExpanded: id => _expandedChronicles.Contains(id),
+                        toggleExpanded: id => ToggleChronicleExpanded(id));
+                }
+                else
+                {
+                    if (_openChronicle is { OwnerUid: var staleOwner }
+                        && string.Equals(staleOwner, pair.UserData.UID, StringComparison.Ordinal))
+                    {
+                        _openChronicle = null;
+                        _chronicleNotice = ChronicleMissingNotice;
+                    }
+                    if (_chronicleNotice != null)
+                    {
+                        SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
                         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                     }
-                    var post = blog[i];
-                    var item = new SyncshellCommunityFeedItemDto(
-                        string.Empty, null, null, SyncshellFeedItemKind.Blog,
-                        post.Id,
-                        string.IsNullOrWhiteSpace(post.Title)
-                            ? "Untitled Chronicle" : post.Title,
-                        null, post.UpdatedAt,
-                        ActorDisplayName: SyncshellCommunityView.HumanName(pair.UserData)
-                            ?? "Unknown user",
-                        ThumbnailMediaHash: post.CoverMediaHash);
-                    if (FeedItemRow.Draw($"friend-chron-{post.Id}", item,
-                            "chron:", accent, ChronicleRowMeta(post)))
+                    for (var i = 0; i < blog.Count; i++)
                     {
-                        _openChronicle = (pair.UserData.UID, post.Id);
-                        _ = Task.Run(async () =>
+                        if (i > 0)
                         {
-                            try
+                            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                        }
+                        var post = blog[i];
+                        var item = new SyncshellCommunityFeedItemDto(
+                            string.Empty, null, null, SyncshellFeedItemKind.Blog,
+                            post.Id,
+                            string.IsNullOrWhiteSpace(post.Title)
+                                ? "Untitled Chronicle" : post.Title,
+                            null, post.UpdatedAt,
+                            ActorUid: pair.UserData.UID,
+                            ActorDisplayName: SyncshellCommunityView.HumanName(pair.UserData)
+                                ?? "Unknown user",
+                            ThumbnailMediaHash: post.CoverMediaHash);
+                        if (FeedItemRow.Draw($"friend-chron-{post.Id}", item,
+                                "chron:", accent, ChronicleRowMeta(post),
+                                profileFor: ProfileForUid))
+                        {
+                            _openChronicle = (pair.UserData.UID, post.Id);
+                            _ = Task.Run(async () =>
                             {
-                                await _apiController.UserMarkBlogPostViewed(post.Id)
-                                    .ConfigureAwait(false);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogDebug(ex,
-                                    "Failed to mark chronicle {Id} viewed", post.Id);
-                            }
-                        });
+                                try
+                                {
+                                    await _apiController.UserMarkBlogPostViewed(post.Id)
+                                        .ConfigureAwait(false);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogDebug(ex,
+                                        "Failed to mark chronicle {Id} viewed", post.Id);
+                                }
+                            });
+                        }
                     }
                 }
             }
-        }
+        }, title: "Chronicles", icon: FontAwesomeIcon.FeatherAlt,
+            accentColor: accent, count: extras?.Blog?.Count);
     }
 
     /// <summary>Opens the photo studio's file browser · the rendered result is
@@ -9126,8 +8933,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         return name ?? _spheneProfileManager.GetPreferredName(uid);
     }
 
-    /// <summary>Profile lookup for the inline comment avatar.</summary>
-    private SpheneProfileData CommentProfile(string uid)
+    /// <summary>Profile lookup by uid - comment avatars and feed rows share it.</summary>
+    private SpheneProfileData ProfileForUid(string uid)
         => _spheneProfileManager.GetSpheneProfile(new UserData(uid));
 
     private IReadOnlyList<SyncshellCommunityView.CommunityStaffMember> StaffMembers(
@@ -9906,6 +9713,23 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         return null;
     }
 
+    /// <summary>The configured syncshell avatar for feed/event rows -
+    /// rides the shared <see cref="ShellMedia"/> cache (one lazy profile
+    /// fetch per gid, no per-row requests) and the same
+    /// <c>hub-shell:avatar</c> texture key the shell cards use, so a
+    /// decoded texture is shared rather than duplicated.</summary>
+    private IDalamudTextureWrap? ShellAvatar(string gid)
+    {
+        if (ShellMedia(gid) is { } p
+            && (p.AvatarMediaHash != null || !string.IsNullOrEmpty(p.AvatarImageBase64)))
+        {
+            return SpheneUI.Media.Texture(
+                $"hub-shell:avatar:{gid}:{SyncshellCommunityView.MediaVersion(p.AvatarMediaHash, p.AvatarImageBase64)}",
+                SyncshellCommunityView.ResolveBytes(p.AvatarMediaHash, p.AvatarImageBase64));
+        }
+        return null;
+    }
+
     private void DrawAreaBoundSection(HashSet<string> areaJoinedGids,
         HashSet<string> managedAreaGids)
     {
@@ -10215,7 +10039,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             var meta = $"hosted by {group.OwnerAliasOrUID} · {identityMembers} members · {role}";
             SpheneUI.Text.Colored(meta, SpheneUI.Colors.TextMuted);
             ImGui.EndGroup();
-        }, accentColor: accent, animatedBackdrop: false, id: "shell-identity-" + group.Group.GID);
+        }, title: "Syncshell", icon: FontAwesomeIcon.Users,
+            accentColor: accent, animatedBackdrop: false, id: "shell-identity-" + group.Group.GID);
     }
 
     private void DrawSyncshellCommunityTab(GroupFullInfoDto group, bool isAreaBound)
@@ -10231,7 +10056,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     SpheneUI.Text.MutedWrapped(isAreaBound
                         ? "This area-bound syncshell has no community page yet."
                         : "This syncshell has no community page yet.");
-                }, "Community", accentColor: SpheneUI.Palette.CrystalBlue);
+                }, "Community", icon: FontAwesomeIcon.Globe, accentColor: SpheneUI.Palette.CrystalBlue);
             }
             else if (!_communityLoadingMap.ContainsKey(group.Group.GID)
                 && _communityFailedAt.ContainsKey(group.Group.GID))
@@ -10372,7 +10197,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 RefreshCommunity);
             CommunityComposers.WireCommentOps(manageEdit, group.Group, RefreshCommunity,
                 uid => CommunityNameFor(uid, group, CommunityFor(group.Group.GID)),
-                CommentProfile);
+                ProfileForUid);
             CommunityComposers.WireTravelOps(manageEdit, group.Group,
                 _lifestreamTravel, _dalamudUtilService, _ipcManager.Lifestream,
                 RefreshCommunity);
@@ -10394,7 +10219,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             CommunityComposers.WireEventOps(manageEdit, group.Group, false, RefreshCommunity);
             CommunityComposers.WireCommentOps(manageEdit, group.Group, RefreshCommunity,
                 uid => CommunityNameFor(uid, group, CommunityFor(group.Group.GID)),
-                CommentProfile);
+                ProfileForUid);
             CommunityComposers.WireTravelOps(manageEdit, group.Group,
                 _lifestreamTravel, _dalamudUtilService, _ipcManager.Lifestream,
                 RefreshCommunity);
@@ -10597,7 +10422,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _ = _apiController.GroupLeaveFully(new GroupDto(group.Group));
                 NavigateTo(new HubLocation(SpheneHubPage.Syncshells, null, null));
             }
-        }, title: "Danger Zone", accentColor: SpheneUI.Colors.Danger);
+        }, title: "Danger Zone", icon: FontAwesomeIcon.ExclamationTriangle,
+            accentColor: SpheneUI.Colors.Danger);
     }
 
     private void DrawSyncshellMembersTab(GroupFullInfoDto group)
@@ -10967,79 +10793,76 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
             && string.Equals(openOwner, uid, StringComparison.Ordinal)
             ? chronicles.FirstOrDefault(b => b.Id == openId) : null;
-        if (openPost != null)
+        // One headed card owns the section - same structure as the own and
+        // friend profile Chronicles cards.
+        SpheneUI.Layout.SectionCard(() =>
         {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
+            if (openPost != null)
             {
-                _openChronicle = null;
-            }
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            var post = openPost;
-            var ops = CommunityComposers.BuildBlogCommentOps(uid, post.Id,
-                () =>
+                if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowLeft, "Back"))
                 {
-                    _publicProfiles.InvalidateProfile(uid);
-                    return Task.CompletedTask;
-                },
-                authorUid => CommunityNameFor(authorUid, null, null), CommentProfile);
-            SpheneUI.Layout.Surface(() =>
-            {
+                    _openChronicle = null;
+                }
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var post = openPost;
+                var ops = CommunityComposers.BuildBlogCommentOps(uid, post.Id,
+                    () =>
+                    {
+                        _publicProfiles.InvalidateProfile(uid);
+                        return Task.CompletedTask;
+                    },
+                    authorUid => CommunityNameFor(authorUid, null, null), ProfileForUid);
                 Sphene.UI.Chronicles.ChronicleReaderView.Draw(post, uid,
                     displayName, avatarWrap, accent, _blogComments, ops,
                     excerptLines: 8,
                     isExpanded: id => _expandedChronicles.Contains(id),
                     toggleExpanded: id => ToggleChronicleExpanded(id),
                     onAuthorClick: NavigateToAuthor);
-            }, id: $"public-chronicle-{post.Id}", border: true, accentColor: accent);
-            return;
-        }
-        if (_openChronicle is { OwnerUid: var staleOwner }
-            && string.Equals(staleOwner, uid, StringComparison.Ordinal))
-        {
-            _openChronicle = null;
-            _chronicleNotice = ChronicleMissingNotice;
-        }
-        if (_chronicleNotice != null)
-        {
-            SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-        }
-        if (chronicles.Count == 0)
-        {
-            SpheneUI.Layout.Surface(() =>
+                return;
+            }
+            if (_openChronicle is { OwnerUid: var staleOwner }
+                && string.Equals(staleOwner, uid, StringComparison.Ordinal))
+            {
+                _openChronicle = null;
+                _chronicleNotice = ChronicleMissingNotice;
+            }
+            if (_chronicleNotice != null)
+            {
+                SpheneUI.Text.ColoredWrapped(_chronicleNotice, SpheneUI.Palette.Warning);
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            }
+            if (chronicles.Count == 0)
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.BookOpen,
                     "No public Chronicles",
                     "Nothing published publicly yet - public Chronicles will land here.");
-            }, id: "public-chronicles-empty");
-            return;
-        }
-        SyncshellCommunityView.RailHeader("Chronicles", FontAwesomeIcon.FeatherAlt,
-            chronicles.Count, accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        for (var i = 0; i < chronicles.Count; i++)
-        {
-            if (i > 0)
-            {
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                return;
             }
-            var captured = chronicles[i];
-            var item = new SyncshellCommunityFeedItemDto(
-                string.Empty, null, null, SyncshellFeedItemKind.Blog,
-                captured.Id,
-                string.IsNullOrWhiteSpace(captured.Title)
-                    ? "Untitled Chronicle" : captured.Title,
-                null, captured.UpdatedAt,
-                ActorUid: uid, ActorDisplayName: displayName,
-                ThumbnailMediaHash: captured.CoverMediaHash);
-            if (FeedItemRow.Draw($"public-chron-{uid}-{captured.Id}", item,
-                    "pub:", accent, ChronicleRowMeta(captured),
-                    onActorClick: NavigateToAuthor))
+            for (var i = 0; i < chronicles.Count; i++)
             {
-                NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
-                    PublicUid: uid, ChroniclePostId: captured.Id));
+                if (i > 0)
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
+                var captured = chronicles[i];
+                var item = new SyncshellCommunityFeedItemDto(
+                    string.Empty, null, null, SyncshellFeedItemKind.Blog,
+                    captured.Id,
+                    string.IsNullOrWhiteSpace(captured.Title)
+                        ? "Untitled Chronicle" : captured.Title,
+                    null, captured.UpdatedAt,
+                    ActorUid: uid, ActorDisplayName: displayName,
+                    ThumbnailMediaHash: captured.CoverMediaHash);
+                if (FeedItemRow.Draw($"public-chron-{uid}-{captured.Id}", item,
+                        "pub:", accent, ChronicleRowMeta(captured),
+                        onActorClick: NavigateToAuthor, profileFor: ProfileForUid))
+                {
+                    NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+                        PublicUid: uid, ChroniclePostId: captured.Id));
+                }
             }
-        }
+        }, title: "Chronicles", icon: FontAwesomeIcon.FeatherAlt,
+            accentColor: accent, count: chronicles.Count);
     }
 
     /// <summary>Community → Following - public chronicles from followed
@@ -11055,72 +10878,73 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         _publicProfiles.EnsureFollowingRequested();
         var items = _publicProfiles.FollowingItems;
-        SpheneUI.Text.SectionHeader("Following",
-            icon: FontAwesomeIcon.Rss, accent: accent);
-        SpheneUI.Text.MutedWrapped(
-            "Public Chronicles from profiles you follow - following is unilateral and grants no pair rights.");
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        if (_publicProfiles.FollowingLoading && items.Count == 0)
+        SpheneUI.Layout.SectionCard(() =>
         {
-            for (var i = 0; i < 3; i++)
+            if (_publicProfiles.FollowingLoading && items.Count == 0)
             {
-                SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
-            }
-        }
-        else if (items.Count == 0 && _publicProfiles.FollowingRefreshFailed)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
-                "Couldn't load the feed",
-                "The Following feed could not be reached - try again now.",
-                "Retry", () => _ = _publicProfiles.RefreshFollowing(),
-                FontAwesomeIcon.SyncAlt, accent);
-        }
-        else if (items.Count == 0)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Rss,
-                "Not following anyone yet",
-                "Public Chronicles from profiles you follow land here - find people in the People tab.",
-                "Find people",
-                () => NavigateTo(new HubLocation(SpheneHubPage.Community, null, null, 7)),
-                FontAwesomeIcon.Users, accent);
-        }
-        else
-        {
-            for (var i = 0; i < items.Count; i++)
-            {
-                // NSFW-author rows redact title/snippet/thumb at read time -
-                // a live settings flip takes effect the same frame.
-                var item = _publicProfiles.RedactIfNsfw(items[i]);
-                if (FeedItemRow.Draw($"follow-{item.Kind}-{item.Id}-{item.ActorUid}",
-                        item, "hub:", fallbackAccent: accent,
-                        onActorClick: NavigateToAuthor))
+                for (var i = 0; i < 3; i++)
                 {
-                    NavigateFeedItem(item);
+                    SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
                 }
-                if (i + 1 < items.Count)
+            }
+            else if (items.Count == 0 && _publicProfiles.FollowingRefreshFailed)
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                    "Couldn't load the feed",
+                    "The Following feed could not be reached - try again now.",
+                    "Retry", () => _ = _publicProfiles.RefreshFollowing(),
+                    FontAwesomeIcon.SyncAlt, accent);
+            }
+            else if (items.Count == 0)
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.Rss,
+                    "Not following anyone yet",
+                    "Public Chronicles from profiles you follow land here - find people in the People tab.",
+                    "Find people",
+                    () => NavigateTo(new HubLocation(SpheneHubPage.Community, null, null, 7)),
+                    FontAwesomeIcon.Users, accent);
+            }
+            else
+            {
+                for (var i = 0; i < items.Count; i++)
+                {
+                    // NSFW-author rows redact title/snippet/thumb at read time -
+                    // a live settings flip takes effect the same frame.
+                    var item = _publicProfiles.RedactIfNsfw(items[i]);
+                    if (i > 0)
+                    {
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    }
+                    if (FeedItemRow.Draw($"follow-{item.Kind}-{item.Id}-{item.ActorUid}",
+                            item, "hub:", fallbackAccent: accent,
+                            onActorClick: NavigateToAuthor, profileFor: ProfileForUid))
+                    {
+                        NavigateFeedItem(item);
+                    }
+                }
+                if (_publicProfiles.FollowingPageFailed)
                 {
                     SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                    SpheneUI.Text.Colored("Couldn't load more.", SpheneUI.Palette.Warning);
                 }
-            }
-            if (_publicProfiles.FollowingPageFailed)
-            {
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                SpheneUI.Text.Colored("Couldn't load more.", SpheneUI.Palette.Warning);
-            }
-            if (_publicProfiles.FollowingHasMore)
-            {
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-                using (ImRaii.Disabled(_publicProfiles.FollowingLoading))
+                if (_publicProfiles.FollowingHasMore)
                 {
-                    if (SpheneUI.Controls.Button(
-                            _publicProfiles.FollowingPageFailed
-                                ? "Retry##followmore" : "Load more##followmore"))
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                    using (ImRaii.Disabled(_publicProfiles.FollowingLoading))
                     {
-                        _ = _publicProfiles.LoadMoreFollowingAsync();
+                        if (SpheneUI.Controls.Button(
+                                _publicProfiles.FollowingPageFailed
+                                    ? "Retry##followmore" : "Load more##followmore"))
+                        {
+                            _ = _publicProfiles.LoadMoreFollowingAsync();
+                        }
                     }
                 }
             }
-        }
+        }, title: "Following", icon: FontAwesomeIcon.Rss,
+            description:
+                "Public Chronicles from profiles you follow - following is unilateral and grants no pair rights.",
+            accentColor: accent);
     }
 
     /// <summary>Community → People - the public profile search. Results
@@ -11135,157 +10959,159 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 "This server doesn't support public profiles yet - update the server to search people.");
             return;
         }
-        SpheneUI.Text.SectionHeader("People",
-            icon: FontAwesomeIcon.Users, accent: accent);
-        SpheneUI.Text.MutedWrapped(
-            "Search profiles shared in the Community Hub by display name.");
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        using (ImRaii.PushId("people-search"))
+        SpheneUI.Layout.SectionCard(() =>
         {
-            // EnterReturnsTrue: changed fires once on submit, not per edit.
-            var submitted = SpheneUI.Controls.InputTextWithHint("##query",
-                "Search public profiles by name…", ref _publicSearchInput, 64,
-                ImGuiInputTextFlags.EnterReturnsTrue);
-            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-            // A changed query may supersede a still-flying request - only a
-            // repeat of the committed query waits for the current flight.
-            var canSearch = !string.IsNullOrWhiteSpace(_publicSearchInput)
-                && (!_publicProfiles.SearchLoading
-                    || !string.Equals(_publicSearchInput.Trim(),
-                        _publicSearchCommitted, StringComparison.Ordinal));
-            using (ImRaii.Disabled(!canSearch))
+            using (ImRaii.PushId("people-search"))
             {
-                if (SpheneUI.Controls.Button("Search")) submitted = true;
-            }
-            if (submitted && canSearch)
-            {
-                _publicSearchCommitted = _publicSearchInput.Trim();
-                _publicProfiles.Search(_publicSearchCommitted);
-            }
-        }
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        var results = _publicProfiles.SearchResults;
-        if (_publicSearchCommitted == null)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Users,
-                "Find people",
-                "Profiles shared in the Community Hub show up here by display name.");
-            return;
-        }
-        // A transport failure is its own state - it must not read as
-        // "no matches"; visible page rows stay and retry reloads page one.
-        if (_publicProfiles.SearchFailed)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
-                "Search unavailable",
-                results.Count == 0
-                    ? "The people search could not be reached - try again now."
-                    : "The next page could not be loaded - try again now.",
-                "Retry", () => _publicProfiles.Search(_publicSearchCommitted),
-                FontAwesomeIcon.SyncAlt, accent);
-            if (results.Count == 0) return;
-        }
-        else if (results.Count == 0 && _publicProfiles.SearchLoading)
-        {
-            for (var i = 0; i < 3; i++)
-            {
-                SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
-            }
-            return;
-        }
-        else if (results.Count == 0)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.UserSlash,
-                "No shared profiles found",
-                "No public profile matches that name - only profiles that opted into the Community Hub appear.");
-            return;
-        }
-        // Bounded revalidation while the tab sits open - a missed push or
-        // a revocation between pushes is caught inside the window.
-        _publicProfiles.EnsureSearchFresh();
-        for (var i = 0; i < results.Count; i++)
-        {
-            var hit = _publicProfiles.RedactIfNsfw(results[i]);
-            DrawPeopleSearchRow(hit, accent);
-            if (i + 1 < results.Count)
-            {
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-            }
-        }
-        if (_publicProfiles.SearchHasMore)
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            using (ImRaii.Disabled(_publicProfiles.SearchLoading))
-            {
-                if (SpheneUI.Controls.Button("Load more",
-                        new Vector2(-1, 0)))
+                // EnterReturnsTrue: changed fires once on submit, not per edit.
+                var submitted = SpheneUI.Controls.InputTextWithHint("##query",
+                    "Search public profiles by name…", ref _publicSearchInput, 64,
+                    ImGuiInputTextFlags.EnterReturnsTrue);
+                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                // A changed query may supersede a still-flying request - only a
+                // repeat of the committed query waits for the current flight.
+                var canSearch = !string.IsNullOrWhiteSpace(_publicSearchInput)
+                    && (!_publicProfiles.SearchLoading
+                        || !string.Equals(_publicSearchInput.Trim(),
+                            _publicSearchCommitted, StringComparison.Ordinal));
+                using (ImRaii.Disabled(!canSearch))
                 {
-                    _publicProfiles.LoadMoreSearch();
+                    if (SpheneUI.Controls.Button("Search")) submitted = true;
+                }
+                if (submitted && canSearch)
+                {
+                    _publicSearchCommitted = _publicSearchInput.Trim();
+                    _publicProfiles.Search(_publicSearchCommitted);
                 }
             }
-        }
-        else if (_publicProfiles.SearchLoading && results.Count > 0)
-        {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            SpheneUI.Fx.SkeletonLine(0.5f);
-        }
+            var results = _publicProfiles.SearchResults;
+            if (_publicSearchCommitted == null)
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.Users,
+                    "Find people",
+                    "Profiles shared in the Community Hub show up here by display name.");
+                return;
+            }
+            // A transport failure is its own state - it must not read as
+            // "no matches"; visible page rows stay and retry reloads page one.
+            if (_publicProfiles.SearchFailed)
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                    "Search unavailable",
+                    results.Count == 0
+                        ? "The people search could not be reached - try again now."
+                        : "The next page could not be loaded - try again now.",
+                    "Retry", () => _publicProfiles.Search(_publicSearchCommitted),
+                    FontAwesomeIcon.SyncAlt, accent);
+                if (results.Count == 0) return;
+            }
+            else if (results.Count == 0 && _publicProfiles.SearchLoading)
+            {
+                for (var i = 0; i < 3; i++)
+                {
+                    SpheneUI.Fx.SkeletonLine(0.85f - i * 0.12f);
+                }
+                return;
+            }
+            else if (results.Count == 0)
+            {
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.UserSlash,
+                    "No shared profiles found",
+                    "No public profile matches that name - only profiles that opted into the Community Hub appear.");
+                return;
+            }
+            // Bounded revalidation while the tab sits open - a missed push or
+            // a revocation between pushes is caught inside the window.
+            _publicProfiles.EnsureSearchFresh();
+            for (var i = 0; i < results.Count; i++)
+            {
+                var hit = _publicProfiles.RedactIfNsfw(results[i]);
+                if (i > 0)
+                {
+                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                }
+                DrawPeopleSearchRow(hit);
+            }
+            if (_publicProfiles.SearchHasMore)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                using (ImRaii.Disabled(_publicProfiles.SearchLoading))
+                {
+                    if (SpheneUI.Controls.Button("Load more",
+                            new Vector2(-1, 0)))
+                    {
+                        _publicProfiles.LoadMoreSearch();
+                    }
+                }
+            }
+            else if (_publicProfiles.SearchLoading && results.Count > 0)
+            {
+                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+                SpheneUI.Fx.SkeletonLine(0.5f);
+            }
+        }, title: "People", icon: FontAwesomeIcon.Users,
+            description:
+                "Search profiles shared in the Community Hub by display name.",
+            accentColor: accent);
     }
 
     /// <summary>One search-result row - avatar, name, follow state. The row
     /// opens the profile; the follow button is its own hit target.</summary>
-    private void DrawPeopleSearchRow(PublicProfileSummaryDto hit, Vector4 accent)
+    private void DrawPeopleSearchRow(PublicProfileSummaryDto hit)
     {
-        SpheneUI.Layout.Surface(() =>
+        // List row inside the People card - no own surface (channel splits
+        // cannot nest inside the card's); separators come from the caller.
+        ImGui.PushID($"person-{hit.User.UID}");
+        var rowH = 28f * SpheneUI.Scale;
+        if (hit.AvatarMediaHash is { } avatarHash && _communityMedia != null)
         {
-            var rowH = 28f * SpheneUI.Scale;
-            if (hit.AvatarMediaHash is { } avatarHash && _communityMedia != null)
+            var hash = avatarHash;
+            // TryGetBytes is the non-blocking path - a miss kicks the
+            // background download and the row repaints when bytes land.
+            var wrap = SpheneUI.Media.Texture(
+                $"pub-avatar:{hit.User.UID}:{hash}",
+                () => _communityMedia.TryGetBytes(hash) ?? []);
+            SpheneUI.Media.Avatar(wrap, rowH);
+            if (ImGui.IsItemClicked())
             {
-                var hash = avatarHash;
-                // TryGetBytes is the non-blocking path - a miss kicks the
-                // background download and the row repaints when bytes land.
-                var wrap = SpheneUI.Media.Texture(
-                    $"pub-avatar:{hit.User.UID}:{hash}",
-                    () => _communityMedia.TryGetBytes(hash) ?? []);
-                SpheneUI.Media.Avatar(wrap, rowH);
-                if (ImGui.IsItemClicked())
-                {
-                    NavigateTo(new HubLocation(SpheneHubPage.PublicProfile,
-                        null, null, PublicUid: hit.User.UID));
-                }
-                if (ImGui.IsItemHovered())
-                {
-                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                }
-                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                NavigateTo(new HubLocation(SpheneHubPage.PublicProfile,
+                    null, null, PublicUid: hit.User.UID));
             }
-            var clicked = SpheneUI.Text.Link(hit.User.PreferredName);
-            SpheneUI.AttachTooltip("View profile");
-            if (hit.IsNsfw)
+            if (ImGui.IsItemHovered())
             {
-                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-                SpheneUI.Layout.Badge("NSFW", SpheneUI.Palette.Warning);
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             }
-            var rightW = 96f * SpheneUI.Scale;
-            var avail = ImGui.GetContentRegionAvail().X;
-            if (avail > rightW + 20f * SpheneUI.Scale)
+            ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+        }
+        var clicked = SpheneUI.Text.Link(hit.User.PreferredName);
+        SpheneUI.AttachTooltip("View profile");
+        if (hit.IsNsfw)
+        {
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            SpheneUI.Layout.Badge("NSFW", SpheneUI.Palette.Warning);
+        }
+        var rightW = 96f * SpheneUI.Scale;
+        var avail = ImGui.GetContentRegionAvail().X;
+        if (avail > rightW + 20f * SpheneUI.Scale)
+        {
+            ImGui.SameLine(ImGui.GetCursorPosX() + avail - rightW);
+            var label = hit.Following ? "Following" : "Follow";
+            using (ImRaii.Disabled(_publicFollowBusy != null))
             {
-                ImGui.SameLine(ImGui.GetCursorPosX() + avail - rightW);
-                var label = hit.Following ? "Following" : "Follow";
-                using (ImRaii.Disabled(_publicFollowBusy != null))
+                if (SpheneUI.Controls.Button($"{label}##pf-{hit.User.UID}",
+                        new Vector2(rightW, 0)))
                 {
-                    if (SpheneUI.Controls.Button($"{label}##pf-{hit.User.UID}",
-                            new Vector2(rightW, 0)))
-                    {
-                        TogglePublicFollowSummary(hit);
-                    }
+                    TogglePublicFollowSummary(hit);
                 }
             }
-            if (clicked)
-            {
-                NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
-                    PublicUid: hit.User.UID));
-            }
-        }, id: $"person-{hit.User.UID}", border: true, accentColor: accent);
+        }
+        if (clicked)
+        {
+            NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
+                PublicUid: hit.User.UID));
+        }
+        ImGui.PopID();
     }
 
     /// <summary>Follow toggle straight from a search row - same path as the

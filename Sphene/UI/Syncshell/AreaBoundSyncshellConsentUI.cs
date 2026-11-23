@@ -71,7 +71,7 @@ public class AreaBoundSyncshellConsentUI : WindowMediatorSubscriberBase
             {
                 SpheneUI.Text.Colored("This syncshell is locked. Joining is disabled.", ImGuiColors.DalamudRed);
             }
-        });
+        }, title: "Syncshell", icon: Dalamud.Interface.FontAwesomeIcon.Users);
         
         // Calculate fixed bottom section height
         var buttonHeight = ImGui.GetFrameHeight();

@@ -562,7 +562,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             }
             SpheneUI.AttachTooltip("Locked syncshells cannot be joined by new users.");
             SpheneUI.Text.MutedWrapped("Locking disables invites and prevents new users from joining.");
-        }, "Access", accent);
+        }, "Access", accent, icon: FontAwesomeIcon.Lock);
     }
 
     /// <summary>
@@ -630,7 +630,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             SpheneUI.Text.MutedWrapped(_joinPolicy == null
                 ? "Loading current join policy..."
                 : Label(current) + " - takes effect immediately for new joiners. Locking the shell above still overrides this.");
-        }, "Join Policy", accent);
+        }, "Join Policy", accent, icon: FontAwesomeIcon.SignInAlt);
     }
 
     /// <summary>
@@ -746,7 +746,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             SpheneUI.Text.MutedWrapped(_publishPolicy == null
                 ? "Loading publishing policy..."
                 : "Member submissions land in the review queue on the Members page until approved.");
-        }, "Publishing Policy", accent);
+        }, "Publishing Policy", accent, icon: FontAwesomeIcon.UserEdit);
     }
 
     private void DrawDefaultsConsole(GroupPermissions perm, Action pushPerms, Vector4 accent)
@@ -767,7 +767,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             SuggestedToggle("Animation sync", perm.IsPreferDisableAnimations(), v => perm.SetPreferDisableAnimations(v));
             SuggestedToggle("VFX sync", perm.IsPreferDisableVFX(), v => perm.SetPreferDisableVFX(v));
             SpheneUI.Text.MutedWrapped("Permission suggestions offered on join · members stay free to keep their own.");
-        }, "Join Defaults", accent);
+        }, "Join Defaults", accent, icon: FontAwesomeIcon.UserCog);
     }
 
     private void DrawIdentityConsole(Vector4 accent)
@@ -827,7 +827,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             {
                 SpheneUI.Text.Colored("Alias must be 3-50 characters, unique, and needs ManagePage rights.", ImGuiColors.DalamudYellow);
             }
-        }, "Identity", accent);
+        }, "Identity", accent, icon: FontAwesomeIcon.IdCard);
     }
 
     private void DrawSecurityConsole(Vector4 accent)
@@ -860,7 +860,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             {
                 SpheneUI.Text.Colored("Failed · needs at least 10 characters.", ImGuiColors.DalamudYellow);
             }
-        }, "Security", accent);
+        }, "Security", accent, icon: FontAwesomeIcon.ShieldAlt);
     }
 
     /// <summary>Invite generation as a card · lives on the Members page since
@@ -1802,7 +1802,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             {
                 DrawApplicationRow(app, accent);
             }
-        }, $"Join Requests{(pending > 0 ? $" · {pending} pending" : string.Empty)}", accent);
+        }, $"Join Requests{(pending > 0 ? $" · {pending} pending" : string.Empty)}", accent, icon: FontAwesomeIcon.UserPlus);
     }
 
     /// <summary>
@@ -1864,7 +1864,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             {
                 DrawReviewItem(item, accent);
             }
-        }, $"Review Queue{(pending > 0 ? $" · {pending} pending" : string.Empty)}", accent);
+        }, $"Review Queue{(pending > 0 ? $" · {pending} pending" : string.Empty)}", accent, icon: FontAwesomeIcon.ClipboardCheck);
     }
 
     private void DrawReviewItem(CommunityReviewItemDto item, Vector4 accent)
@@ -1964,7 +1964,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             {
                 DrawReportRow(report, accent);
             }
-        }, $"Reports{(pending > 0 ? $" · {pending} open" : string.Empty)}", accent);
+        }, $"Reports{(pending > 0 ? $" · {pending} open" : string.Empty)}", accent, icon: FontAwesomeIcon.Flag);
     }
 
     private void DrawReportRow(CommunityReportDto report, Vector4 accent)
@@ -2145,7 +2145,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             SpheneUI.Text.Wrapped($"Pruned {_pruneTask.Result} inactive member(s).");
             _pruneTask = null;
         }
-        }, "Housekeeping", accent);
+        }, "Housekeeping", accent, icon: FontAwesomeIcon.Broom);
     }
 
     private void DrawBanishedPanel(Vector4 accent)
@@ -2208,7 +2208,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 new[] { FontAwesomeIcon.UserCheck },
                 actionSlots: 1);
         }
-        }, "Banished souls", accent);
+        }, "Banished souls", accent, icon: FontAwesomeIcon.UserSlash);
     }
 
 

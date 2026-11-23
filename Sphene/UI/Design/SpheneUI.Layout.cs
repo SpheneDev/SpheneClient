@@ -151,7 +151,8 @@ public static partial class SpheneUI
             }
 
             var scale = SpheneUI.Scale;
-            var padding = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
+            var padY = Spacing.CardPadding.Scaled;
             var rounding = AccentCardRounding * scale;
             var availWidth = ImGui.GetContentRegionAvail().X;
             var accent = accentColor ?? Palette.SpheneGold;
@@ -169,17 +170,17 @@ public static partial class SpheneUI
             {
                 cardRightX = MathF.Min(cardRightX, bound);
             }
-            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
+            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padX * 2f);
             using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX, padY));
             using (ImRaii.Group())
             {
                 ContentRegion(innerWidth, id, content);
             }
 
-            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
+            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padY);
             drawList.ChannelsSetCurrent(0);
 
             var background = AccentCardTint(accent);
@@ -226,14 +227,18 @@ public static partial class SpheneUI
 
         /// <summary>
         /// Calm full-width section panel: a borderless tonal surface in the
-        /// rail-band color family, identified by a hairline accent seam along
-        /// its top edge and an optional accent title. The standard grouping
-        /// container for settings blocks; use <see cref="AccentCard"/> for
-        /// prominent cards.
+        /// rail-band color family. With a <paramref name="title"/> it renders
+        /// the integrated header band shared with <see cref="HeadedSurface"/> -
+        /// icon slot + heading + optional count/description + right-docked
+        /// actions on a lifted tonal strip closed by a divider. Untitled
+        /// cards stay plain surfaces; an explicit accent still draws the
+        /// hairline top seam. Use <see cref="AccentCard"/> for prominent cards.
         /// </summary>
         public static void SectionCard(Action content, string? title = null,
             Vector4? accentColor = null, string? description = null, bool animatedBackdrop = true,
-            string? id = null, bool border = false)
+            string? id = null, bool border = false, FontAwesomeIcon? icon = null,
+            int? count = null,
+            params (FontAwesomeIcon Icon, string Tooltip, Action OnClick)?[] actions)
         {
             if (InChannelSplit)
             {
@@ -242,7 +247,8 @@ public static partial class SpheneUI
             }
 
             var scale = SpheneUI.Scale;
-            var padding = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
+            var padY = Spacing.CardPadding.Scaled;
             var rounding = AccentCardRounding * scale;
             var availWidth = ImGui.GetContentRegionAvail().X;
             var accent = accentColor ?? Theme.Current.AccentCyan;
@@ -258,29 +264,29 @@ public static partial class SpheneUI
             {
                 cardRightX = MathF.Min(cardRightX, bound);
             }
-            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padding * 2f);
+            var innerWidth = MathF.Max(60f * scale, cardRightX - cardMin.X - padX * 2f);
+            var innerRight = cardRightX - padX;
             using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
+            var bandTopPad = Spacing.X8.Scaled;
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX,
+                string.IsNullOrEmpty(title) ? padY : bandTopPad));
+            var bandBottom = -1f;
+            if (!string.IsNullOrEmpty(title))
+            {
+                var headerBottom = CardHeader(title, icon, description, accent,
+                    count, innerRight, actions);
+                bandBottom = headerBottom + bandTopPad;
+                ImGui.SetCursorScreenPos(new Vector2(cardMin.X + padX,
+                    bandBottom + HeaderBodyGap));
+            }
             using (ImRaii.Group())
             {
-                ContentRegion(innerWidth, id ?? title, () =>
-                {
-                    if (!string.IsNullOrEmpty(title))
-                    {
-                        Text.Colored(title, accent);
-                        if (!string.IsNullOrEmpty(description))
-                        {
-                            Text.ColoredWrapped(description, Dalamud.Interface.Colors.ImGuiColors.DalamudGrey);
-                        }
-                        ImGuiHelpers.ScaledDummy(0, 7);
-                    }
-                    content();
-                });
+                ContentRegion(innerWidth, id ?? title, content);
             }
 
-            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padding);
+            var cardMax = new Vector2(cardRightX, ImGui.GetItemRectMax().Y + padY);
             drawList.ChannelsSetCurrent(0);
 
             // Borderless tonal panel in the rail-band color family; the group
@@ -300,9 +306,20 @@ public static partial class SpheneUI
                 Chrome.SectionCardBackdrop(drawList, cardMin, cardMax, rounding, accent);
             }
 
-            // The accent seam marks titled/explicitly-accented cards only  · 
-            // untitled SectionCards render as plain tonal surfaces.
-            if (!string.IsNullOrEmpty(title) || accentColor.HasValue)
+            // Titled cards carry the same header band as HeadedSurface: a
+            // lifted tonal strip spanning the card edge-to-edge, top-rounded
+            // and closed by a divider. The band is the card identity, so the
+            // accent seam is only drawn for untitled explicitly-accented cards.
+            if (bandBottom > 0f)
+            {
+                drawList.AddRectFilled(cardMin, new Vector2(cardRightX, bandBottom),
+                    ColorUtils.ToU32(ColorUtils.LerpColor(background, accent, 0.07f)),
+                    rounding, ImDrawFlags.RoundCornersTop);
+                drawList.AddLine(new Vector2(cardMin.X, bandBottom),
+                    new Vector2(cardRightX, bandBottom),
+                    ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.5f)));
+            }
+            else if (accentColor.HasValue)
             {
                 var seamColor = ColorUtils.WithAlpha(accent, 0.32f);
                 var seamCol = ImGui.ColorConvertFloat4ToU32(seamColor);
@@ -327,14 +344,15 @@ public static partial class SpheneUI
         }
 
         /// <summary>
-        /// Integrated card header row · required semantic accent icon in a
+        /// Integrated card header row · optional semantic accent icon in a
         /// uniform invisible slot (fixed width - <see cref="CardHeaderIconSlot"/>,
         /// no plate), heading title, optional count, optional muted
         /// description under the title and right-aligned icon actions -
         /// icon, title block and actions all vertically centered against
         /// each other from real font metrics. The title always begins at
         /// left + slot + gap regardless of the glyph's rendered width, so
-        /// stacked card headers share one title column.
+        /// stacked card headers share one title column. A null icon leaves
+        /// the slot empty so the title column still aligns.
         /// Returns the screen-space Y at the bottom of the header block and
         /// leaves the flow cursor there; callers add their own spacing so
         /// chrome variants can size the header band exactly. Inside a
@@ -342,7 +360,7 @@ public static partial class SpheneUI
         /// <see cref="GroupState.RowStart"/>, so it draws no row hairline and
         /// the first real row still skips its separator.
         /// </summary>
-        public static float CardHeader(string title, FontAwesomeIcon icon,
+        public static float CardHeader(string title, FontAwesomeIcon? icon = null,
             string? description = null, Vector4? accent = null, int? count = null,
             float rightEdge = -1f,
             params (FontAwesomeIcon Icon, string Tooltip, Action OnClick)?[] actions)
@@ -353,7 +371,7 @@ public static partial class SpheneUI
             var headerMin = ImGui.GetCursorScreenPos();
 
             var lineH = ImGui.GetTextLineHeight();
-            var iconSize = Icons.Size(icon);
+            var iconSize = icon.HasValue ? Icons.Size(icon.Value) : Vector2.Zero;
             // Heading metrics · measured inside the pushed scope, used to
             // center the title/desc block against the leading icon glyph.
             var titleH = lineH;
@@ -431,10 +449,13 @@ public static partial class SpheneUI
             var glyphX = headerMin.X + MathF.Max(0f, (iconSlotW - iconSize.X) * 0.5f);
                 var glyphY = headerMin.Y + (rowH - blockH) * 0.5f
                     + (titleH - iconSize.Y) * 0.5f;
-                using (Icons.PushFont())
+                if (icon.HasValue)
                 {
-                    drawList.AddText(new Vector2(glyphX, glyphY),
-                        ColorUtils.ToU32(tone), icon.ToIconString());
+                    using (Icons.PushFont())
+                    {
+                        drawList.AddText(new Vector2(glyphX, glyphY),
+                            ColorUtils.ToU32(tone), icon.Value.ToIconString());
+                    }
                 }
 
             // Title/description block · clipped left of the action dock so a
@@ -516,7 +537,7 @@ public static partial class SpheneUI
             }
 
             var scale = SpheneUI.Scale;
-            var padX = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
             var padY = Spacing.X8.Scaled;
             var radius = AccentCardRounding * scale;
 
@@ -592,29 +613,31 @@ public static partial class SpheneUI
             }
 
             var scale = SpheneUI.Scale;
-            var padding = Spacing.CardPadding.Scaled;
+            var padX = Spacing.CardPaddingX.Scaled;
+            var padY = Spacing.CardPadding.Scaled;
             var radius = AccentCardRounding * scale;
 
             var drawList = ImGui.GetWindowDrawList();
             var cardMin = ImGui.GetCursorScreenPos();
             var cardRightX = SurfaceRightBound(cardMin, scale);
             var innerWidth = MathF.Max(60f * scale,
-                cardRightX - cardMin.X - padding * 2f);
-            var innerRight = cardRightX - padding;
+                cardRightX - cardMin.X - padX * 2f);
+            var innerRight = cardRightX - padX;
 
             using var splitScope = new ChannelSplitGuard(drawList);
             drawList.ChannelsSetCurrent(1);
 
-            ImGui.SetCursorScreenPos(cardMin + new Vector2(padding, padding));
+            ImGui.SetCursorScreenPos(cardMin + new Vector2(padX,
+                Spacing.X8.Scaled));
             var headerBottom = CardHeader(title, icon, description, accent,
                 count, innerRight, actions);
             var bandBottom = headerBottom + Spacing.X8.Scaled;
-            ImGui.SetCursorScreenPos(new Vector2(cardMin.X + padding,
+            ImGui.SetCursorScreenPos(new Vector2(cardMin.X + padX,
                 bandBottom + HeaderBodyGap));
 
             using (ImRaii.Group())
             {
-                ContentBounds.Push(new Vector2(cardMin.X + padding, innerRight));
+                ContentBounds.Push(new Vector2(cardMin.X + padX, innerRight));
                 try
                 {
                     ContentRegion(innerWidth, id ?? $"headed-{title}", content);
@@ -626,7 +649,7 @@ public static partial class SpheneUI
             }
 
             var cardMax = new Vector2(cardRightX,
-                ImGui.GetItemRectMax().Y + padding);
+                ImGui.GetItemRectMax().Y + padY);
             drawList.ChannelsSetCurrent(0);
             var fill = NavRailBandColor();
             drawList.AddRectFilled(cardMin, cardMax, ColorUtils.ToU32(fill), radius);
@@ -776,12 +799,26 @@ public static partial class SpheneUI
                     // is limited to its bounds and would cut anything wider off.
                     // edgeToEdge surfaces paint over the border ring · the same
                     // full-bleed treatment the chrome title bar gets.
+                    // Vertically the theoretical child bounds are NOT safe: a
+                    // child extending past the parent viewport (short host
+                    // window, area placed low) would let rows paint below the
+                    // window entirely. Clamp the pushed rect to the clip that
+                    // is active now - ImGui already intersects every child
+                    // with its parent chain, so this keeps the wider-than-child
+                    // horizontal reach while restoring the viewport's bound.
                     var borderSize = MathF.Max(ImGui.GetStyle().WindowBorderSize, 0f);
                     var clipInsetX = edgeToEdge ? 0f : borderSize;
-                    ImGui.PushClipRect(
-                        new Vector2(state.ParentMin.X + clipInsetX, min.Y + state.TopInset),
-                        new Vector2(state.ParentMax.X - clipInsetX, max.Y), false);
-                    state.ClipPushed = true;
+                    var clipMin = ImGui.GetWindowDrawList().GetClipRectMin();
+                    var clipMax = ImGui.GetWindowDrawList().GetClipRectMax();
+                    var lo = new Vector2(state.ParentMin.X + clipInsetX,
+                        MathF.Max(min.Y + state.TopInset, clipMin.Y));
+                    var hi = new Vector2(state.ParentMax.X - clipInsetX,
+                        MathF.Min(max.Y, clipMax.Y));
+                    if (hi.X > lo.X && hi.Y > lo.Y)
+                    {
+                        ImGui.PushClipRect(lo, hi, false);
+                        state.ClipPushed = true;
+                    }
                 }
                 // The child's own content edge is a bound too: labeled controls
                 // and toggle rows inside a scroll area dock to its padded inner
@@ -1015,7 +1052,7 @@ public static partial class SpheneUI
         /// </summary>
         public static void EndScrollArea(Vector4? fadeBaseColor = null, float edgePaddingX = -1f,
             Vector2? fadeSpanX = null, float? fadeMinY = null, float bottomInset = 0f,
-            float fadeStrength = 1f)
+            float fadeStrength = 1f, bool scrollHints = true)
         {
             var state = ScrollAreaStack.Count > 0 ? ScrollAreaStack.Pop() : new ScrollAreaState();
 
@@ -1113,7 +1150,7 @@ public static partial class SpheneUI
                 }
                 Chrome.ScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
                     state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX, fadeMinY,
-                    fadeStrength);
+                    fadeStrength, scrollHints);
                 var styleVars = ImGui.GetStyle();
                 var cornerReach = MathF.Max(styleVars.WindowBorderSize,
                         MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))
@@ -2537,6 +2574,7 @@ public static partial class SpheneUI
         private sealed class NavContentState
         {
             public bool Scrollable;
+            public bool ScrollHints;
             public Vector4? BaseColor;
             public bool HasHost;
             public bool Begun;
@@ -2566,10 +2604,13 @@ public static partial class SpheneUI
         /// scroll child, so it never scrolls - and returns the consumed
         /// height. The child then opens below it, reduced by that amount
         /// (clamped so a usable body always remains).
+        /// <paramref name="scrollHints"/> toggles the centered scroll pill
+        /// the page viewport draws at its edges; the edge fades always stay.
         /// </summary>
         /// </summary>
         public static bool BeginNavContent(string id, bool scrollable = true, bool padded = true,
-            float contentInset = -1f, Func<Vector2, float>? fixedContent = null)
+            float contentInset = -1f, Func<Vector2, float>? fixedContent = null,
+            bool scrollHints = true)
         {
             var hadRail = NavRailStack.Count > 0;
             var state = hadRail ? NavRailStack.Pop() : new NavRailState();
@@ -2642,6 +2683,7 @@ public static partial class SpheneUI
             var navContent = new NavContentState
             {
                 Scrollable = scrollable,
+                ScrollHints = scrollHints,
                 BaseColor = baseColor,
                 HasHost = hadRail,
                 Depth = ScrollAreaStack.Count,
@@ -2689,7 +2731,8 @@ public static partial class SpheneUI
             var state = NavContentStack.Count > 0 ? NavContentStack.Pop() : null;
             if (state?.Scrollable ?? true)
             {
-                EndScrollArea(fadeBaseColor: state?.BaseColor);
+                EndScrollArea(fadeBaseColor: state?.BaseColor,
+                    scrollHints: state?.ScrollHints ?? true);
                 return;
             }
             var childMin = ImGui.GetWindowPos();

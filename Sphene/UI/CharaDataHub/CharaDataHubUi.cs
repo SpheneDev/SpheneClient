@@ -1018,7 +1018,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 ImGui.SameLine();
                 ImGui.AlignTextToFramePadding();
                 DrawAddOrRemoveFavorite(metaInfo);
-            }, title: "Code Info", accentColor: SpheneUI.Palette.EtherealPurple);
+            }, title: "Code Info", icon: FontAwesomeIcon.Code, accentColor: SpheneUI.Palette.EtherealPurple);
         }
     }
 
@@ -1182,7 +1182,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                             }
                         }
                     }
-                }, title: "Loaded MCDF", accentColor: SpheneUI.Palette.EtherealPurple);
+                }, title: "Loaded MCDF", icon: FontAwesomeIcon.FileAlt, accentColor: SpheneUI.Palette.EtherealPurple);
             }
             if ((_charaDataManager.LoadedMcdfHeader?.IsFaulted ?? false) || (_charaDataManager.McdfApplicationTask?.IsFaulted ?? false))
             {
@@ -1255,7 +1255,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
             }
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             SpheneUI.Text.MutedWrapped("For best results, have everything you want shared equipped and redraw your character before exporting.");
-        }, title: "Export your character", accentColor: SpheneUI.Palette.EtherealPurple);
+        }, title: "Export your character", icon: FontAwesomeIcon.FileExport, accentColor: SpheneUI.Palette.EtherealPurple);
     }
 
     private void DrawMetaInfoData(string selectedGposeActor, bool hasValidGposeTarget, CharaDataMetaInfoExtendedDto data, bool canOpen = false)
@@ -1419,7 +1419,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 _configService.Save();
             }
             SpheneUI.Controls.HelpText("Automatically download MCD Online data (Your Own and Shared with You) once a connection is established.");
-        }, title: "Behavior", accentColor: accent);
+        }, title: "Behavior", icon: FontAwesomeIcon.SlidersH, accentColor: accent);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
@@ -1436,7 +1436,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
             SpheneUI.Controls.Toggle("Abbreviate character names", ref _abbreviateCharaName);
             SpheneUI.Controls.HelpText("Abbreviate displayed names (e.g. F. L.). Not persistent · resets on restart.");
-        }, title: "Display", accentColor: accent);
+        }, title: "Display", icon: FontAwesomeIcon.Eye, accentColor: accent);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
@@ -1456,7 +1456,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
                 }
             }
             SpheneUI.Controls.HelpText("Use this if the Load or Save MCDF file dialog does not open.");
-        }, title: "File Dialogs", accentColor: accent);
+        }, title: "File Dialogs", icon: FontAwesomeIcon.FolderOpen, accentColor: accent);
     }
 
     private void DrawHelpFoldout(string text)

@@ -93,7 +93,7 @@ internal sealed partial class CharaDataHubUi
                     _charaDataGposeTogetherManager.JoinGPoseLobby(lastLobby);
                 }
             }
-        }, title: "Lobby", accentColor: accent);
+        }, title: "Lobby", icon: FontAwesomeIcon.Users, accentColor: accent);
     }
 
     /// <summary>The active lobby: ID + actions on top, member roster below.</summary>
@@ -140,7 +140,7 @@ internal sealed partial class CharaDataHubUi
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
                 SpheneUI.Text.MutedWrapped("Assigning users to characters is only available in GPose.");
             }
-        }, title: "Lobby", accentColor: accent);
+        }, title: "Lobby", icon: FontAwesomeIcon.Users, accentColor: accent);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
 
@@ -164,7 +164,7 @@ internal sealed partial class CharaDataHubUi
                     DrawLobbyUser(user, gposeCharas);
                 }
             }
-        }, title: $"Members ({users.Count()})", accentColor: accent);
+        }, title: $"Members ({users.Count()})", icon: FontAwesomeIcon.UserFriends, accentColor: accent);
     }
 
     private void DrawLobbyUser(GposeLobbyUserData user,

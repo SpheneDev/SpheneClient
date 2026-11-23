@@ -526,7 +526,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                 {
                     SpheneUI.Text.MutedWrapped(nd);
                 }
-            });
+            }, title: "Description", icon: FontAwesomeIcon.AlignLeft);
         }
 
         // card 2 · highlights (only when the data actually carries them)
@@ -536,7 +536,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
             {
                 SpheneUI.Layout.CardGrid(e.Highlights, 200f * scale,
                     (hl, i) => DrawHighlightCard(hl, accent));
-            }, title: "Highlights");
+            }, title: "Highlights", icon: FontAwesomeIcon.Star);
         }
 
         // card 3 · changelog groups, collapsible with counts
@@ -570,7 +570,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
                 var color = ChangeCategoryColor(main);
                 DrawChangelogGroup(e, main, items, color);
             }
-        }, title: "Changelog");
+        }, title: "Changelog", icon: FontAwesomeIcon.Scroll);
     }
 
     /// <summary>Flattens a change group into plain item lines - headings are

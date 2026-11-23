@@ -1487,7 +1487,8 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                 });
                 _ = _conversionTask.ContinueWith(t => { }, TaskScheduler.Default);
             }
-        }, title: "BC7 Conversion", accentColor: SpheneUI.Palette.EtherealPurple);
+        }, title: "BC7 Conversion", accentColor: SpheneUI.Palette.EtherealPurple,
+            icon: FontAwesomeIcon.ExchangeAlt);
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
         DrawTable("analysistex", fileGroup, SpheneUI.Layout.FillToViewBottomHeight());
@@ -1649,7 +1650,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
                     SpheneUI.AttachTooltip(string.Join(Environment.NewLine, gamepaths.Skip(1)));
                 }
             }
-        }, title: "Selected File");
+        }, title: "Selected File", icon: FontAwesomeIcon.File);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
     }
 

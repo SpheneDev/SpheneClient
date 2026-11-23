@@ -752,7 +752,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     }
                 }
                 SpheneUI.Layout.EndScrollArea(SpheneUI.Layout.NavRailBandColor());
-            }, title: $"1 · Inbox ({pending.Count})", accentColor: accent);
+            }, title: $"1 · Inbox ({pending.Count})", icon: FontAwesomeIcon.Inbox, accentColor: accent);
 
             SpheneUI.Tables.SetColumn(1);
 
@@ -760,7 +760,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             SpheneUI.Layout.SectionCard(() =>
             {
                 DrawRightPanel(scale, isEmbedded, colBottom, accent);
-            }, title: "2 · Package Details", accentColor: accent);
+            }, title: "2 · Package Details", icon: FontAwesomeIcon.BoxOpen, accentColor: accent);
 
             SpheneUI.Lint.CheckFillBottom(colBottom, "ReceiveMods.Table");
         }

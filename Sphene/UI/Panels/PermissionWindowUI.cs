@@ -108,8 +108,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
         }, id: "perm-general");
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-        SpheneUI.Text.SectionHeader("Sync Permissions");
-        SpheneUI.Layout.RowGroup(() =>
+        SpheneUI.Layout.HeadedRowGroup("Sync Permissions", () =>
         {
             if (SpheneUI.Controls.Toggle("Disable Sounds", ref disableSounds))
             {
@@ -166,7 +165,7 @@ public class PermissionWindowUI : WindowMediatorSubscriberBase
                 ImGui.AlignTextToFramePadding();
                 SpheneUI.Text.Plain(Pair.UserData.AliasOrUID + " has " + (!otherDisableVfxInDuty ? "not " : string.Empty) + "disabled VFX sync in duty with you");
             }
-        }, id: "perm-sync");
+        }, Dalamud.Interface.FontAwesomeIcon.SyncAlt, id: "perm-sync");
 
         SpheneUI.Layout.Separator();
 

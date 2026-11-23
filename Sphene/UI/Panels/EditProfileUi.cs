@@ -133,7 +133,7 @@ public class EditProfileUi
                 }
                 SpheneUI.AttachTooltip("Discord, website, venue listing · rendered as clickable chips");
             }
-        }, "Links", accentColor: SpheneUI.Colors.Accent,
+        }, "Links", icon: FontAwesomeIcon.Link, accentColor: SpheneUI.Colors.Accent,
             description: "Discord, website, venue listing · shown as clickable chips on your profile.");
     }
 

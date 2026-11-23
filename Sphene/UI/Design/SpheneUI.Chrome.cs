@@ -869,7 +869,10 @@ public static partial class SpheneUI
             const float halfPi = MathF.PI * 0.5f;
             const int segments = 10;
 
-            drawList.PushClipRect(min - new Vector2(2f, 2f), max + new Vector2(2f, 2f), false);
+            // Intersect, not replace: the strips live inside min..max anyway,
+            // and a child that overflows the parent viewport must never paint
+            // its frame below the window edge.
+            drawList.PushClipRect(min - new Vector2(2f, 2f), max + new Vector2(2f, 2f), true);
             drawList.AddRectFilled(new Vector2(min.X, min.Y + r), new Vector2(min.X + b, max.Y - r), color);
             drawList.AddRectFilled(new Vector2(max.X - b, min.Y + r), new Vector2(max.X, max.Y - r), color);
             drawList.AddRectFilled(new Vector2(min.X + r, max.Y - b), new Vector2(max.X - r, max.Y), color);
@@ -939,7 +942,7 @@ public static partial class SpheneUI
         internal static void ScrollFades(Vector2 min, Vector2 max, float scrollY,
             float scrollMaxY, bool border, float topInset, Vector2 parentMin, Vector2 parentMax,
             Vector4? fadeBaseColor, float edgePaddingX = -1f, Vector2? fadeSpanX = null,
-            float? fadeMinY = null, float strength = 1f)
+            float? fadeMinY = null, float strength = 1f, bool drawHints = true)
         {
             var scale = SpheneUI.Scale;
             // A child whose scrollable range is shorter than a line of text has
@@ -1037,7 +1040,10 @@ public static partial class SpheneUI
                 var hint = ColorUtils.ToU32(new Vector4(1f, 1f, 1f, ScrollHintChevronAlpha * upStrength));
                 VerticalFade(drawList, inner, new Vector2(innerMax.X, inner.Y + height),
                     opaque, transparentColor, topLeftRadius, topRightRadius, 0f, 0f);
-                ScrollHintPill(drawList, centerX, inner.Y, chevronSize, hint, pointsUp: true);
+                if (drawHints)
+                {
+                    ScrollHintPill(drawList, centerX, inner.Y, chevronSize, hint, pointsUp: true);
+                }
             }
 
             if (downStrength > 0f)
@@ -1047,7 +1053,10 @@ public static partial class SpheneUI
                 var hint = ColorUtils.ToU32(new Vector4(1f, 1f, 1f, ScrollHintChevronAlpha * downStrength));
                 VerticalFade(drawList, new Vector2(inner.X, innerMax.Y - height), innerMax,
                     transparentColor, opaque, 0f, 0f, bottomLeftRadius, bottomRightRadius);
-                ScrollHintPill(drawList, centerX, innerMax.Y, chevronSize, hint, pointsUp: false);
+                if (drawHints)
+                {
+                    ScrollHintPill(drawList, centerX, innerMax.Y, chevronSize, hint, pointsUp: false);
+                }
             }
 
             drawList.PopClipRect();
