@@ -801,6 +801,8 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             Logger.LogDebug("Individual Pair: {userPair}", userPair);
             _pairManager.AddUserPair(userPair);
         }
+
+        _pairManager.MarkInitialPairListLoaded();
     }
 
     private async Task LoadOnlinePairsAsync()
@@ -834,8 +836,9 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
             return;
         }
 
-        var hasAnyPairs = _pairManager.DirectPairs.Count > 0 || _pairManager.GroupPairs.Count > 0;
-        if (!hasAnyPairs)
+        // Only a completed sweep satisfies this - early server pushes merely
+        // patch single rows and must not suppress the authoritative list load.
+        if (_pairManager.RequiresInitialPairLoad)
         {
             await LoadIninitialPairsAsync().ConfigureAwait(false);
         }

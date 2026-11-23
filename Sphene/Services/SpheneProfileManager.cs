@@ -24,7 +24,9 @@ public class SpheneProfileManager : MediatorSubscriberBase
     /// <summary>Last seen identity row per uid - DisplayName/Alias resolve
     /// for surfaces that only carry a uid (comments, staff rosters).</summary>
     private readonly ConcurrentDictionary<string, UserData> _userIdentities = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<UserData, byte> _profileExtrasLoading = new(UserDataComparer.Instance);
+    private static readonly TimeSpan _profileFetchRetryDelay = TimeSpan.FromSeconds(15);
+    private readonly ProfileFetchTracker<UserData> _profileFetchTracker = new(UserDataComparer.Instance, _profileFetchRetryDelay);
+    private readonly ProfileFetchTracker<UserData> _extrasFetchTracker = new(UserDataComparer.Instance, _profileFetchRetryDelay);
 
     private readonly SpheneProfileData _defaultProfileData = new(IsFlagged: false, IsNSFW: false, _spheneLogo, string.Empty, _noDescription);
     private readonly SpheneProfileData _loadingProfileData = new(IsFlagged: false, IsNSFW: false, _spheneLogoLoading, string.Empty, "Loading Data from server...");
@@ -42,35 +44,65 @@ public class SpheneProfileManager : MediatorSubscriberBase
             {
                 _spheneProfiles.Remove(msg.UserData, out _);
                 _spheneProfileExtras.Remove(msg.UserData, out _);
-                _profileExtrasLoading.Remove(msg.UserData, out _);
                 _userIdentities.Remove(msg.UserData.UID, out _);
+                _profileFetchTracker.Drop(msg.UserData);
+                _extrasFetchTracker.Drop(msg.UserData);
             }
             else
             {
                 _spheneProfiles.Clear();
                 _spheneProfileExtras.Clear();
-                _profileExtrasLoading.Clear();
                 _userIdentities.Clear();
+                _profileFetchTracker.Reset();
+                _extrasFetchTracker.Reset();
             }
         });
         Mediator.Subscribe<DisconnectedMessage>(this, (_) =>
         {
             _spheneProfiles.Clear();
             _spheneProfileExtras.Clear();
-            _profileExtrasLoading.Clear();
             _userIdentities.Clear();
+            _profileFetchTracker.Reset();
+            _extrasFetchTracker.Reset();
+        });
+        Mediator.Subscribe<ConnectedMessage>(this, (_) =>
+        {
+            _profileFetchTracker.ResetFailures();
+            _extrasFetchTracker.ResetFailures();
+            // Entries parked on the placeholder after a failed fetch are
+            // dropped so the next read pulls the real profile instead of
+            // waiting out the retry cooldown.
+            foreach (var kvp in _spheneProfiles)
+            {
+                if (ReferenceEquals(kvp.Value, _defaultProfileData))
+                    _spheneProfiles.TryRemove(kvp.Key, out var _);
+            }
         });
     }
 
     public SpheneProfileData GetSpheneProfile(UserData data)
     {
-        if (!_spheneProfiles.TryGetValue(data, out var profile))
+        if (_spheneProfiles.TryGetValue(data, out var profile)
+            && !ReferenceEquals(profile, _defaultProfileData))
         {
-            _ = Task.Run(() => GetSpheneProfileFromService(data));
-            return (_loadingProfileData);
+            return profile;
         }
 
-        return (profile);
+        // A hub read only makes sense while connected - offline reads return
+        // the uncached placeholder so no failed entry is ever parked.
+        if (!_apiController.IsConnected)
+        {
+            return profile ?? _defaultProfileData;
+        }
+
+        if (_profileFetchTracker.TryBeginFetch(data, DateTimeOffset.UtcNow))
+        {
+            _spheneProfiles[data] = _loadingProfileData;
+            _ = Task.Run(() => GetSpheneProfileFromService(data));
+            return _loadingProfileData;
+        }
+
+        return profile ?? _loadingProfileData;
     }
 
     /// <summary>True while <paramref name="data"/>'s profile is still being fetched from the server.</summary>
@@ -90,7 +122,11 @@ public class SpheneProfileManager : MediatorSubscriberBase
         {
             return extras;
         }
-        if (_profileExtrasLoading.TryAdd(data, 0))
+        if (!_apiController.IsConnected)
+        {
+            return null;
+        }
+        if (_extrasFetchTracker.TryBeginFetch(data, DateTimeOffset.UtcNow))
         {
             _ = Task.Run(() => GetProfileExtrasFromService(data));
         }
@@ -99,7 +135,7 @@ public class SpheneProfileManager : MediatorSubscriberBase
 
     /// <summary>True while <paramref name="data"/>'s extras are being fetched.</summary>
     public bool IsProfileExtrasLoading(UserData data)
-        => _profileExtrasLoading.ContainsKey(data);
+        => _extrasFetchTracker.IsInFlight(data);
 
     /// <summary>Patches the cached extras after a local write - saves the refetch.</summary>
     public void UpdateProfileExtras(UserData data,
@@ -124,7 +160,7 @@ public class SpheneProfileManager : MediatorSubscriberBase
     public void InvalidateProfileExtras(UserData data)
     {
         _spheneProfileExtras.Remove(data, out _);
-        _profileExtrasLoading.Remove(data, out _);
+        _extrasFetchTracker.Drop(data);
     }
 
     private async Task GetProfileExtrasFromService(UserData data)
@@ -133,15 +169,13 @@ public class SpheneProfileManager : MediatorSubscriberBase
         {
             var extras = await _apiController.UserGetProfileExtras(new API.Dto.User.UserDto(data)).ConfigureAwait(false);
             _spheneProfileExtras[data] = extras;
+            _extrasFetchTracker.ReportSucceeded(data);
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to get profile extras for user {user}", data);
-            _spheneProfileExtras[data] = new API.Dto.User.UserProfileExtrasDto(data, null, null);
-        }
-        finally
-        {
-            _profileExtrasLoading.Remove(data, out _);
+            // no placeholder cached - a transient failure must not hide real extras
+            _extrasFetchTracker.ReportFailed(data, DateTimeOffset.UtcNow);
         }
     }
 
@@ -149,7 +183,6 @@ public class SpheneProfileManager : MediatorSubscriberBase
     {
         try
         {
-            _spheneProfiles[data] = _loadingProfileData;
             var profile = await _apiController.UserGetProfile(new API.Dto.User.UserDto(data)).ConfigureAwait(false);
             if (profile.User != null) _userIdentities[profile.User.UID] = profile.User;
             SpheneProfileData profileData = new(profile.Disabled, profile.IsNSFW ?? false,
@@ -168,12 +201,15 @@ public class SpheneProfileManager : MediatorSubscriberBase
             {
                 _spheneProfiles[data] = profileData;
             }
+            _profileFetchTracker.ReportSucceeded(data);
         }
         catch (Exception ex)
         {
-            // if fails save DefaultProfileData to dict
+            // The placeholder is parked but retryable - a failure must not pin
+            // it for the rest of the session.
             Logger.LogWarning(ex, "Failed to get Profile from service for user {user}", data);
             _spheneProfiles[data] = _defaultProfileData;
+            _profileFetchTracker.ReportFailed(data, DateTimeOffset.UtcNow);
         }
     }
 }

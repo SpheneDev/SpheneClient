@@ -56,6 +56,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
     private readonly HashSet<string> _unseenInboundIndividualPairRequestUids = new(StringComparer.Ordinal);
     private readonly HashSet<string> _ignoredInboundIndividualPairRequestUids = new(StringComparer.Ordinal);
 
+    private readonly PairListSyncGate _pairListSyncGate = new();
     private Lazy<List<Pair>> _directPairsInternal;
     private Lazy<Dictionary<GroupFullInfoDto, List<Pair>>> _groupPairsInternal;
     private Lazy<Dictionary<Pair, List<GroupFullInfoDto>>> _pairsWithGroupsInternal;
@@ -126,6 +127,13 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
 
         ClearAllCachedPairCharacterDataOnStartup();
     }
+
+    /// <summary>True until the authoritative pair list was pulled since the
+    /// last <see cref="ClearPairs"/>. Early server pushes only patch single
+    /// rows and must not suppress the full sweep.</summary>
+    public bool RequiresInitialPairLoad => _pairListSyncGate.RequiresInitialLoad;
+
+    internal void MarkInitialPairListLoaded() => _pairListSyncGate.MarkInitialListLoaded();
 
     public List<Pair> DirectPairs => _directPairsInternal.Value;
 
@@ -397,6 +405,7 @@ public sealed class PairManager : DisposableMediatorSubscriberBase
         ClearCurrentPairCharacterCache();
         _allClientPairs.Clear();
         _allGroups.Clear();
+        _pairListSyncGate.OnPairsCleared();
         _pendingOnlineDtos.Clear();
         _pendingCharaDataDtos.Clear();
         _individualPairRequestLock.Enter();
