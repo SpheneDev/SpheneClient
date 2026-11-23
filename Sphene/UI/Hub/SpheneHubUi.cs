@@ -2882,9 +2882,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         SpheneUI.Layout.RegisterPageHelp("home", HomeHelpContent);
         DrawHomeHero(profile, accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
         DrawHomeQuickNav();
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
 
         _communityFeed.EnsureRequested();
         var items = _communityFeed.Items;
@@ -2898,7 +2898,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.TableSetupColumn("side", ImGuiTableColumnFlags.WidthStretch, 1f);
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
-            DrawHomePendingCard(accent);
             DrawHomeFeedCard(accent);
             ImGui.TableSetColumnIndex(1);
             DrawHomeGlanceCard(accent);
@@ -2906,7 +2905,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             DrawHomeNewsCard(accent);
         }
 
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
         DrawHomeDiscoverStrip(accent);
     }
 
@@ -2972,10 +2971,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.SameLine(0f, 0f);
             DrawGlanceStat("pending", pending.ToString(), w,
                 FontAwesomeIcon.Clock, SpheneUI.Palette.NetworkWarning,
-                () => SetPage(SpheneHubPage.Home));
+                () => SpheneUI.Popups.ToggleFlyout("hub-inbox"));
 
         }, title: "Overview", accentColor: accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
     private static void DrawGlanceStat(string label, string value, float w,
@@ -3093,25 +3092,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
             }
         }, title: "Latest moments", accentColor: accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-    }
-
-    /// <summary>
-    /// "Needs attention" - live pair requests plus inbox items (mod
-    /// transfers, updates, area-bound consents) with inline actions. The
-    /// card only renders while something is actually pending.
-    /// </summary>
-    private void DrawHomePendingCard(Vector4 accent)
-    {
-        if (NotificationInbox.PendingCount(_notificationInbox, _pairManager) == 0)
-        {
-            return;
-        }
-        SpheneUI.Layout.SectionCard(() =>
-        {
-            NotificationInbox.Draw(_notificationInbox, _pairManager, _apiController, Mediator);
-        }, title: "Needs attention", accentColor: accent, border: true);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
     /// <summary>
@@ -3224,7 +3205,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
             }
         }, accentColor: accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
     /// <summary>Deep-link routing for feed rows. Section-tagged rows land on

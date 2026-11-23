@@ -103,9 +103,9 @@ public static partial class SpheneUI
         /// <summary>Gap between sibling cards on a page.</summary>
         public static Space CardGap => Density.Current switch
         {
-            DensityProfile.Compact => X4,
-            DensityProfile.Comfortable => X12,
-            _ => X8,
+            DensityProfile.Compact => X2,
+            DensityProfile.Comfortable => X8,
+            _ => X4,
         };
 
         /// <summary>Inner padding of cards.</summary>
