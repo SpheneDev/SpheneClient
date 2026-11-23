@@ -2902,7 +2902,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ImGui.TableSetColumnIndex(1);
             DrawHomeGlanceCard(accent);
             DrawHomeMomentsCard(accent, items);
-            DrawHomeNewsCard(accent);
         }
 
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
@@ -2921,6 +2920,30 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             if (p.IsOnline) online++;
         }
         var shells = _pairManager.GroupPairs.Keys.Count;
+
+        // News tile status · an undismissed update push outranks the
+        // announcement count; both collapse into one line when pending.
+        _announcements.EnsureRequested();
+        var announcements = _announcements.Items;
+        var updatePending = false;
+        foreach (var inboxItem in _notificationInbox.GetItems())
+        {
+            if (inboxItem.Kind == InboxKind.Update)
+            {
+                updatePending = true;
+                break;
+            }
+        }
+        var newsSub = updatePending && announcements.Count > 0
+            ? $"Update + {announcements.Count} announcements"
+            : updatePending
+                ? "Update available"
+                : announcements.Count > 0
+                    ? $"{announcements.Count} announcements"
+                    : _announcements.IsLoading
+                        ? "Checking…"
+                        : _apiController.IsConnected ? "All caught up" : "Offline";
+
         (FontAwesomeIcon Icon, Vector4 Tint, string Title, string Sub,
             SpheneHubPage Page)[] tiles =
             [
@@ -2930,8 +2953,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     "Friends", $"{online} online", SpheneHubPage.Friends),
                 (FontAwesomeIcon.Newspaper, SpheneUI.Palette.SpheneMagenta,
                     "Community", "Discover", SpheneHubPage.Community),
-                (FontAwesomeIcon.Home, SpheneUI.Palette.EtherealPurple,
-                    "Housing", "Your places", SpheneHubPage.Housing),
+                (FontAwesomeIcon.Bullhorn,
+                    updatePending ? SpheneUI.Palette.NetworkActive : SpheneUI.Palette.SpheneGold,
+                    "News & Updates", newsSub, SpheneHubPage.News),
             ];
         SpheneUI.Layout.CardGrid(tiles, 170f * SpheneUI.Scale, (tile, _) =>
         {
@@ -3557,54 +3581,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             onClick();
         }
-    }
-
-    /// <summary>
-    /// The news slot · today it surfaces the installed version and links into
-    /// release notes; future announcements/community entries plug in here.
-    /// </summary>
-    private void DrawHomeNewsCard(Vector4 accent)
-    {
-        SpheneUI.Layout.SectionCard(() =>
-        {
-            var version = System.Reflection.Assembly.GetExecutingAssembly()
-                .GetName().Version?.ToString() ?? "unknown";
-            var titleText = $"Sphene v{version} installed";
-            var descText = "Release notes, announcements and community updates land in this feed.";
-
-            var scale = SpheneUI.Scale;
-            var drawList = ImGui.GetWindowDrawList();
-            var pos = ImGui.GetCursorScreenPos();
-            var availW = ImGui.GetContentRegionAvail().X;
-            var gap = 3f * scale;
-            var titleSize = ImGui.CalcTextSize(titleText);
-            var descSize = ImGui.CalcTextSize(descText, false, availW);
-            var pad = new Vector2(6f * scale, 4f * scale);
-            var blockSize = new Vector2(
-                MathF.Max(titleSize.X, descSize.X) + pad.X * 2f,
-                titleSize.Y + gap + descSize.Y + pad.Y * 2f);
-
-            ImGui.SetCursorScreenPos(pos - pad);
-            var clicked = ImGui.InvisibleButton("##home-news-version", blockSize);
-            var hovered = ImGui.IsItemHovered();
-            if (hovered)
-            {
-                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                drawList.AddRectFilled(pos - pad, pos - pad + blockSize,
-                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                        SpheneUI.Colors.TextPrimary, 0.07f)), 5f * scale);
-            }
-            ImGui.SetCursorScreenPos(pos);
-            SpheneUI.Text.Colored(titleText,
-                hovered ? SpheneUI.Colors.TextPrimary : SpheneUI.Colors.TextSecondary);
-            ImGui.SetCursorScreenPos(pos + new Vector2(0f, titleSize.Y + gap));
-            SpheneUI.Text.MutedWrapped(descText);
-            SpheneUI.AttachTooltip("Open News & Updates");
-            if (clicked)
-            {
-                SetPage(SpheneHubPage.News);
-            }
-        }, title: "News & Updates", accentColor: accent);
     }
 
     private static Vector4 CommunityAccent => SpheneUI.Theme.Current.AccentBlue;
