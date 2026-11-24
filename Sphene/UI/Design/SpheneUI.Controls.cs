@@ -638,6 +638,10 @@ public static partial class SpheneUI
                     value = model;
                 }
             }
+            else if (!string.Equals(view, value, StringComparison.Ordinal))
+            {
+                value = view;
+            }
             if (hideText)
             {
                 ImGui.PopStyleColor();
@@ -679,6 +683,10 @@ public static partial class SpheneUI
             var view = codec?.Encode(value) ?? value;
             var changed = ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth),
                 ref view, maxLength, size, flags, callback, ref context);
+            // the write-back is unconditional: the codec path expands
+            // placeholders into the model, the passthrough path hands the
+            // buffer content back verbatim - a null codec must never turn
+            // the input write-only (typed text never reaching the model)
             if (codec != null)
             {
                 var model = codec.Expand(view);
@@ -686,6 +694,10 @@ public static partial class SpheneUI
                 {
                     value = model;
                 }
+            }
+            else if (!string.Equals(view, value, StringComparison.Ordinal))
+            {
+                value = view;
             }
             Lint.CheckBounds(label);
             return changed;

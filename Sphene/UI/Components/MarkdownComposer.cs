@@ -64,11 +64,6 @@ public sealed class MarkdownComposer
     /// friends); null hides the typeahead.</summary>
     public Func<IEnumerable<MentionCandidate>>? MentionProvider { get; set; }
 
-    /// <summary>One queued buffer edit - executes inside the input callback
-    /// where UTF-8 byte positions and <c>InsertChars</c>/<c>DeleteChars</c>
-    /// apply directly to the live ImGui buffer.</summary>
-    private delegate void ComposerEdit(ref ImGuiInputTextCallbackData data);
-
     /// <summary>Mutable callback context - the queue of pending edits plus
     /// the last-known caret/selection snapshot. Lives as a settable field so
     /// it can be handed to the callback by ref.</summary>
@@ -80,7 +75,10 @@ public sealed class MarkdownComposer
         /// <summary>Caret as an index into the model string - view offsets
         /// differ once placeholders (1 char) stand in for sequences (N chars).</summary>
         public int ModelCaret = -1;
-        public readonly Queue<ComposerEdit> Pending = new();
+        /// <summary>When &gt;= 0 the callback forces caret+selection to this
+        /// view offset once - markup edits set it so the caret lands behind
+        /// the inserted markers after the managed splice.</summary>
+        public int CaretTarget = -1;
         /// <summary>Placeholder codec: emoji occupy one BMP char each in the
         /// 16-bit ImWchar buffer - real sequences live only in the model.</summary>
         public readonly Helpers.Emoji.EmojiTextCodec Codec = new();
@@ -99,6 +97,8 @@ public sealed class MarkdownComposer
 
     private EditContext _edit = new();
     private bool _refocus;
+    private string? _pendingInsert;
+    private int _editEpoch;
     private string _colorHex = "#ffffff";
 
     /// <summary>Set false by hosts that provide their own full preview
@@ -137,13 +137,21 @@ public sealed class MarkdownComposer
         {
             SpheneUI.Text.Colored(_error, SpheneUI.Palette.Warning);
         }
-        // Queued toolbar edits apply inside the input callback - force focus
-        // this frame so the callback runs (it fires while the widget is
-        // active) and the edit lands in the same frame as the click.
+        // markup edits are applied to the model synchronously at click time -
+        // the refocus merely returns the caret to the input so the caret
+        // target lands and typing continues where the edit left off
         if (_refocus)
         {
             _refocus = false;
             ImGui.SetKeyboardFocusHere();
+        }
+        if (_pendingInsert != null)
+        {
+            // the pick landed outside the body's ref scope - splice it now,
+            // one frame later, through the same managed path
+            var insert = _pendingInsert;
+            _pendingInsert = null;
+            body = ApplyInsert(body, insert);
         }
         var emoji = SpheneUI.EmojiPickerHook;
         var emojiW = PlainText && emoji != null && !previewing
@@ -158,14 +166,20 @@ public sealed class MarkdownComposer
             var inputW = emojiW > 0f
                 ? MathF.Max(60f * scale, ImGui.GetContentRegionAvail().X - emojiW)
                 : -1f;
-            // 16-bit ImWchar buffer: emoji ride as placeholders, the model keeps real text
+            // 16-bit ImWchar buffer: emoji ride as placeholders, the model keeps real text.
+            // The id carries the edit epoch - a managed splice bumps it, the
+            // widget state re-initializes from the edited text instead of
+            // resurrecting the stale pre-edit buffer over the model.
             var view = _edit.Codec.Encode(body);
-            SpheneUI.Controls.InputTextMultiline(label, ref view, maxLength,
+            SpheneUI.Controls.InputTextMultiline(label + "##me" + _editEpoch, ref view, maxLength,
                 new Vector2(inputW, h), flags, OnInputCallback, ref _edit,
                 trailingWidth: 0f, preferredWidth: -1f);
             var expanded = _edit.Codec.Expand(view);
             if (!string.Equals(expanded, body, StringComparison.Ordinal))
             {
+                SpheneUI.LogDebug($"[ComposerDebug] roundtrip-write id={_id} epoch={_editEpoch} "
+                    + $"model='{SanitizeForLog(body)}' view='{SanitizeForLog(view)}' "
+                    + $"expanded='{SanitizeForLog(expanded)}'");
                 body = expanded;
             }
             _edit.ModelCaret = _edit.CaretB >= 0
@@ -193,10 +207,18 @@ public sealed class MarkdownComposer
     private static int OnInputCallback(ref ImGuiInputTextCallbackData data,
         ref EditContext ctx)
     {
-        while (ctx.Pending.Count > 0)
+        if (ctx.CaretTarget >= 0)
         {
-            ctx.Pending.Dequeue()(ref data);
-            data.BufDirty = 1;
+            var t = Math.Min(ctx.CaretTarget, data.BufTextLen);
+            data.SelectionStart = data.SelectionEnd = data.CursorPos = t;
+            ctx.CaretTarget = -1;
+        }
+        if (ctx.SelStartB != data.SelectionStart || ctx.SelEndB != data.SelectionEnd
+            || ctx.CaretB != data.CursorPos)
+        {
+            SpheneUI.LogDebug($"[ComposerDebug] snapshot sel=({data.SelectionStart},{data.SelectionEnd}) "
+                + $"caret={data.CursorPos} bufLen={data.BufTextLen} "
+                + $"was=({ctx.SelStartB},{ctx.SelEndB})/{ctx.CaretB}");
         }
         ctx.SelStartB = data.SelectionStart;
         ctx.SelEndB = data.SelectionEnd;
@@ -216,90 +238,95 @@ public sealed class MarkdownComposer
     }
 
     /// <summary>Queues a caret insertion from an outside control (emoji
-    /// picker) - same path the toolbar buttons use.</summary>
-    public void QueueInsertText(string insert) => QueueInsert(insert);
+    /// picker). The pick arrives without access to the bound body, so the
+    /// payload defers one frame and splices at the top of the next Draw -
+    /// same managed path the toolbar edits use.</summary>
+    public void QueueInsertText(string insert)
+    {
+        _pendingInsert = insert;
+        _refocus = true;
+    }
+
+    /// <summary>Splices <paramref name="payload"/> over the captured range
+    /// of the encoded view and writes the expanded model back. Positions are
+    /// ImWchar units; the buffer is BMP-only by codec construction, so they
+    /// index the view string directly. All markup editing goes through here
+    /// - pure managed string surgery, immune to input activation timing:
+    /// the text can never be eaten by a lost or mistimed callback edit.</summary>
+    private string ApplySplice(string body, string payload, int caretInView)
+    {
+        var view = _edit.Codec.Encode(body);
+        var (s, e, _) = EditRange();
+        s = Math.Clamp(s, 0, view.Length);
+        e = Math.Clamp(e, s, view.Length);
+        var newView = string.Concat(view.AsSpan(0, s), payload, view.AsSpan(e));
+        _edit.CaretTarget = s + Math.Clamp(caretInView, 0, payload.Length);
+        _refocus = true;
+        // force the input state to reload from the edited model: ImGui keys
+        // buffer/selection/undo per widget id and never follows externally
+        // rewritten text mid-edit - without a fresh id the stale buffer
+        // round-trips back over the splice and reverts it
+        _editEpoch++;
+        SpheneUI.LogDebug($"[ComposerDebug] splice id={_id} s={s} e={e} viewLen={view.Length} "
+            + $"payload='{SanitizeForLog(payload)}' caret={_edit.CaretTarget} "
+            + $"sel=({_edit.SelStartB},{_edit.SelEndB}) caretB={_edit.CaretB}");
+        return _edit.Codec.Expand(newView);
+    }
+
+    private static string SanitizeForLog(string text)
+        => text.Length <= 40 ? text.Replace("\n", "\\n") : text[..40].Replace("\n", "\\n") + "…";
 
     /// <summary>Inserts <paramref name="insert"/> at the caret or replaces the
     /// selection; the caret lands at <paramref name="caretOffsetInInsert"/>
-    /// UTF-8 bytes inside the inserted text (end = default).</summary>
-    private void QueueInsert(string insert, int caretOffsetInInsert = -1)
+    /// chars inside the inserted text (end = default).</summary>
+    private string ApplyInsert(string body, string insert, int caretOffsetInInsert = -1)
     {
-        _edit.Pending.Enqueue((ref ImGuiInputTextCallbackData d) =>
-        {
-            var (s, e, _) = EditRange();
-            var bounds = d.BufTextLen;
-            s = Math.Clamp(s, 0, bounds);
-            e = Math.Clamp(e, s, bounds);
-            if (e > s) d.DeleteChars(s, e - s);
-            var encoded = _edit.Codec.Encode(insert);
-            d.InsertChars(s, encoded);
-            var caret = s + (caretOffsetInInsert < 0
-                ? encoded.Length : caretOffsetInInsert);
-            d.SelectionStart = d.SelectionEnd = d.CursorPos = caret;
-        });
-        _refocus = true;
+        var encoded = _edit.Codec.Encode(insert);
+        return ApplySplice(body, encoded,
+            caretOffsetInInsert < 0 ? encoded.Length : caretOffsetInInsert);
     }
 
     /// <summary>Wraps the selection in <paramref name="prefix"/>/<paramref name="suffix"/>;
     /// without a selection inserts the empty pair with the caret between
     /// the markers.</summary>
-    private void QueueWrap(string prefix, string suffix)
+    private string ApplyWrap(string body, string prefix, string suffix)
     {
-        _edit.Pending.Enqueue((ref ImGuiInputTextCallbackData d) =>
-        {
-            var (s, e, had) = EditRange();
-            var bounds = d.BufTextLen;
-            s = Math.Clamp(s, 0, bounds);
-            e = Math.Clamp(e, s, bounds);
-            if (had)
-            {
-                d.InsertChars(e, _edit.Codec.Encode(suffix));
-                d.InsertChars(s, _edit.Codec.Encode(prefix));
-                d.SelectionStart = d.SelectionEnd = d.CursorPos =
-                    e + prefix.Length + suffix.Length;
-            }
-            else
-            {
-                d.InsertChars(s, _edit.Codec.Encode(prefix + suffix));
-                d.SelectionStart = d.SelectionEnd = d.CursorPos = s + prefix.Length;
-            }
-        });
-        _refocus = true;
+        var view = _edit.Codec.Encode(body);
+        var (s, e, had) = EditRange();
+        s = Math.Clamp(s, 0, view.Length);
+        e = Math.Clamp(e, s, view.Length);
+        var inner = view[s..e];
+        return ApplySplice(body, prefix + inner + suffix,
+            had ? inner.Length + prefix.Length + suffix.Length : prefix.Length);
     }
 
-    private void QueueLink()
+    private string ApplyLink(string body)
     {
-        _edit.Pending.Enqueue((ref ImGuiInputTextCallbackData d) =>
+        var view = _edit.Codec.Encode(body);
+        var (s, e, had) = EditRange();
+        s = Math.Clamp(s, 0, view.Length);
+        e = Math.Clamp(e, s, view.Length);
+        if (had)
         {
-            var (s, e, had) = EditRange();
-            var bounds = d.BufTextLen;
-            s = Math.Clamp(s, 0, bounds);
-            e = Math.Clamp(e, s, bounds);
-            if (had)
-            {
-                // Selected text becomes the link label; caret waits in the URL.
-                d.InsertChars(e, "]()");
-                d.InsertChars(s, "[");
-                d.SelectionStart = d.SelectionEnd = d.CursorPos = e + 3;
-            }
-            else
-            {
-                d.InsertChars(s, "[]()");
-                d.SelectionStart = d.SelectionEnd = d.CursorPos = s + 1;
-            }
-        });
-        _refocus = true;
+            // Selected text becomes the link label; caret waits in the URL.
+            return ApplySplice(body, "[" + view[s..e] + "]()", view[s..e].Length + 3);
+        }
+        return ApplySplice(body, "[]()", 1);
     }
 
     private void DrawToolbar(float scale, ref string body, bool previewing)
     {
+        // ref params can't be captured by the local button functions - the
+        // toolbar edits this captured copy synchronously and it writes back
+        // to the caller's body at the end of the toolbar pass
+        var text = body;
         var gap = SpheneUI.Spacing.X2.Scaled;
         ImGui.PushID(_id);
         void WrapBtn(FontAwesomeIcon icon, string tip, string pre, string post)
         {
             if (SpheneUI.Icons.Button(icon))
             {
-                QueueWrap(pre, post);
+                text = ApplyWrap(text, pre, post);
             }
             SpheneUI.AttachTooltip(tip);
             ImGui.SameLine(0f, gap);
@@ -308,7 +335,7 @@ public sealed class MarkdownComposer
         {
             if (SpheneUI.Icons.Button(icon))
             {
-                QueueInsert(insert, caret);
+                text = ApplyInsert(text, insert, caret);
             }
             SpheneUI.AttachTooltip(tip);
             ImGui.SameLine(0f, gap);
@@ -330,7 +357,7 @@ public sealed class MarkdownComposer
             InsertBtn(FontAwesomeIcon.ListUl, "List", "\n- item\n- item\n", 3);
             if (SpheneUI.Icons.Button(FontAwesomeIcon.Link))
             {
-                QueueLink();
+                text = ApplyLink(text);
             }
             SpheneUI.AttachTooltip("Link (selection becomes the label)");
             ImGui.SameLine(0f, gap);
@@ -395,21 +422,22 @@ public sealed class MarkdownComposer
         }
         if (SpheneUI.Popups.BeginFlyout("size-" + _id))
         {
-            DrawSizeFlyout();
+            DrawSizeFlyout(ref text);
             SpheneUI.Popups.EndFlyout();
         }
         if (SpheneUI.Popups.BeginFlyout("color-" + _id))
         {
-            DrawColorFlyout();
+            DrawColorFlyout(ref text);
             SpheneUI.Popups.EndFlyout();
         }
-        DrawMentionTypeahead(ref body);
+        DrawMentionTypeahead(ref text);
+        body = text;
         _ = scale;
     }
 
     /// <summary>Size presets - each wraps the selection in
     /// <c>&lt;size=N&gt;…&lt;/size&gt;</c> (or inserts an empty pair).</summary>
-    private void DrawSizeFlyout()
+    private void DrawSizeFlyout(ref string body)
     {
         SpheneUI.Text.Muted("Text size");
         foreach (var pt in SizePresets)
@@ -417,7 +445,7 @@ public sealed class MarkdownComposer
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.TextHeight,
                     $"{pt} pt", isInPopup: true))
             {
-                QueueWrap($"<size={pt}>", "</size>");
+                body = ApplyWrap(body, $"<size={pt}>", "</size>");
                 SpheneUI.Popups.CloseFlyout("size-" + _id);
             }
         }
@@ -425,7 +453,7 @@ public sealed class MarkdownComposer
 
     /// <summary>Preset swatches plus a full picker - picks wrap the selection
     /// in <c>&lt;color=#rrggbb&gt;…&lt;/color&gt;</c>.</summary>
-    private void DrawColorFlyout()
+    private void DrawColorFlyout(ref string body)
     {
         SpheneUI.Text.Muted("Text color");
         foreach (var (name, col) in ColorPresets)
@@ -433,7 +461,7 @@ public sealed class MarkdownComposer
             if (SpheneUI.Controls.ColorSwatch($"##mcp{name}" + _id, col,
                     selected: false))
             {
-                QueueWrap($"<color={HexOf(col)}>", "</color>");
+                body = ApplyWrap(body, $"<color={HexOf(col)}>", "</color>");
                 SpheneUI.Popups.CloseFlyout("color-" + _id);
             }
             SpheneUI.AttachTooltip(name);
@@ -450,7 +478,7 @@ public sealed class MarkdownComposer
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Apply custom color",
                 isInPopup: true))
         {
-            QueueWrap($"<color={_colorHex}>", "</color>");
+            body = ApplyWrap(body, $"<color={_colorHex}>", "</color>");
             SpheneUI.Popups.CloseFlyout("color-" + _id);
         }
     }
@@ -526,7 +554,8 @@ public sealed class MarkdownComposer
     {
         if (PendingInserts.TryRemove(_id, out var ins))
         {
-            QueueInsert(ins);
+            _pendingInsert = ins;
+            _refocus = true;
         }
     }
 
@@ -562,7 +591,8 @@ public sealed class MarkdownComposer
         {
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Insert"))
             {
-                QueueInsert(" " + token);
+                _pendingInsert = " " + token;
+            _refocus = true;
                 _refInput = null;
                 SpheneUI.Popups.CloseFlyout("ref-" + _id);
             }
