@@ -446,23 +446,10 @@ public static class FeedItemRow
         bool chipsClickable = false,
         List<(string Emoji, Vector4 Rect)>? chipRects = null)
     {
-        // the capsule is taller than the bare glyphs: padY of air top and
-        // bottom, contents centered inside - row height carries the extra
-        var padY = PillPadY * scale;
-        var pillH = lineH + 2f * padY;
-        var centerY = y + pillH * 0.5f;
         // Two capsules: the stats pill (like/comment/views) and the reactions
         // pill (emoji chips + trailing add affordance). Both render inside
         // the existing line metric - the row height contract is unchanged.
-        var mutedU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
-        var accentU = SpheneUI.ColorUtils.ToU32(accent);
-        var surfaceU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.Surface);
-        var borderU = SpheneUI.ColorUtils.ToU32(new Vector4(
-            SpheneUI.Colors.Border.X, SpheneUI.Colors.Border.Y,
-            SpheneUI.Colors.Border.Z, 0.35f));
         var iconGap = 4f * scale;
-        var segGap = 10f * scale;
-        var padX = 8f * scale;
         var pillGap = 8f * scale;
         likeRect = Vector4.Zero;
         commentRect = Vector4.Zero;
@@ -488,46 +475,27 @@ public static class FeedItemRow
             shown.Add((s.Icon, s.Count, s.Clickable, s.Active, s.Slot, w));
         }
 
-        void Capsule(float cx, float cw)
-        {
-            drawList.AddRectFilled(new Vector2(cx, y), new Vector2(cx + cw, y + pillH),
-                surfaceU, pillH * 0.5f);
-            drawList.AddRect(new Vector2(cx, y), new Vector2(cx + cw, y + pillH),
-                borderU, pillH * 0.5f, ImDrawFlags.None, 1f);
-        }
-
         var sx = x;
         if (shown.Count > 0)
         {
-            var statsW = padX * 2f;
-            foreach (var s in shown) statsW += s.W;
-            statsW += segGap * (shown.Count - 1);
-            Capsule(sx, statsW);
-            var cx = sx + padX;
+            // the shared stats capsule - one implementation for feed rows
+            // and comment-thread strips; slot indices map back to the
+            // like/comment hit outs
+            var statSegs = new List<ReactionPillBar.StatsSegment>(shown.Count);
+            var slotIndex = new[] { -1, -1, -1 };
             foreach (var s in shown)
             {
-                var hovered = s.Clickable && ImGui.IsMouseHoveringRect(
-                    new Vector2(cx, y), new Vector2(cx + s.W, y + pillH));
-                var col = hovered || s.Active ? accentU : mutedU;
-                var gw = ReactionPillBar.DrawCenteredIcon(drawList, s.Icon,
-                    cx, centerY, lineH, col);
-                var num = s.Count is > 0 ? s.Count.Value.ToString() : null;
-                if (num != null)
-                {
-                    drawList.AddText(new Vector2(cx + gw + iconGap,
-                        ReactionPillBar.OpticalTextY(centerY, lineH)), col, num);
-                }
-                if (hovered)
-                {
-                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                }
-                if (s.Clickable)
-                {
-                    var r = new Vector4(cx, y, cx + s.W, y + pillH);
-                    if (s.Slot == 0) likeRect = r;
-                    else if (s.Slot == 1) commentRect = r;
-                }
-                cx += s.W + segGap;
+                slotIndex[s.Slot] = statSegs.Count;
+                statSegs.Add(new ReactionPillBar.StatsSegment(
+                    s.Icon, s.Count, s.Active, s.Clickable));
+            }
+            var statRects = new List<(int Slot, Vector4 Rect)>();
+            var statsW = ReactionPillBar.DrawStats(drawList, new Vector2(sx, y),
+                lineH, scale, accent, statSegs, statRects);
+            foreach (var (slot, r) in statRects)
+            {
+                if (slot == slotIndex[0]) likeRect = r;
+                else if (slot == slotIndex[1]) commentRect = r;
             }
             sx += statsW;
         }

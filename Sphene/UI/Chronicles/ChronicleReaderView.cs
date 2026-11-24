@@ -141,7 +141,7 @@ public static class ChronicleReaderView
             SpheneUI.Layout.Separator();
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             comments.Draw(CommentTargetKind.Blog, post.Id, authorUid, null, ops,
-                post.CommentsLocked, post.CommentCount);
+                post.CommentsLocked, post.CommentCount, post.ViewCount);
         }
     }
 

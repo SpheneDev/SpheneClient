@@ -74,6 +74,73 @@ internal static class ReactionPillBar
         return w;
     }
 
+    /// <summary>The width the reactions capsule will occupy for these
+    /// chips within <paramref name="maxWidth"/> - runs the same trailing-
+    /// chip drop pass as Draw, so hit zones sized from it always match the
+    /// rendered capsule. Hosts need this before submitting overlay buttons
+    /// (the overlay must span the pill exactly, never the whole line -
+    /// full-width overlays push same-line followers off the card edge).</summary>
+    public static float MeasureWidth(float lineH, float scale,
+        IReadOnlyList<(string Emoji, int Count, bool ByMe)> chips, bool clickable,
+        float maxWidth)
+        => Measure(lineH, scale, chips, clickable, maxWidth).Width;
+
+    /// <summary>Capsule width plus the leading-chip count surviving the
+    /// width clamp - the single layout computation both Draw and overlay
+    /// sizing use, so hit zones can never diverge from the rendering.</summary>
+    private static (float Width, int Visible) Measure(float lineH, float scale,
+        IReadOnlyList<(string Emoji, int Count, bool ByMe)> chips, bool clickable,
+        float maxWidth)
+    {
+        var iconGap = 4f * scale;
+        var segGap = 6f * scale;
+        var padX = 8f * scale;
+        var addW = clickable ? AddWidth(lineH, scale) : 0f;
+        var widths = new List<float>(chips.Count);
+        foreach (var chip in chips)
+        {
+            var countText = chip.Count > 1 ? chip.Count.ToString() : null;
+            widths.Add(lineH + (countText != null
+                ? iconGap + ImGui.CalcTextSize(countText).X : 0f));
+        }
+        float chipsW = 0f;
+        for (var i = 0; i < widths.Count; i++)
+        {
+            chipsW += widths[i] + (i > 0 ? segGap : 0f);
+        }
+        float PillWidth()
+        {
+            var inner = chipsW + (addW > 0f && chipsW > 0f ? segGap : 0f) + addW;
+            return padX * 2f + inner;
+        }
+        while (widths.Count > 0 && PillWidth() > maxWidth)
+        {
+            chipsW -= widths[^1] + (widths.Count > 1 ? segGap : 0f);
+            widths.RemoveAt(widths.Count - 1);
+        }
+        if (widths.Count == 0 && addW <= 0f) return (0f, 0);
+        var pillW = MathF.Min(PillWidth(), maxWidth);
+        if (addW > 0f && padX * 2f + addW > maxWidth && widths.Count == 0)
+        {
+            pillW = padX * 2f + addW;
+        }
+        return (pillW, widths.Count);
+    }
+
+    /// <summary>Add-affordance width - the smiley+plus composite plus its
+    /// margins. Shared by measure and draw.</summary>
+    private static float AddWidth(float lineH, float scale)
+    {
+        var smileyGlyph = FontAwesomeIcon.Smile.ToIconString();
+        var smileyH = lineH * 0.80f;
+        var smileyW = smileyH * (ImGui.CalcTextSize(smileyGlyph).X
+            / MathF.Max(1f, ImGui.GetTextLineHeight()));
+        var plusH = smileyH * 0.72f;
+        var plusW = plusH * (ImGui.CalcTextSize("+").X
+            / MathF.Max(1f, ImGui.GetTextLineHeight()));
+        return smileyW + plusW * 0.75f + 5f * scale * 2f;
+    }
+
     /// <summary>Draws the capsule at <paramref name="pos"/> and reports the
     /// add-button hit rect plus one rect per visible chip. Returns the
     /// capsule width actually used (clamped to <paramref name="maxWidth"/>).</summary>
@@ -109,34 +176,18 @@ internal static class ReactionPillBar
             / MathF.Max(1f, ImGui.GetTextLineHeight()));
         var addMargin = 5f * scale;
         var addW = clickable ? smileyW + plusW * 0.75f + addMargin * 2f : 0f;
-        // measure chips; drop trailing ones until capsule + add fit
-        var widths = new List<float>(chips.Count);
-        foreach (var chip in chips)
+        // the one layout computation - overlay sizing and drawing share it,
+        // so hit zones can never diverge from the rendered capsule
+        var measured = Measure(lineH, scale, chips, clickable, maxWidth);
+        var pillW = measured.Width;
+        if (pillW <= 0f) return 0f;
+        // the surviving leading chips, sized for the layout pass
+        var widths = new List<float>(measured.Visible);
+        for (var c = 0; c < measured.Visible; c++)
         {
-            var countText = chip.Count > 1 ? chip.Count.ToString() : null;
-            widths.Add(chipH + (countText != null
-                ? iconGap + ImGui.CalcTextSize(countText).X : 0f));
-        }
-        float chipsW = 0f;
-        for (var i = 0; i < widths.Count; i++)
-        {
-            chipsW += widths[i] + (i > 0 ? segGap : 0f);
-        }
-        float PillWidth()
-        {
-            var inner = chipsW + (addW > 0f && chipsW > 0f ? segGap : 0f) + addW;
-            return padX * 2f + inner;
-        }
-        while (widths.Count > 0 && PillWidth() > maxWidth)
-        {
-            chipsW -= widths[^1] + (widths.Count > 1 ? segGap : 0f);
-            widths.RemoveAt(widths.Count - 1);
-        }
-        if (widths.Count == 0 && addW <= 0f) return 0f;
-        var pillW = MathF.Min(PillWidth(), maxWidth);
-        if (addW > 0f && padX * 2f + addW > maxWidth && widths.Count == 0)
-        {
-            pillW = padX * 2f + addW;
+            var ct = chips[c].Count > 1 ? chips[c].Count.ToString() : null;
+            widths.Add(chipH + (ct != null
+                ? iconGap + ImGui.CalcTextSize(ct).X : 0f));
         }
 
         drawList.AddRectFilled(pos, pos + new Vector2(pillW, pillH), surfaceU, pillH * 0.5f);
@@ -211,6 +262,91 @@ internal static class ReactionPillBar
                     smileyY + smileyH - plusH * 0.78f),
                 glyphCol, "+");
             addRect = new Vector4(addX, pos.Y, addX + addW, pos.Y + pillH);
+        }
+        return pillW;
+    }
+
+    /// <summary>One stats-capsule segment: icon with optional count. Active
+    /// renders accent (the viewer's like); clickable segments report a hit
+    /// rect and tint on hover, passive ones stay muted.</summary>
+    [System.Runtime.InteropServices.StructLayout(
+        System.Runtime.InteropServices.LayoutKind.Auto)]
+    public readonly record struct StatsSegment(
+        FontAwesomeIcon Icon, int? Count, bool Active, bool Clickable);
+
+    /// <summary>Width the stats capsule will occupy - measure and draw
+    /// share this so overlay hit zones match the rendering exactly.</summary>
+    public static float MeasureStatsWidth(float lineH, float scale,
+        IReadOnlyList<StatsSegment> segments)
+    {
+        var iconGap = 4f * scale;
+        var segGap = 10f * scale;
+        var padX = 8f * scale;
+        var w = padX * 2f;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var s = segments[i];
+            var num = s.Count is > 0 ? s.Count.Value.ToString() : null;
+            w += CenteredIconWidth(s.Icon, lineH)
+                + (num != null ? iconGap + ImGui.CalcTextSize(num).X : 0f)
+                + (i > 0 ? segGap : 0f);
+        }
+        return w;
+    }
+
+    /// <summary>Draws the stats capsule (like/comment/views idiom) at
+    /// <paramref name="pos"/>; clickable segments report hit rects as
+    /// (slot index, screen rect) for the host's click routing. Returns the
+    /// capsule width. Shares the pill geometry, centerline and optical
+    /// centering of the reactions capsule - the two read as one family.</summary>
+    public static float DrawStats(ImDrawListPtr drawList, Vector2 pos,
+        float lineH, float scale, Vector4 accent,
+        IReadOnlyList<StatsSegment> segments,
+        List<(int Slot, Vector4 Rect)>? hitRects)
+    {
+        var mutedU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
+        var accentU = SpheneUI.ColorUtils.ToU32(accent);
+        var surfaceU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.Surface);
+        var borderU = SpheneUI.ColorUtils.ToU32(new Vector4(
+            SpheneUI.Colors.Border.X, SpheneUI.Colors.Border.Y,
+            SpheneUI.Colors.Border.Z, 0.35f));
+        var iconGap = 4f * scale;
+        var segGap = 10f * scale;
+        var padX = 8f * scale;
+        var pillH = Height(lineH, scale);
+        var centerY = pos.Y + pillH * 0.5f;
+        var pillW = MeasureStatsWidth(lineH, scale, segments);
+
+        drawList.AddRectFilled(pos, pos + new Vector2(pillW, pillH),
+            surfaceU, pillH * 0.5f);
+        drawList.AddRect(pos, pos + new Vector2(pillW, pillH), borderU,
+            pillH * 0.5f, ImDrawFlags.None, 1f);
+
+        var cx = pos.X + padX;
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var s = segments[i];
+            var num = s.Count is > 0 ? s.Count.Value.ToString() : null;
+            var segW = CenteredIconWidth(s.Icon, lineH)
+                + (num != null ? iconGap + ImGui.CalcTextSize(num).X : 0f);
+            var hovered = s.Clickable && ImGui.IsMouseHoveringRect(
+                new Vector2(cx, pos.Y), new Vector2(cx + segW, pos.Y + pillH));
+            var col = hovered || s.Active ? accentU : mutedU;
+            var gw = DrawCenteredIcon(drawList, s.Icon, cx, centerY, lineH, col);
+            if (num != null)
+            {
+                drawList.AddText(new Vector2(cx + gw + iconGap,
+                    OpticalTextY(centerY, lineH)), col, num);
+            }
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            }
+            if (s.Clickable)
+            {
+                hitRects?.Add((i, new Vector4(cx, pos.Y, cx + segW, pos.Y + pillH)));
+            }
+            cx += segW + segGap;
         }
         return pillW;
     }

@@ -180,7 +180,8 @@ public sealed class CommentThreadView
     /// is the host row's denormalized count (badge); <paramref name="locked"/>
     /// the host's thread-lock flag.</summary>
     public void Draw(CommentTargetKind kind, long targetId, string? ownerUid,
-        string? groupGid, CommentOps ops, bool locked, int commentCount)
+        string? groupGid, CommentOps ops, bool locked, int commentCount,
+        int? viewCount = null)
     {
         var key = $"{(int)kind}:{targetId}";
         ThreadState st;
@@ -220,7 +221,7 @@ public sealed class CommentThreadView
             }
             ResolveFocus(ops, st);
             DrawThread(kind, targetId, ownerUid, groupGid, ops, locked,
-                commentCount, key, st);
+                commentCount, viewCount, key, st);
         }
     }
 
@@ -229,13 +230,23 @@ public sealed class CommentThreadView
     /// collection this iterates is frozen against off-thread applies.</summary>
     private void DrawThread(CommentTargetKind kind, long targetId, string? ownerUid,
         string? groupGid, CommentOps ops, bool locked, int commentCount,
-        string key, ThreadState st)
+        int? viewCount, string key, ThreadState st)
     {
         ImGui.PushID($"cmt-{key}");
-        DrawTargetReactions(kind, targetId, ownerUid, groupGid, ops, st);
-        SpheneUI.Text.Muted(locked
-            ? $"{commentCount} comments · locked"
-            : $"{commentCount} comment{(commentCount == 1 ? string.Empty : "s")}");
+        var statsShown = DrawTargetReactions(kind, targetId, ownerUid, groupGid,
+            ops, st, commentCount, viewCount);
+        if (!statsShown)
+        {
+            // read-only surfaces get no stats capsule - the muted line is
+            // their only count display; with stats the pill carries it
+            SpheneUI.Text.Muted(locked
+                ? $"{commentCount} comments · locked"
+                : $"{commentCount} comment{(commentCount == 1 ? string.Empty : "s")}");
+        }
+        else if (locked)
+        {
+            SpheneUI.Text.Muted("locked");
+        }
         // the comment opener docks at the right edge of the target's
         // reaction row - one line, engagement left / composer entry right
         if (!locked && ops.Save != null && !st.ComposerOpen)
@@ -752,10 +763,11 @@ public sealed class CommentThreadView
             });
     }
 
-    private static void DrawTargetReactions(CommentTargetKind kind, long targetId,
-        string? ownerUid, string? groupGid, CommentOps ops, ThreadState st)
+    private static bool DrawTargetReactions(CommentTargetKind kind, long targetId,
+        string? ownerUid, string? groupGid, CommentOps ops, ThreadState st,
+        int commentCount, int? viewCount)
     {
-        if (ops.SetReaction == null || ops.LoadTargetSummary == null) return;
+        if (ops.SetReaction == null || ops.LoadTargetSummary == null) return false;
         if (!st.TargetSummaryLoaded)
         {
             st.TargetSummaryLoaded = true;
@@ -788,8 +800,9 @@ public sealed class CommentThreadView
                     st.TargetSummary = summary;
                 }
             });
-        });
+        }, commentCount, viewCount);
         ImGui.SameLine(0f, SpheneUI.Spacing.X12.Scaled);
+        return true;
     }
 
     private static void Submit(CommentTargetKind kind, long targetId, string? ownerUid,

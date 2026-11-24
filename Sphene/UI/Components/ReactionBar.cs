@@ -51,68 +51,149 @@ public static class ReactionBar
         return translated;
     }
 
-    /// <summary>Inline reaction pill for one target - the shared capsule
-    /// visual (same as feed rows): clamped chips, overflow count, trailing
-    /// accent-bordered add button opening the emoji picker. Summary may be
-    /// null while loading - the pill still renders the add affordance.</summary>
+    /// <summary>Inline reaction strip for one target - the shared capsule
+    /// visuals (same as feed rows): an optional stats capsule (likes /
+    /// comments / views, thumb toggles the viewer's like) followed by the
+    /// reactions capsule with clamped chips and the smiley+plus add button.
+    /// When the stats capsule renders, thumbs-up reactions fold into it and
+    /// leave the emoji chips - the like/emoji separation matches the feed.
+    /// Summary may be null while loading - the pills still render.</summary>
     public static void DrawInline(ReactionTargetKind targetKind, long targetId,
-        ReactionSummaryDto? summary, Action<string, bool> onSet)
+        ReactionSummaryDto? summary, Action<string, bool> onSet,
+        int? commentCount = null, int? viewCount = null)
     {
         ImGui.PushID($"rxn-{targetKind}-{targetId}");
         var scale = SpheneUI.Scale;
         var lineH = ImGui.GetTextLineHeight();
         var pillH = ReactionPillBar.Height(lineH, scale);
-        var chips = OrderedChips(summary);
+        var withStats = commentCount != null || viewCount != null;
+        var counts = EmojiCountsOf(summary);
+        var mine = ViewerEmojisOf(summary);
+        var chips = OrderedChips(summary, excludeLikes: withStats);
         var flyoutId = $"rxn-add-{targetKind}-{targetId}";
         var pos = ImGui.GetCursorScreenPos();
         var maxW = ImGui.GetContentRegionAvail().X;
-        // one overlay button spans the strip; clicks route through the
-        // helper's hit rects - the same idiom the feed rows use
-        ImGui.InvisibleButton("##rxnpill", new Vector2(maxW, pillH));
+        var pillGap = 8f * scale;
+
+        // stats segments mirror the feed: thumb always (the like toggle),
+        // comment count always, views only once anyone actually viewed
+        var segments = new List<ReactionPillBar.StatsSegment>();
+        if (withStats)
+        {
+            var likeCount = 0;
+            var liked = false;
+            foreach (var kv in counts)
+            {
+                if (!kv.Key.StartsWith(ReactionEmojiMap.ThumbsUp, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                likeCount += kv.Value;
+                if (mine.Contains(kv.Key, StringComparer.Ordinal)) liked = true;
+            }
+            segments.Add(new ReactionPillBar.StatsSegment(
+                FontAwesomeIcon.ThumbsUp, likeCount, liked, true));
+            if (commentCount != null)
+            {
+                segments.Add(new ReactionPillBar.StatsSegment(
+                    FontAwesomeIcon.Comment, commentCount, false, false));
+            }
+            if (viewCount is > 0)
+            {
+                segments.Add(new ReactionPillBar.StatsSegment(
+                    FontAwesomeIcon.Eye, viewCount, false, false));
+            }
+        }
+
+        // overlay sized to the drawn strip exactly - a full-width overlay
+        // would push the same-line followers (composer entry) off the card
+        var statsW = withStats && segments.Count > 0
+            ? ReactionPillBar.MeasureStatsWidth(lineH, scale, segments) : 0f;
+        var rxnMaxW = MathF.Max(60f * scale, maxW - statsW
+            - (statsW > 0f ? pillGap : 0f));
+        var rxnW = ReactionPillBar.MeasureWidth(lineH, scale, chips, true, rxnMaxW);
+        var totalW = statsW + (statsW > 0f && rxnW > 0f ? pillGap : 0f) + rxnW;
+        if (totalW <= 0f)
+        {
+            ImGui.PopID();
+            return;
+        }
+        ImGui.InvisibleButton("##rxnpill", new Vector2(totalW, pillH));
         var clicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
+
+        var statRects = new List<(int Slot, Vector4 Rect)>();
+        var x = pos.X;
+        if (statsW > 0f)
+        {
+            ReactionPillBar.DrawStats(ImGui.GetWindowDrawList(),
+                new Vector2(x, pos.Y), lineH, scale, SpheneUI.Colors.Accent,
+                segments, statRects);
+            x += statsW + (rxnW > 0f ? pillGap : 0f);
+        }
         var chipRects = new List<(string Emoji, Vector4 Rect)>();
-        ReactionPillBar.Draw(ImGui.GetWindowDrawList(), pos, maxW, lineH, scale,
-            SpheneUI.Colors.Accent, chips, clickable: true,
-            out var addRect, chipRects);
+        Vector4 addRect = Vector4.Zero;
+        if (rxnW > 0f)
+        {
+            ReactionPillBar.Draw(ImGui.GetWindowDrawList(),
+                new Vector2(x, pos.Y), rxnMaxW, lineH, scale,
+                SpheneUI.Colors.Accent, chips, clickable: true,
+                out addRect, chipRects);
+        }
         if (clicked)
         {
             var mouse = ImGui.GetIO().MousePos;
-            var hit = false;
-            foreach (var (emoji, rect) in chipRects)
-            {
-                if (mouse.X < rect.X || mouse.X >= rect.Z
-                    || mouse.Y < rect.Y || mouse.Y >= rect.W) continue;
-                var active = chips.Any(c => string.Equals(c.Emoji, emoji, StringComparison.Ordinal) && c.ByMe);
-                onSet(emoji, !active);
-                hit = true;
-                break;
-            }
-            if (!hit && addRect != Vector4.Zero
-                && mouse.X >= addRect.X && mouse.X < addRect.Z
-                && mouse.Y >= addRect.Y && mouse.Y < addRect.W)
+            if (!RouteStatsClick(statRects, mouse, segments, onSet)
+                && !RouteChipClick(chipRects, mouse, chips, onSet)
+                && MouseIn(addRect, mouse))
             {
                 SpheneUI.EmojiPickerHook?.OpenFlyout(flyoutId, emoji => onSet(emoji, true));
             }
         }
-        if (ImGui.IsItemHovered() && MouseInAdd(addRect))
+        if (ImGui.IsItemHovered() && MouseIn(addRect, ImGui.GetIO().MousePos))
         {
             SpheneUI.AttachTooltip("Add reaction");
         }
         SpheneUI.EmojiPickerHook?.Draw(flyoutId);
         ImGui.PopID();
 
-        static bool MouseInAdd(Vector4 r)
+        static bool MouseIn(Vector4 r, Vector2 m)
+            => r != Vector4.Zero && m.X >= r.X && m.X < r.Z && m.Y >= r.Y && m.Y < r.W;
+
+        static bool RouteStatsClick(List<(int Slot, Vector4 Rect)> rects, Vector2 m,
+            List<ReactionPillBar.StatsSegment> segs, Action<string, bool> set)
         {
-            if (r == Vector4.Zero) return false;
-            var m = ImGui.GetIO().MousePos;
-            return m.X >= r.X && m.X < r.Z && m.Y >= r.Y && m.Y < r.W;
+            foreach (var (slot, r) in rects)
+            {
+                if (m.X < r.X || m.X >= r.Z || m.Y < r.Y || m.Y >= r.W) continue;
+                // slot 0 is the thumb - the like toggle; likes flip through
+                // the same server-authoritative reaction path as chips
+                if (slot == 0)
+                {
+                    set(ReactionEmojiMap.ThumbsUp, !segs[0].Active);
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        static bool RouteChipClick(List<(string Emoji, Vector4 Rect)> rects, Vector2 m,
+            List<(string Emoji, int Count, bool ByMe)> chips, Action<string, bool> set)
+        {
+            foreach (var (emoji, r) in rects)
+            {
+                if (m.X < r.X || m.X >= r.Z || m.Y < r.Y || m.Y >= r.W) continue;
+                var active = chips.Any(c => string.Equals(c.Emoji, emoji, StringComparison.Ordinal) && c.ByMe);
+                set(emoji, !active);
+                return true;
+            }
+            return false;
         }
     }
 
     /// <summary>Chips ordered most-reacted first as the shared tuple shape
     /// the pill helper renders.</summary>
     private static List<(string Emoji, int Count, bool ByMe)> OrderedChips(
-        ReactionSummaryDto? summary)
+        ReactionSummaryDto? summary, bool excludeLikes = false)
     {
         var counts = EmojiCountsOf(summary);
         var mine = ViewerEmojisOf(summary);
@@ -120,6 +201,8 @@ public static class ReactionBar
         foreach (var kv in counts)
         {
             if (kv.Value <= 0) continue;
+            if (excludeLikes && kv.Key.StartsWith(ReactionEmojiMap.ThumbsUp,
+                    StringComparison.Ordinal)) continue;
             list.Add((kv.Key, kv.Value, mine.Contains(kv.Key, StringComparer.Ordinal)));
         }
         list.Sort((a, b) => b.Item2 != a.Item2
