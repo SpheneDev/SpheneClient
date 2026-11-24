@@ -1,3 +1,4 @@
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Group;
 
 namespace Sphene.Services;
@@ -51,7 +52,7 @@ public sealed class CommunityFeedStore
     /// Rows are records, so the patch rebinds the list; readers holding the
     /// previous snapshot keep a stable view.</summary>
     public void PatchReaction(SyncshellFeedItemKind kind, long itemId,
-        int totalCount, bool likedByMe)
+        ReactionSummaryDto summary)
     {
         lock (_lock)
         {
@@ -61,11 +62,7 @@ public sealed class CommunityFeedStore
             {
                 if (item.Kind == kind && (item.ItemId ?? item.Id) == itemId)
                 {
-                    copy.Add(item with
-                    {
-                        ReactionCount = totalCount,
-                        LikedByMe = likedByMe,
-                    });
+                    copy.Add(WithReactionSummary(item, summary));
                     touched = true;
                 }
                 else
@@ -337,4 +334,48 @@ public sealed class CommunityFeedStore
     /// from collapsing into one another.</summary>
     private static string KeyOf(SyncshellCommunityFeedItemDto i)
         => $"{i.Kind}:{i.Id}:{i.ActorUid}:{i.TimestampUtc.Ticks}:{i.FeedRowKey}";
+    /// <summary>Single mapping from a reaction summary onto a feed row -
+    /// thumbs variants count as likes, everything else groups into chips
+    /// with the viewer's own state. Every reaction patch path (toggle
+    /// responses, live refetches) funnels through here so the row shape can
+    /// never diverge between write paths. Rows from older servers lack the
+    /// emoji breakdown - the int fallbacks keep their prior state then.</summary>
+    internal static SyncshellCommunityFeedItemDto WithReactionSummary(
+        SyncshellCommunityFeedItemDto item, ReactionSummaryDto summary)
+    {
+        var viewerEmojis = summary.ViewerEmojis;
+        var thumbsUp = Sphene.API.Data.Enum.ReactionEmojiMap.ThumbsUp;
+        var liked = viewerEmojis != null
+            ? viewerEmojis.Any(e => e.StartsWith(thumbsUp, StringComparison.Ordinal))
+            : summary.ViewerKinds.Contains((int)ReactionKind.Like);
+        int? likeCount = null;
+        List<FeedReactionEmojiDto>? chips = null;
+        if (summary.EmojiCounts != null)
+        {
+            var likes = 0;
+            chips = new List<FeedReactionEmojiDto>();
+            foreach (var kv in summary.EmojiCounts)
+            {
+                if (kv.Value <= 0) continue;
+                if (kv.Key.StartsWith(thumbsUp, StringComparison.Ordinal))
+                {
+                    likes += kv.Value;
+                }
+                else
+                {
+                    chips.Add(new FeedReactionEmojiDto(kv.Key, kv.Value,
+                        viewerEmojis?.Contains(kv.Key, StringComparer.Ordinal) == true));
+                }
+            }
+            likeCount = likes;
+            chips = chips.OrderByDescending(e => e.Count).ToList();
+        }
+        return item with
+        {
+            ReactionCount = summary.TotalCount,
+            LikedByMe = liked,
+            LikeCount = likeCount ?? item.LikeCount,
+            ReactionEmojis = chips ?? item.ReactionEmojis,
+        };
+    }
 }

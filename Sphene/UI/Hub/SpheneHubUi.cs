@@ -3240,7 +3240,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 fallbackAccent: accent, onActorClick: NavigateToAuthor,
                                 profileFor: ProfileForUid, shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
                         {
                             NavigateFeedItem(item);
@@ -5658,6 +5658,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             NavigateTo(new HubLocation(SpheneHubPage.Community, null, null, hit));
         }
+        // manual refresh - reactions live-patch and content pushes invalidate,
+        // but the user always gets a deterministic re-fetch escape hatch
+        ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+        if (SpheneUI.Controls.IconButton("community-feed-refresh",
+                FontAwesomeIcon.SyncAlt, enabled: !_communityFeed.IsLoading))
+        {
+            _communityFeed.Invalidate();
+        }
+        SpheneUI.AttachTooltip("Refresh feed");
+        if (_communityFeed.IsLoading)
+        {
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
+            SpheneUI.Text.Muted("refreshing…");
+        }
     }
 
     private readonly HashSet<string> _memberUidScratch = new(StringComparer.Ordinal);
@@ -5768,7 +5782,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
@@ -5804,7 +5818,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
@@ -6037,7 +6051,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
@@ -6081,7 +6095,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
@@ -7603,7 +7617,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                         shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
                 {
                     NavigateFeedItem(item);
@@ -7932,6 +7946,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// reaction kinds, so the row patches in place - the feed never
     /// reloads for a like.</summary>
     private void ToggleFeedItemLike(SyncshellCommunityFeedItemDto item)
+        => ToggleFeedItemReaction(item, ReactionEmojiMap.ThumbsUp);
+
+    /// <summary>Feed-strip reaction toggle - likes ride the same path with
+    /// the thumbs glyph, emoji chips carry their own sequence. The desired
+    /// state comes from the row's viewer flags; the response patches just
+    /// this row's counts in place.</summary>
+    private void ToggleFeedItemReaction(SyncshellCommunityFeedItemDto item, string emoji)
     {
         var targetKind = item.Kind switch
         {
@@ -7942,7 +7963,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         };
         if (targetKind == null) return;
         var targetId = item.ItemId ?? item.Id;
-        var set = !item.LikedByMe;
+        var isThumbs = emoji.StartsWith(ReactionEmojiMap.ThumbsUp, StringComparison.Ordinal);
+        var set = isThumbs
+            ? !item.LikedByMe
+            : item.ReactionEmojis?.FirstOrDefault(e => string.Equals(e.Emoji, emoji,
+                StringComparison.Ordinal)) is not { ByMe: true };
         _ = Task.Run(async () =>
         {
             try
@@ -7950,18 +7975,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 var summary = await _apiController.SetReaction(new ReactionSetDto(
                     targetKind.Value, targetId, ReactionKind.Like, set,
                     OwnerUid: item.TargetOwnerUid,
-                    Emoji: ReactionEmojiMap.ThumbsUp)).ConfigureAwait(false);
-                // toned thumbs carry the base glyph as a prefix - they count
-                // as likes, same rule the server's LikedByMe fill applies
-                var viewerEmojis = summary.ViewerEmojis;
-                var liked = viewerEmojis != null
-                    ? viewerEmojis.Any(e => e.StartsWith(ReactionEmojiMap.ThumbsUp,
-                        StringComparison.Ordinal))
-                    : summary.ViewerKinds.Contains((int)ReactionKind.Like);
-                _communityFeed.ApplyReactionSummary(item.Kind, targetId,
-                    summary.TotalCount, liked);
-                _publicProfiles.ApplyReactionSummary(item.Kind, targetId,
-                    summary.TotalCount, liked);
+                    Emoji: emoji, Toggle: true)).ConfigureAwait(false);
+                _communityFeed.ApplyReactionSummary(item.Kind, targetId, summary);
+                _publicProfiles.ApplyReactionSummary(item.Kind, targetId, summary);
             }
             catch (Exception ex)
             {
@@ -8296,7 +8312,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 "chron:", accent, ChronicleRowMeta(captured),
                                 profileFor: ProfileForUid,
                                 onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
                         {
                             _openChronicle = (me.UID, captured.Id);
@@ -8444,7 +8460,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 "chron:", accent, ChronicleRowMeta(post),
                                 profileFor: ProfileForUid,
                                 onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
                         {
                             _openChronicle = (pair.UserData.UID, post.Id);
@@ -11113,7 +11129,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         "pub:", accent, ChronicleRowMeta(captured),
                         onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                         onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
@@ -11178,7 +11194,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             item, "hub:", fallbackAccent: accent,
                             onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                             onThumbClick: OpenFeedItemPhoto,
-                    onLikeClick: ToggleFeedItemLike,
+                    onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
                     onCommentClick: NavigateFeedItem))
                     {
                         NavigateFeedItem(item);

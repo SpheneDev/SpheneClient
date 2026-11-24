@@ -157,6 +157,9 @@ public sealed class CommentThreadView
     /// refreshes) drop every thread for safety.</summary>
     public void InvalidateForChange(CommunityChangedDto change)
     {
+        // reaction-only pushes move counts, not content - open threads keep
+        // their state and pick up fresh summaries on the next open
+        if (change.ReactionsOnly) return;
         var kind = change.Section switch
         {
             SyncshellCommunitySection.News => CommentTargetKind.News,
@@ -737,7 +740,7 @@ public sealed class CommentThreadView
             (emoji, set) =>
             {
                 var dto = new ReactionSetDto(ReactionTargetKind.Comment, c.Id,
-                    ReactionKind.Like, set, Emoji: emoji);
+                    ReactionKind.Like, set, Emoji: emoji, Toggle: true);
                 _ = Task.Run(async () =>
                 {
                     var s = await ops.SetReaction!(dto).ConfigureAwait(false);
@@ -776,7 +779,7 @@ public sealed class CommentThreadView
         {
             var dto = new ReactionSetDto(rk, targetId, ReactionKind.Like, set, null, ownerUid,
                 groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null,
-                Emoji: emoji);
+                Emoji: emoji, Toggle: true);
             _ = Task.Run(async () =>
             {
                 var summary = await ops.SetReaction(dto).ConfigureAwait(false);

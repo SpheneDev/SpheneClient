@@ -101,6 +101,23 @@ public sealed class MarkdownComposer
     private int _editEpoch;
     private string _colorHex = "#ffffff";
 
+    /// <summary>Undo/redo snapshots of the model text plus the view-space
+    /// caret at snapshot time. Entries are pushed by <see cref="ApplySplice"/>
+    /// only - plain typing stays owned by ImGui's native input undo; the two
+    /// stacks interleave through the <see cref="_undoBaseline"/> heuristic.</summary>
+    private const int MaxUndoEntries = 100;
+    private readonly List<(string Text, int Caret)> _undoStack = new();
+    private readonly List<(string Text, int Caret)> _redoStack = new();
+    /// <summary>The model text as of the last splice/restore (or first frame).
+    /// While the live body diverges, the user has typed since - ImGui's native
+    /// undo owns Ctrl+Z for that typing, so the managed undo yields. Once the
+    /// body matches again (native undo exhausted or no typing happened), the
+    /// managed stack takes over. Epoch bumps wipe the native undo state, so
+    /// right after a toolbar edit only the managed stack can answer.</summary>
+    private string _undoBaseline = string.Empty;
+    private bool _undoBaselineInit;
+    private bool _inputWasActive;
+
     /// <summary>Set false by hosts that provide their own full preview
     /// surface - the inline toggle + preview block are suppressed.</summary>
     public bool ShowPreview { get; set; } = true;
@@ -153,6 +170,13 @@ public sealed class MarkdownComposer
             _pendingInsert = null;
             body = ApplyInsert(body, insert);
         }
+        if (!_undoBaselineInit)
+        {
+            _undoBaselineInit = true;
+            _undoBaseline = body;
+        }
+        if (!previewing)
+            body = HandleUndoKeys(body);
         var emoji = SpheneUI.EmojiPickerHook;
         var emojiW = PlainText && emoji != null && !previewing
             ? ImGui.GetFrameHeight() + SpheneUI.Spacing.X4.Scaled : 0f;
@@ -174,6 +198,7 @@ public sealed class MarkdownComposer
             SpheneUI.Controls.InputTextMultiline(label + "##me" + _editEpoch, ref view, maxLength,
                 new Vector2(inputW, h), flags, OnInputCallback, ref _edit,
                 trailingWidth: 0f, preferredWidth: -1f);
+            _inputWasActive = ImGui.IsItemActive();
             var expanded = _edit.Codec.Expand(view);
             if (!string.Equals(expanded, body, StringComparison.Ordinal))
             {
@@ -255,6 +280,20 @@ public sealed class MarkdownComposer
     /// the text can never be eaten by a lost or mistimed callback edit.</summary>
     private string ApplySplice(string body, string payload, int caretInView)
     {
+        PushUndo(body);
+        var result = SpliceView(body, payload, caretInView);
+        _undoBaseline = result;
+        return result;
+    }
+
+    /// <summary>The managed-string splice machinery shared by edits and
+    /// undo/redo restores - positions are ImWchar units; the buffer is
+    /// BMP-only by codec construction, so they index the view string
+    /// directly. All markup editing funnels here - pure managed string
+    /// surgery, immune to input activation timing: the text can never be
+    /// eaten by a lost or mistimed callback edit.</summary>
+    private string SpliceView(string body, string payload, int caretInView)
+    {
         var view = _edit.Codec.Encode(body);
         var (s, e, _) = EditRange();
         s = Math.Clamp(s, 0, view.Length);
@@ -271,6 +310,78 @@ public sealed class MarkdownComposer
             + $"payload='{SanitizeForLog(payload)}' caret={_edit.CaretTarget} "
             + $"sel=({_edit.SelStartB},{_edit.SelEndB}) caretB={_edit.CaretB}");
         return _edit.Codec.Expand(newView);
+    }
+
+    /// <summary>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while the input is focused.
+    /// Only fires when the input was active last frame - focus state lags one
+    /// frame, which is invisible in practice. Repeat is on so holding the key
+    /// walks the history.</summary>
+    private string HandleUndoKeys(string body)
+    {
+        if (!_inputWasActive)
+            return body;
+        var io = ImGui.GetIO();
+        if (io.KeyCtrl && !io.KeyAlt && !io.KeyShift
+            && ImGui.IsKeyPressed(ImGuiKey.Z, true)
+            && TryUndo(body) is { } undone)
+            return undone;
+        if (((io.KeyCtrl && !io.KeyAlt && !io.KeyShift
+                 && ImGui.IsKeyPressed(ImGuiKey.Y, true))
+             || (io.KeyCtrl && io.KeyShift && !io.KeyAlt
+                 && ImGui.IsKeyPressed(ImGuiKey.Z, true)))
+            && TryRedo(body) is { } redone)
+            return redone;
+        return body;
+    }
+
+    private void PushUndo(string body)
+    {
+        if (_undoStack.Count > 0
+            && string.Equals(_undoStack[^1].Text, body, StringComparison.Ordinal))
+            return;
+        _undoStack.Add((body, Math.Max(0, _edit.CaretB)));
+        if (_undoStack.Count > MaxUndoEntries)
+            _undoStack.RemoveAt(0);
+        _redoStack.Clear();
+    }
+
+    /// <summary>Pops one undo snapshot and restores it as a full-text
+    /// replacement through the epoch mechanism. Yields (null) while the body
+    /// diverges from the baseline - typing since the last splice belongs to
+    /// ImGui's native undo, which fires on the same keypress.</summary>
+    private string? TryUndo(string body)
+    {
+        if (_undoStack.Count == 0
+            || !string.Equals(body, _undoBaseline, StringComparison.Ordinal))
+            return null;
+        var (text, caret) = _undoStack[^1];
+        _undoStack.RemoveAt(_undoStack.Count - 1);
+        _redoStack.Add((body, Math.Max(0, _edit.CaretB)));
+        return Restore(text, caret);
+    }
+
+    private string? TryRedo(string body)
+    {
+        if (_redoStack.Count == 0
+            || !string.Equals(body, _undoBaseline, StringComparison.Ordinal))
+            return null;
+        var (text, caret) = _redoStack[^1];
+        _redoStack.RemoveAt(_redoStack.Count - 1);
+        _undoStack.Add((body, Math.Max(0, _edit.CaretB)));
+        return Restore(text, caret);
+    }
+
+    /// <summary>Restores a snapshot as a full-text replacement. The caret
+    /// target rides the snapshot's view-space position - re-encoding the
+    /// restored model reproduces exactly that view.</summary>
+    private string Restore(string text, int caret)
+    {
+        var view = _edit.Codec.Encode(text);
+        _edit.CaretTarget = Math.Clamp(caret, 0, view.Length);
+        _refocus = true;
+        _editEpoch++;
+        _undoBaseline = text;
+        return text;
     }
 
     private static string SanitizeForLog(string text)

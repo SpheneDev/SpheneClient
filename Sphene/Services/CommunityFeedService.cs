@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Group;
 using Sphene.Services.Mediator;
 using Sphene.WebAPI;
@@ -32,7 +34,20 @@ public class CommunityFeedService : DisposableMediatorSubscriberBase, IHostedSer
         Mediator.Subscribe<HubClosedMessage>(this, (_) => Invalidate());
         // Community writes push per shell · invalidate lazily so the next
         // render refetches once instead of fetching on every push.
-        Mediator.Subscribe<CommunityChangedMessage>(this, (_) => Invalidate());
+        // Reaction toggles push too - but likes/chips patch in place, so a
+        // reaction-only change must not collapse the whole feed into a reload
+        Mediator.Subscribe<CommunityChangedMessage>(this, (msg) =>
+        {
+            var change = msg.Community;
+            if (!change.ReactionsOnly)
+            {
+                Invalidate();
+            }
+            else if (change.ReactionTargetKind is { } rk && change.ReactionTargetId is { } rid)
+            {
+                ScheduleReactionRefetch(rk, rid, change.Group);
+            }
+        });
         Mediator.Subscribe<ClearProfileDataMessage>(this, (_) => Invalidate());
         // Follow/unfollow changes the eligible set (followed shells feed
         // public events) - a cached result, including an empty one, must
@@ -144,10 +159,51 @@ public class CommunityFeedService : DisposableMediatorSubscriberBase, IHostedSer
     /// feed store the row may live in - count and red-heart state update
     /// in place, no refetch, no feed reload.</summary>
     public void ApplyReactionSummary(SyncshellFeedItemKind kind, long itemId,
-        int totalCount, bool likedByMe)
+        ReactionSummaryDto summary)
     {
-        _store.PatchReaction(kind, itemId, totalCount, likedByMe);
-        _forYouStore.PatchReaction(kind, itemId, totalCount, likedByMe);
+        _store.PatchReaction(kind, itemId, summary);
+        _forYouStore.PatchReaction(kind, itemId, summary);
+    }
+
+    /// <summary>Live reaction updates: a reactions-only push carries the
+    /// affected target, so exactly one summary refetch per item patches the
+    /// rows in place - no feed reload, no guessing. Pushes coalesce per item
+    /// over a short debounce window, so a burst of toggles costs one fetch.</summary>
+    private readonly System.Threading.Lock _reactionRefetchGate = new();
+    private readonly HashSet<(int Kind, long Id)> _pendingReactionRefetches = new();
+
+    private void ScheduleReactionRefetch(int kind, long id, GroupData group)
+    {
+        using (_reactionRefetchGate.EnterScope())
+        {
+            if (!_pendingReactionRefetches.Add((kind, id))) return;
+        }
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(500).ConfigureAwait(false);
+                var rk = (ReactionTargetKind)kind;
+                var summary = await _apiController.GetReactionSummary(
+                    new ReactionSetDto(rk, id, ReactionKind.Like, true,
+                        Group: group))
+                    .ConfigureAwait(false);
+                // the enums share ordinals for News/Event/Blog - rows of
+                // other kinds simply match nothing
+                ApplyReactionSummary((SyncshellFeedItemKind)kind, id, summary);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Live reaction refetch failed");
+            }
+            finally
+            {
+                using (_reactionRefetchGate.EnterScope())
+                {
+                    _pendingReactionRefetches.Remove((kind, id));
+                }
+            }
+        });
     }
 
     /// <summary>Fetches the first page; dedupes concurrent calls.</summary>

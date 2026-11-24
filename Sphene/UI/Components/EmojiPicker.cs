@@ -73,6 +73,21 @@ public sealed class EmojiPicker
         SpheneUI.AttachTooltip(tooltip);
     }
 
+    /// <summary>Opens the flyout without rendering the trigger button -
+    /// for hosts that draw their own affordance (feed reaction pills) and
+    /// only need the picker's selection surface.</summary>
+    public void OpenFlyout(string flyoutId, Action<string> onPick)
+    {
+        _onPick = onPick;
+        if (!SpheneUI.Popups.IsFlyoutOpen(flyoutId))
+        {
+            _wantSearchFocus = true;
+            _hoveredName = null;
+            _category = _config.Current.RecentEmojis.Count > 0 ? -1 : 0;
+        }
+        SpheneUI.Popups.ToggleFlyout(flyoutId, preferAbove: true);
+    }
+
     /// <summary>Renders the flyout while open; a no-op otherwise.</summary>
     public void Draw(string flyoutId)
     {

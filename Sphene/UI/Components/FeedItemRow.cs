@@ -50,7 +50,8 @@ public static class FeedItemRow
         Func<string, IDalamudTextureWrap?>? shellAvatarFor = null,
         Action<SyncshellCommunityFeedItemDto>? onThumbClick = null,
         Action<SyncshellCommunityFeedItemDto>? onLikeClick = null,
-        Action<SyncshellCommunityFeedItemDto>? onCommentClick = null)
+        Action<SyncshellCommunityFeedItemDto>? onCommentClick = null,
+        Action<SyncshellCommunityFeedItemDto, string>? onReactionClick = null)
     {
         var drawList = ImGui.GetWindowDrawList();
         var scale = SpheneUI.Scale;
@@ -310,15 +311,21 @@ public static class FeedItemRow
         }
         var likeRect = Vector4.Zero;
         var commentRect = Vector4.Zero;
+        var chipRects = new List<(string Emoji, Vector4 Rect)>();
+        var addRect = Vector4.Zero;
         if (hasTail)
         {
             var engageable = item.Kind is SyncshellFeedItemKind.News
                 or SyncshellFeedItemKind.Event or SyncshellFeedItemKind.Blog;
+            chipRects.Clear();
             DrawStatsLine(drawList, item, nameX,
-                tailAnchor + lineH + lineGap, lineH, scale, accent,
+                tailAnchor + lineH + lineGap, lineH, scale, accent, textW,
                 likeClickable: engageable && onLikeClick != null,
                 commentClickable: engageable && onCommentClick != null,
-                out likeRect, out commentRect);
+                out likeRect, out commentRect, out addRect,
+                chipsClickable: engageable && onReactionClick != null,
+                chipRects: chipRects);
+            SpheneUI.EmojiPickerHook?.Draw(FeedPickerId(id));
         }
 
         if (showThumb)
@@ -350,6 +357,18 @@ public static class FeedItemRow
         if (Inside(commentRect))
         {
             onCommentClick!(item);
+            return false;
+        }
+        foreach (var (emoji, rect) in chipRects)
+        {
+            if (!Inside(rect)) continue;
+            onReactionClick!(item, emoji);
+            return false;
+        }
+        if (addRect != Vector4.Zero && Inside(addRect))
+        {
+            SpheneUI.EmojiPickerHook?.OpenFlyout(FeedPickerId(id),
+                emoji => onReactionClick!(item, emoji));
             return false;
         }
         if (thumbRect != Vector4.Zero
@@ -400,7 +419,13 @@ public static class FeedItemRow
     private static float ExtraHeight(List<string>? snippet, bool tail,
         float lineH, float lineGap)
         => (snippet is { Count: > 0 } ? lineGap + snippet.Count * lineH : 0f)
-            + (tail ? lineGap + lineH : 0f);
+            + (tail ? lineGap + lineH + 2f * PillPadY * SpheneUI.Scale : 0f);
+
+    /// <summary>Unscaled vertical air above and below the pill contents -
+    /// the engagement capsules are noticeably taller than the bare text
+    /// line was, so the tail metric carries the extra on both the measure
+    /// and the draw path through <see cref="ExtraHeight"/>.</summary>
+    private const float PillPadY = 3.5f;
 
     /// <summary>X-style engagement strip: muted icon+count pairs. Reaction
     /// and comment icons paint even at zero when their click callback is
@@ -409,62 +434,123 @@ public static class FeedItemRow
     /// <paramref name="commentRect"/> report the icon+count hit boxes so the
     /// row's single invisible button can route clicks; hovered stats tint
     /// accent and show the hand.</summary>
+    /// <summary>Per-row emoji picker flyout id - stable across frames so the
+    /// overlay stays attached to the row that opened it.</summary>
+    private static string FeedPickerId(string rowId) => $"feed-add-{rowId}";
+
     private static void DrawStatsLine(ImDrawListPtr drawList,
         SyncshellCommunityFeedItemDto item, float x, float y,
-        float lineH, float scale, Vector4 accent,
+        float lineH, float scale, Vector4 accent, float width,
         bool likeClickable, bool commentClickable,
-        out Vector4 likeRect, out Vector4 commentRect)
+        out Vector4 likeRect, out Vector4 commentRect, out Vector4 addRect,
+        bool chipsClickable = false,
+        List<(string Emoji, Vector4 Rect)>? chipRects = null)
     {
+        // the capsule is taller than the bare glyphs: padY of air top and
+        // bottom, contents centered inside - row height carries the extra
+        var padY = PillPadY * scale;
+        var pillH = lineH + 2f * padY;
+        var centerY = y + pillH * 0.5f;
+        // Two capsules: the stats pill (like/comment/views) and the reactions
+        // pill (emoji chips + trailing add affordance). Both render inside
+        // the existing line metric - the row height contract is unchanged.
         var mutedU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
         var accentU = SpheneUI.ColorUtils.ToU32(accent);
+        var surfaceU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.Surface);
+        var borderU = SpheneUI.ColorUtils.ToU32(new Vector4(
+            SpheneUI.Colors.Border.X, SpheneUI.Colors.Border.Y,
+            SpheneUI.Colors.Border.Z, 0.35f));
         var iconGap = 4f * scale;
-        var statGap = 13f * scale;
-        var sx = x;
+        var segGap = 10f * scale;
+        var padX = 8f * scale;
+        var pillGap = 8f * scale;
         likeRect = Vector4.Zero;
         commentRect = Vector4.Zero;
-        void Stat(FontAwesomeIcon icon, int? count, bool alwaysShow,
-            bool clickable, ref Vector4 rect, bool activeState = false)
+        addRect = Vector4.Zero;
+
+        // ---- measure the stats segments first so the capsule wraps them
+        var likeCount = item.LikeCount ?? item.ReactionCount;
+        var segs = new List<(FontAwesomeIcon Icon, int? Count, bool AlwaysShow,
+            bool Clickable, bool Active, int Slot)>();
+        segs.Add((FontAwesomeIcon.ThumbsUp, likeCount, likeClickable,
+            likeClickable, item.LikedByMe, 0));
+        segs.Add((FontAwesomeIcon.Comment, item.CommentCount, commentClickable,
+            commentClickable, false, 1));
+        segs.Add((FontAwesomeIcon.Eye, item.ViewCount, false, false, false, 2));
+        var shown = new List<(FontAwesomeIcon Icon, int? Count, bool Clickable,
+            bool Active, int Slot, float W)>();
+        foreach (var s in segs)
         {
-            if (!alwaysShow && count is not > 0) return;
-            var glyph = icon.ToIconString();
-            var startX = sx;
-            float gw;
-            using (SpheneUI.Icons.PushFont())
-            {
-                gw = ImGui.CalcTextSize(glyph).X;
-            }
-            var num = count is > 0 ? count.Value.ToString() : null;
+            if (!s.AlwaysShow && s.Count is not > 0) continue;
+            var gw = ReactionPillBar.CenteredIconWidth(s.Icon, lineH);
+            var num = s.Count is > 0 ? s.Count.Value.ToString() : null;
             var w = gw + (num != null ? iconGap + ImGui.CalcTextSize(num).X : 0f);
-            var hovered = clickable && ImGui.IsMouseHoveringRect(
-                new Vector2(startX, y), new Vector2(startX + w, y + lineH));
-            // an active (already-cast) stat rides the accent even at rest -
-            // the thumb reads as toggled on, not just hoverable
-            var col = hovered || activeState ? accentU : mutedU;
-            using (SpheneUI.Icons.PushFont())
-            {
-                var gy = y + MathF.Max(0f,
-                    (lineH - ImGui.GetTextLineHeight()) * 0.5f);
-                drawList.AddText(new Vector2(startX, gy), col, glyph);
-            }
-            if (num != null)
-            {
-                drawList.AddText(new Vector2(startX + gw + iconGap, y), col, num);
-            }
-            if (hovered)
-            {
-                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-            }
-            if (clickable)
-            {
-                rect = new Vector4(startX, y, startX + w, y + lineH);
-            }
-            sx = startX + w + statGap;
+            shown.Add((s.Icon, s.Count, s.Clickable, s.Active, s.Slot, w));
         }
-        Stat(FontAwesomeIcon.ThumbsUp, item.ReactionCount, likeClickable,
-            likeClickable, ref likeRect, activeState: item.LikedByMe);
-        Stat(FontAwesomeIcon.Comment, item.CommentCount, commentClickable,
-            commentClickable, ref commentRect);
-        Stat(FontAwesomeIcon.Eye, item.ViewCount, false, false, ref commentRect);
+
+        void Capsule(float cx, float cw)
+        {
+            drawList.AddRectFilled(new Vector2(cx, y), new Vector2(cx + cw, y + pillH),
+                surfaceU, pillH * 0.5f);
+            drawList.AddRect(new Vector2(cx, y), new Vector2(cx + cw, y + pillH),
+                borderU, pillH * 0.5f, ImDrawFlags.None, 1f);
+        }
+
+        var sx = x;
+        if (shown.Count > 0)
+        {
+            var statsW = padX * 2f;
+            foreach (var s in shown) statsW += s.W;
+            statsW += segGap * (shown.Count - 1);
+            Capsule(sx, statsW);
+            var cx = sx + padX;
+            foreach (var s in shown)
+            {
+                var hovered = s.Clickable && ImGui.IsMouseHoveringRect(
+                    new Vector2(cx, y), new Vector2(cx + s.W, y + pillH));
+                var col = hovered || s.Active ? accentU : mutedU;
+                var gw = ReactionPillBar.DrawCenteredIcon(drawList, s.Icon,
+                    cx, centerY, lineH, col);
+                var num = s.Count is > 0 ? s.Count.Value.ToString() : null;
+                if (num != null)
+                {
+                    drawList.AddText(new Vector2(cx + gw + iconGap,
+                        ReactionPillBar.OpticalTextY(centerY, lineH)), col, num);
+                }
+                if (hovered)
+                {
+                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                }
+                if (s.Clickable)
+                {
+                    var r = new Vector4(cx, y, cx + s.W, y + pillH);
+                    if (s.Slot == 0) likeRect = r;
+                    else if (s.Slot == 1) commentRect = r;
+                }
+                cx += s.W + segGap;
+            }
+            sx += statsW;
+        }
+
+        // ---- reactions pill: the shared capsule helper - same visual and
+        // behavior in feed rows and comment-thread bars
+        var chips = item.ReactionEmojis;
+        var hasChips = chips is { Count: > 0 };
+        if (!hasChips && !chipsClickable) return;
+        sx += pillGap;
+        if (sx >= x + width) return;
+        var pillY = y;
+        var adapted = new List<(string Emoji, int Count, bool ByMe)>();
+        if (hasChips)
+        {
+            foreach (var c in chips!)
+            {
+                adapted.Add((c.Emoji, c.Count, c.ByMe));
+            }
+        }
+        ReactionPillBar.Draw(drawList, new Vector2(sx, pillY), x + width - sx,
+            lineH, scale, accent, adapted, chipsClickable,
+            out addRect, chipRects);
     }
 
     /// <summary>Per-kind display label + glyph for context text, badges

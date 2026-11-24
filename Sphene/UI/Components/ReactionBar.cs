@@ -51,141 +51,103 @@ public static class ReactionBar
         return translated;
     }
 
-    /// <summary>Inline chip row for one target - summary may be null while
-    /// loading (renders just the add-affordance then).</summary>
+    /// <summary>Inline reaction pill for one target - the shared capsule
+    /// visual (same as feed rows): clamped chips, overflow count, trailing
+    /// accent-bordered add button opening the emoji picker. Summary may be
+    /// null while loading - the pill still renders the add affordance.</summary>
     public static void DrawInline(ReactionTargetKind targetKind, long targetId,
         ReactionSummaryDto? summary, Action<string, bool> onSet)
     {
         ImGui.PushID($"rxn-{targetKind}-{targetId}");
-        var first = true;
-        DrawChips(summary, interactive: true, onSet, ref first);
-        var picker = SpheneUI.EmojiPickerHook;
-        if (picker != null)
+        var scale = SpheneUI.Scale;
+        var lineH = ImGui.GetTextLineHeight();
+        var pillH = ReactionPillBar.Height(lineH, scale);
+        var chips = OrderedChips(summary);
+        var flyoutId = $"rxn-add-{targetKind}-{targetId}";
+        var pos = ImGui.GetCursorScreenPos();
+        var maxW = ImGui.GetContentRegionAvail().X;
+        // one overlay button spans the strip; clicks route through the
+        // helper's hit rects - the same idiom the feed rows use
+        ImGui.InvisibleButton("##rxnpill", new Vector2(maxW, pillH));
+        var clicked = ImGui.IsItemClicked(ImGuiMouseButton.Left);
+        var chipRects = new List<(string Emoji, Vector4 Rect)>();
+        ReactionPillBar.Draw(ImGui.GetWindowDrawList(), pos, maxW, lineH, scale,
+            SpheneUI.Colors.Accent, chips, clickable: true,
+            out var addRect, chipRects);
+        if (clicked)
         {
-            if (!first) ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-            var flyoutId = $"rxn-add-{targetKind}-{targetId}";
-            picker.TriggerButton(flyoutId, emoji => onSet(emoji, true),
-                "Add reaction", ghost: true);
-            picker.Draw(flyoutId);
+            var mouse = ImGui.GetIO().MousePos;
+            var hit = false;
+            foreach (var (emoji, rect) in chipRects)
+            {
+                if (mouse.X < rect.X || mouse.X >= rect.Z
+                    || mouse.Y < rect.Y || mouse.Y >= rect.W) continue;
+                var active = chips.Any(c => string.Equals(c.Emoji, emoji, StringComparison.Ordinal) && c.ByMe);
+                onSet(emoji, !active);
+                hit = true;
+                break;
+            }
+            if (!hit && addRect != Vector4.Zero
+                && mouse.X >= addRect.X && mouse.X < addRect.Z
+                && mouse.Y >= addRect.Y && mouse.Y < addRect.W)
+            {
+                SpheneUI.EmojiPickerHook?.OpenFlyout(flyoutId, emoji => onSet(emoji, true));
+            }
         }
+        if (ImGui.IsItemHovered() && MouseInAdd(addRect))
+        {
+            SpheneUI.AttachTooltip("Add reaction");
+        }
+        SpheneUI.EmojiPickerHook?.Draw(flyoutId);
         ImGui.PopID();
+
+        static bool MouseInAdd(Vector4 r)
+        {
+            if (r == Vector4.Zero) return false;
+            var m = ImGui.GetIO().MousePos;
+            return m.X >= r.X && m.X < r.Z && m.Y >= r.Y && m.Y < r.W;
+        }
     }
 
-    /// <summary>Passive strip of already-cast reactions - nothing is
-    /// clickable. For surfaces where the viewer must not add a reaction
-    /// (e.g. their own comment).</summary>
+    /// <summary>Chips ordered most-reacted first as the shared tuple shape
+    /// the pill helper renders.</summary>
+    private static List<(string Emoji, int Count, bool ByMe)> OrderedChips(
+        ReactionSummaryDto? summary)
+    {
+        var counts = EmojiCountsOf(summary);
+        var mine = ViewerEmojisOf(summary);
+        var list = new List<(string, int, bool)>();
+        foreach (var kv in counts)
+        {
+            if (kv.Value <= 0) continue;
+            list.Add((kv.Key, kv.Value, mine.Contains(kv.Key, StringComparer.Ordinal)));
+        }
+        list.Sort((a, b) => b.Item2 != a.Item2
+            ? b.Item2.CompareTo(a.Item2)
+            : string.CompareOrdinal(a.Item1, b.Item1));
+        return list;
+    }
+
+    /// <summary>Passive pill of already-cast reactions - nothing is
+    /// clickable, no add affordance. For surfaces where the viewer must not
+    /// react (e.g. their own comment).</summary>
     public static void DrawReadOnly(ReactionTargetKind targetKind, long targetId,
         ReactionSummaryDto? summary)
     {
         ImGui.PushID($"rxn-ro-{targetKind}-{targetId}");
-        var first = true;
-        DrawChips(summary, interactive: false, null, ref first);
-        ImGui.PopID();
-    }
-
-    /// <summary>One chip per emoji with a positive count, most-reacted
-    /// first - chips the viewer cast render accent-tinted and toggle off
-    /// on click, foreign chips toggle the viewer in.</summary>
-    private static void DrawChips(ReactionSummaryDto? summary, bool interactive,
-        Action<string, bool>? onSet, ref bool first)
-    {
-        var counts = EmojiCountsOf(summary);
-        if (counts.Count == 0) return;
-        var mine = ViewerEmojisOf(summary);
-        var ordered = counts
-            .Where(kv => kv.Value > 0)
-            .OrderByDescending(kv => kv.Value)
-            .ThenBy(kv => kv.Key, StringComparer.Ordinal)
-            .ToList();
-        var rowStartX = ImGui.GetCursorPosX();
-        var rowRight = ImGui.GetCursorScreenPos().X + ImGui.GetContentRegionAvail().X;
-        foreach (var (emoji, count) in ordered)
-        {
-            // chips flow left-to-right and wrap when the next one would
-            // overhang the row's right edge - an unbounded emoji vocabulary
-            // must never clip off the content region; wrapped lines keep the
-            // row's original left indent
-            var chipW = ChipWidth(count);
-            if (!first)
-            {
-                if (ImGui.GetCursorScreenPos().X + chipW > rowRight)
-                {
-                    ImGui.NewLine();
-                    ImGui.SetCursorPosX(rowStartX);
-                }
-                else
-                {
-                    ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-                }
-            }
-            first = false;
-            var active = mine.Contains(emoji, StringComparer.Ordinal);
-            var clicked = DrawChip(emoji, count, active, interactive);
-            if (clicked) onSet?.Invoke(emoji, !active);
-            SpheneUI.AttachTooltip(count + " reaction" + (count == 1 ? "" : "s")
-                + (active ? " · you reacted" : string.Empty));
-        }
-    }
-
-    /// <summary>Chip pixel width - single source for the wrap check and
-    /// the plate itself so the two can never disagree.</summary>
-    private static float ChipWidth(int count)
-    {
-        var pad = SpheneUI.Spacing.X4.Scaled;
-        var gap = 2f * SpheneUI.Scale;
-        return pad + ImGui.GetTextLineHeight() + gap
-            + ImGui.CalcTextSize(count.ToString()).X + pad;
-    }
-
-    /// <summary>Renders one emoji chip: rounded plate (accent-tinted when
-    /// active, brightening on hover) + sprite + count. Returns true when
-    /// clicked. Passive chips skip the hit zone but keep the plate.</summary>
-    private static bool DrawChip(string emoji, int count, bool active, bool interactive)
-    {
         var scale = SpheneUI.Scale;
         var lineH = ImGui.GetTextLineHeight();
-        var pad = SpheneUI.Spacing.X4.Scaled;
-        var gap = 2f * scale;
-        var chipW = ChipWidth(count);
-        var countText = count.ToString();
-        var chipH = lineH + pad;
-
-        var pos = ImGui.GetCursorScreenPos();
-        var clicked = false;
-        if (interactive)
+        var pillH = ReactionPillBar.Height(lineH, scale);
+        var chips = OrderedChips(summary);
+        if (chips.Count > 0)
         {
-            ImGui.InvisibleButton($"##chip-{emoji}", new Vector2(chipW, chipH));
-            clicked = ImGui.IsItemClicked();
+            var pos = ImGui.GetCursorScreenPos();
+            var maxW = ImGui.GetContentRegionAvail().X;
+            ImGui.Dummy(new Vector2(maxW, pillH));
+            ReactionPillBar.Draw(ImGui.GetWindowDrawList(), pos, maxW, lineH,
+                scale, SpheneUI.Colors.Accent, chips, clickable: false,
+                out _, null);
         }
-        else
-        {
-            ImGui.Dummy(new Vector2(chipW, chipH));
-        }
-        var hovered = interactive && ImGui.IsItemHovered();
-
-        var draw = ImGui.GetWindowDrawList();
-        var accent = SpheneUI.Colors.Accent;
-        var fill = active
-            ? new Vector4(accent.X, accent.Y, accent.Z, hovered ? 0.45f : 0.3f)
-            : new Vector4(1f, 1f, 1f, hovered ? 0.12f : 0.05f);
-        var rounding = chipH * 0.5f;
-        draw.AddRectFilled(pos, pos + new Vector2(chipW, chipH),
-            ImGui.ColorConvertFloat4ToU32(fill), rounding);
-        if (active)
-        {
-            draw.AddRect(pos, pos + new Vector2(chipW, chipH),
-                ImGui.ColorConvertFloat4ToU32(new Vector4(accent.X, accent.Y, accent.Z, 0.8f)),
-                rounding, ImDrawFlags.None, 1f * scale);
-        }
-
-        var spriteY = pos.Y + pad * 0.5f;
-        SpheneUI.Emoji.SpriteAt(draw, new Vector2(pos.X + pad, spriteY), lineH, emoji);
-
-        var textX = pos.X + pad + lineH + gap;
-        var textY = pos.Y + (chipH - lineH) * 0.5f;
-        var textColor = active ? accent : SpheneUI.Colors.TextMuted;
-        draw.AddText(new Vector2(textX, textY),
-            ImGui.ColorConvertFloat4ToU32(textColor), countText);
-        return clicked;
+        ImGui.PopID();
     }
 }

@@ -300,8 +300,8 @@ public class PublicProfileService : DisposableMediatorSubscriberBase, IHostedSer
     /// Following feed - same in-place update the community stores get, so
     /// a liked chronicle flips its heart without a refetch.</summary>
     public void ApplyReactionSummary(SyncshellFeedItemKind kind, long itemId,
-        int totalCount, bool likedByMe)
-        => _store.FollowingFeed.PatchReaction(kind, itemId, totalCount, likedByMe);
+        ReactionSummaryDto summary)
+        => _store.FollowingFeed.PatchReaction(kind, itemId, summary);
 
     public async Task RefreshFollowing()
     {
