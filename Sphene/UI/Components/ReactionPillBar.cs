@@ -230,7 +230,7 @@ internal static class ReactionPillBar
         var hidden = chips.Count - widths.Count;
         if (hidden > 0)
         {
-            var more = hidden + "…";
+            var more = hidden + "...";
             drawList.AddText(new Vector2(rx, OpticalTextY(centerY, lineH)), mutedU, more);
             rx += ImGui.CalcTextSize(more).X + segGap;
         }

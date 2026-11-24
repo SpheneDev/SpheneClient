@@ -282,8 +282,8 @@ public static class FeedItemRow
         }
 
         // Chronicle preview + engagement strip: wrapped snippet lines tuck
-        // under the title, the last line ends in an inline accent "… more"
-        // jump (X-style); the tail line carries muted icon/count stats.
+        // under the title, the last line ends in the accent "… more" jump
+        // (X-style, ellipsis owned by the link); the tail carries stats.
         // The whole row is the click target, so the link is honest.
         var tailAnchor = context != null ? l3Y : l2Y;
         if (snippetLines is { Count: > 0 })
@@ -296,17 +296,19 @@ public static class FeedItemRow
                     secU, snippetLines[i]);
             }
             var lastY = sy + (snippetLines.Count - 1) * lineH;
-            var moreW = ImGui.CalcTextSize(" more").X;
-            var dotsW = ImGui.CalcTextSize("…").X;
-            var lastShown = FitToWidth(snippetLines[^1], textW - moreW - dotsW);
-            if (!lastShown.EndsWith('…'))
-            {
-                lastShown += "…";
-            }
+            // the ellipsis belongs to the jump, not the text: the snippet
+            // ends bare and one accent "… more" unit marks both the
+            // truncation and the way in - reading dots as text-owned makes
+            // the link look like it starts mid-sentence
+            const string moreLink = "... more";
+            var linkW = ImGui.CalcTextSize(moreLink).X;
+            var gapW = ImGui.CalcTextSize(" ").X;
+            var lastShown = FitToWidth(snippetLines[^1], textW - linkW - gapW)
+                .TrimEnd('…', '.', ' ').TrimEnd();
             drawList.AddText(new Vector2(nameX, lastY), secU, lastShown);
-            drawList.AddText(
-                new Vector2(nameX + ImGui.CalcTextSize(lastShown).X, lastY),
-                SpheneUI.ColorUtils.ToU32(accent), " more");
+            var linkX = nameX + ImGui.CalcTextSize(lastShown).X + gapW;
+            drawList.AddText(new Vector2(linkX, lastY),
+                SpheneUI.ColorUtils.ToU32(accent), moreLink);
             tailAnchor = lastY;
         }
         var likeRect = Vector4.Zero;
@@ -697,7 +699,9 @@ public static class FeedItemRow
     /// <summary>The substring of <paramref name="text"/> fitting
     /// <paramref name="maxW"/>, ellipsized on overflow (UTF-8 safe).
     /// Shared by <see cref="EllipsisEnd"/> and inline tails that append
-    /// their own suffix (like the Chronicle preview's "… more").</summary>
+    /// their own suffix (like the Chronicle preview's "... more"). ASCII
+    /// periods on purpose: the unicode ellipsis resolves to a midline CJK
+    /// fallback glyph in this font chain, periods sit on the baseline.</summary>
     private static string FitToWidth(string text, float maxW)
     {
         if (maxW <= 0f) return string.Empty;
@@ -707,7 +711,7 @@ public static class FeedItemRow
         while (lo < hi)
         {
             var mid = (lo + hi + 1) / 2;
-            if (ImGui.CalcTextSize(t[..mid].ToString() + "…").X <= maxW)
+            if (ImGui.CalcTextSize(t[..mid].ToString() + "...").X <= maxW)
             {
                 lo = mid;
             }
@@ -716,7 +720,7 @@ public static class FeedItemRow
                 hi = mid - 1;
             }
         }
-        return t[..lo].ToString() + "…";
+        return t[..lo].ToString() + "...";
     }
 
     /// <summary>Ellipsized drawlist text (UTF-8 safe). <paramref name="medium"/>
