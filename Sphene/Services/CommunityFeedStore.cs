@@ -45,6 +45,38 @@ public sealed class CommunityFeedStore
         get { lock (_lock) { return _items; } }
     }
 
+    /// <summary>Patches engagement state on every row matching
+    /// (<paramref name="kind"/>, <paramref name="itemId"/>) in a fresh
+    /// snapshot - the in-place like toggle updates counts without a refetch.
+    /// Rows are records, so the patch rebinds the list; readers holding the
+    /// previous snapshot keep a stable view.</summary>
+    public void PatchReaction(SyncshellFeedItemKind kind, long itemId,
+        int totalCount, bool likedByMe)
+    {
+        lock (_lock)
+        {
+            var copy = new List<SyncshellCommunityFeedItemDto>(_items.Count);
+            var touched = false;
+            foreach (var item in _items)
+            {
+                if (item.Kind == kind && (item.ItemId ?? item.Id) == itemId)
+                {
+                    copy.Add(item with
+                    {
+                        ReactionCount = totalCount,
+                        LikedByMe = likedByMe,
+                    });
+                    touched = true;
+                }
+                else
+                {
+                    copy.Add(item);
+                }
+            }
+            if (touched) _items = copy;
+        }
+    }
+
     /// <summary>True while a fetch is in flight.</summary>
     public bool IsLoading
     {

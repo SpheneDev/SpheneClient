@@ -248,6 +248,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private List<SyncshellCommunityFeedItemDto>? _friendActivityItems;
     private string? _friendActivityCursor;
     private bool _friendActivityLoading;
+    private bool _friendActivityPageFailed;
     private Pair? _viewingFriend;
     private readonly Dictionary<string, SyncshellAdminUI> _embeddedAdminPanels = new(StringComparer.Ordinal);
     private byte[] _lastAvatarBytes = [];
@@ -530,6 +531,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 _friendBannerBytes = [];
                 _friendActivityItems = null;
                 _friendActivityCursor = null;
+                _friendActivityPageFailed = false;
             }
             // Comment threads cache per post and only refetch on invalidate -
             // a profile push for ANY user (own chronicles included) can mean
@@ -1825,11 +1827,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     "All caught up",
                     "Pair requests, transfers and updates land here.");
             }
-            else if (SpheneUI.Layout.BeginScrollArea("hub-inbox-scroll",
-                    new Vector2(310f * scale, inboxH)))
+            else
             {
-                NotificationInbox.Draw(_notificationInbox, _pairManager,
-                    _apiController, Mediator);
+                if (SpheneUI.Layout.BeginScrollArea("hub-inbox-scroll",
+                        new Vector2(310f * scale, inboxH)))
+                {
+                    NotificationInbox.Draw(_notificationInbox, _pairManager,
+                        _apiController, Mediator);
+                }
                 SpheneUI.Layout.EndScrollArea();
             }
             SpheneUI.Popups.EndFlyout();
@@ -2911,7 +2916,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
         }
 
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
+        // The discover strip emits its own leading gap when it renders - a
+        // page that ends on spacing has a phantom scroll range worth exactly
+        // that gap.
         DrawHomeDiscoverStrip(accent);
     }
 
@@ -3005,7 +3012,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 () => SpheneUI.Popups.ToggleFlyout("hub-inbox"));
 
         }, title: "Overview", icon: FontAwesomeIcon.ChartBar, accentColor: accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
+        // No trailing gap - the column's last card must end on its edge or a
+        // tall side column leaks phantom page scroll below the table row.
     }
 
     private static void DrawGlanceStat(string label, string value, float w,
@@ -3060,6 +3068,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             return;
         }
 
+        // Leading gap emitted only when the card renders - spacing that outlives
+        // the last card becomes phantom scroll range.
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
         SpheneUI.Layout.SectionCard(() =>
         {
             var scale = SpheneUI.Scale;
@@ -3124,7 +3135,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
         }, title: "Latest moments", icon: FontAwesomeIcon.Images,
             accentColor: accent);
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
     }
 
     /// <summary>
@@ -3193,48 +3203,65 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 // at 10 items behind the "Community overview" footer link.
                 // FillToViewBottomHeight is scroll-invariant, so the size
                 // only follows window height, never page scroll.
-                var shown = Math.Min(items.Count, 10);
                 // Fill contract identical to DrawRecentActivity on the
                 // community overview: the card's outer edge lands one
                 // ItemSpacing above the page bottom. The reserve is exactly
                 // what the parent cursor consumes below the viewport inside
-                // the card - the card's bottom padding - plus the same
-                // ItemSpacing hair the community card leaves. PagePadding is
-                // already inside the avail baseline and must not be reserved
-                // again (it was what pushed the card edge visibly up).
+                // the card - the card's bottom padding - plus TWO ItemSpacing:
+                // one for the hair the edge leaves above the baseline, one for
+                // the trailing spacing ImGui's ItemSize counts after the last
+                // widget (CursorMaxPos includes it - an unreserved notch of
+                // phantom scroll range, the exact residual reported here).
                 var footerReserve = SpheneUI.Spacing.CardPadding.Scaled
-                    + ImGui.GetStyle().ItemSpacing.Y;
+                    + ImGui.GetStyle().ItemSpacing.Y * 2f;
                 var feedH = SpheneUI.Layout.FillToViewBottomHeight(footerReserve);
                 if (SpheneUI.Layout.BeginScrollArea("home-feed-scroll",
                         new Vector2(0f, feedH), contentPadding: Vector2.Zero))
                 {
-                    for (var i = 0; i < shown; i++)
+                    var shown = 0;
+                    var any = false;
+                    foreach (var item in items)
                     {
-                        var item = items[i];
+                        // Activity-on-your-content rows live in the
+                        // community Activity tab, never in a feed.
+                        if (item.Kind is SyncshellFeedItemKind.Comment
+                            or SyncshellFeedItemKind.Reaction or SyncshellFeedItemKind.Rsvp)
+                        {
+                            continue;
+                        }
+                        if (shown >= 10) break;
+                        if (any)
+                        {
+                            SpheneUI.Layout.ItemSeparator();
+                        }
                         // actor in the key - reaction/comment rows can share
                         // the same target id across different users.
                         if (FeedItemRow.Draw($"feed-{item.Kind}-{item.Id}-{item.ActorUid}", item, "hub:",
                                 fallbackAccent: accent, onActorClick: NavigateToAuthor,
-                                profileFor: ProfileForUid, shellAvatarFor: ShellAvatar))
+                                profileFor: ProfileForUid, shellAvatarFor: ShellAvatar,
+                    onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
                         {
                             NavigateFeedItem(item);
                         }
-                        if (i + 1 < shown)
-                        {
-                            SpheneUI.Layout.ItemSeparator();
-                        }
+                        shown++;
+                        any = true;
                     }
                     // Stream-tail jump link - clickable text, not a button -
                     // the persistent nav lives on the card's title actions.
-                    SpheneUI.Layout.ItemSeparator();
+                    if (any)
+                    {
+                        SpheneUI.Layout.ItemSeparator();
+                    }
                     if (SpheneUI.Text.Link("More →", accent))
                     {
                         NavigateTo(new HubLocation(SpheneHubPage.Community, null, null,
                             SubPage: 0));
                     }
                     SpheneUI.AttachTooltip("Open the full community overview");
-                    SpheneUI.Layout.EndScrollArea(scrollHints: false);
                 }
+                SpheneUI.Layout.EndScrollArea(scrollHints: false);
             }
         }, title: "Community feed", icon: FontAwesomeIcon.Newspaper,
             accentColor: accent, actions: feedActions);
@@ -3328,6 +3355,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             return;
         }
 
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
         SpheneUI.Layout.SectionCard(() =>
         {
             var scale = SpheneUI.Scale;
@@ -5331,7 +5359,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private static readonly SpheneUI.Controls.TabItem[] OverviewFeedTabs =
     [
         new(FontAwesomeIcon.Clock, "Recent Activity"),
-        new(FontAwesomeIcon.Star, "Highlights")
+        new(FontAwesomeIcon.WandMagicSparkles, "For You")
+    ];
+
+    private int _communityActivityTab;
+    private static readonly SpheneUI.Controls.TabItem[] CommunityActivityTabs =
+    [
+        new(FontAwesomeIcon.Bolt, "All"),
+        new(FontAwesomeIcon.Comments, "Comments"),
+        new(FontAwesomeIcon.Heart, "Reactions"),
+        new(FontAwesomeIcon.CalendarCheck, "Sign-ups")
     ];
 
     private void DrawCommunityOverview(IReadOnlyList<SyncshellCommunityFeedItemDto> items, Vector4 accent)
@@ -5369,15 +5406,21 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             var activity = _overviewFeedTab == 0;
             var height = MathF.Max(1f, bodyBottom - ImGui.GetCursorScreenPos().Y
                 - SpheneUI.Spacing.CardPadding.Scaled - ImGui.GetStyle().ItemSpacing.Y);
-            var scrollId = activity ? "##overview-activity-scroll" : "##overview-highlights-scroll";
+            var scrollId = activity ? "##overview-activity-scroll" : "##overview-foryou-scroll";
             if (SpheneUI.Layout.BeginScrollArea(scrollId, new Vector2(0f, height),
                     contentPadding: Vector2.Zero, chainWheel: false))
             {
-                DrawCommunityHighlights(items, accent, preview: activity);
                 if (activity)
                 {
+                    // The stream leads straight into content rows - no
+                    // highlights preview and no inner "Recent Activity"
+                    // section header; the tab bar already names the pane.
                     DrawCommunityCardFeed(items, accent, only: null);
-                    DrawCommunityLoadMore();
+                    DrawCommunityLoadMore(accent);
+                }
+                else
+                {
+                    DrawForYouFeed(accent);
                 }
             }
             SpheneUI.Layout.EndScrollArea();
@@ -5432,23 +5475,55 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 break;
         }
 
-        DrawCommunityLoadMore();
+        DrawCommunityLoadMore(accent);
     }
 
-    private void DrawCommunityLoadMore()
+    /// <summary>Cursor-paged stream tail, Twitter-style: an invisible
+    /// sentinel auto-loads the next page once it scrolls into view - the
+    /// store dedups concurrent page fetches. While a page is in flight a
+    /// muted "Loading…" hint keeps the spot; a failed page swaps in a
+    /// warning + retry link (explicit click only - never an auto-retry
+    /// loop against a dead backend).</summary>
+    private static void DrawFeedLoadTail(string id, bool hasMore, bool loading,
+        bool failed, Func<Task> load, Vector4 accent)
     {
-        if (_communityFeed.HasMore)
+        if (!hasMore) return;
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
+        // Fixed-height tail: the sentinel, loading hint and retry row all
+        // occupy one line-height slot so the host's scroll range never
+        // oscillates when a fetch starts or lands - a shrinking range
+        // clamps ScrollY, which is the sporadic "list snaps back" jump.
+        if (failed)
         {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_communityFeed.IsLoading))
+            SpheneUI.Text.Colored("Couldn't load more.", SpheneUI.Palette.Warning);
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4);
+            using var pushId = ImRaii.PushId(id);
+            if (SpheneUI.Text.Link("Retry", accent))
             {
-                if (SpheneUI.Controls.Button(_communityFeed.PageFailed ? "Retry loading more##commmore" : "Load more##commmore"))
-                {
-                    _ = _communityFeed.LoadMoreAsync();
-                }
+                _ = load();
             }
+            return;
+        }
+        if (loading)
+        {
+            SpheneUI.Text.Muted("Loading…");
+            return;
+        }
+        ImGui.Dummy(new Vector2(1f, ImGui.GetTextLineHeightWithSpacing()));
+        // Prefetch margin: fire while the last ~1.3 viewports are in range -
+        // the next page lands before the user bottoms out, which is what
+        // makes the stream feel endless instead of button-gated.
+        var remain = ImGui.GetScrollMaxY() - ImGui.GetScrollY();
+        if (remain <= ImGui.GetWindowHeight() * 1.3f)
+        {
+            _ = load();
         }
     }
+
+    private void DrawCommunityLoadMore(Vector4 accent)
+        => DrawFeedLoadTail("commmore", _communityFeed.HasMore,
+            _communityFeed.IsLoading, _communityFeed.PageFailed,
+            _communityFeed.LoadMoreAsync, accent);
 
     /// <summary>Content type each card-feed tab shows · tabs with their own
     /// layout (photos grid, events list, activity rows) map to null and are
@@ -5653,70 +5728,51 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     }
 
     /// <summary>
-    /// "Highlights" strip on Overview - up to three compact media tiles the
-    /// feed payload honestly supports: the next non-cancelled upcoming
-    /// event, the latest news post and the latest photo. Labels describe
-    /// schedule and recency only · no invented popularity or engagement.
-    /// The event tile comes from the dedicated next-event lookup - feed
-    /// paging orders newest-first, so the earliest eligible event can live
-    /// on a page that was never loaded.
+    /// "For You" tab on Overview - the server-ranked digest: community
+    /// content and followed authors' posts, scored by real engagement
+    /// (reactions, comments, views) against recency, followed authors
+    /// boosted. One ranked slice, no paging - a digest, not a stream.
     /// </summary>
-    private void DrawCommunityHighlights(
-        IReadOnlyList<SyncshellCommunityFeedItemDto> items, Vector4 accent, bool preview)
+    private void DrawForYouFeed(Vector4 accent)
     {
-        _communityFeed.EnsureNextEventRequested();
-        var nextEvent = _communityFeed.NextEvent;
-        SyncshellCommunityFeedItemDto? latestNews = null;
-        SyncshellCommunityFeedItemDto? latestPhoto = null;
-        foreach (var item in items)
+        _communityFeed.EnsureForYouRequested();
+        var items = _communityFeed.ForYouItems;
+        if (items.Count == 0)
         {
-            switch (item.Kind)
+            if (_communityFeed.ForYouLoading) DrawCommunitySkeleton();
+            else if (_communityFeed.ForYouRefreshFailed)
             {
-                case SyncshellFeedItemKind.News when latestNews == null:
-                    latestNews = item;
-                    break;
-                case SyncshellFeedItemKind.Photo when latestPhoto == null:
-                    latestPhoto = item;
-                    break;
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.ExclamationTriangle,
+                    "Feed unavailable", "Your For You digest could not be loaded.",
+                    "Retry", () => _ = _communityFeed.RefreshForYou(),
+                    FontAwesomeIcon.SyncAlt, accent);
             }
-        }
-
-        List<(SyncshellCommunityFeedItemDto Item, string Slot)> rows = [];
-        if (nextEvent != null) rows.Add((nextEvent, "Upcoming event"));
-        if (latestNews != null) rows.Add((latestNews, "Latest news"));
-        if (latestPhoto != null) rows.Add((latestPhoto, "Latest photo"));
-        if (rows.Count == 0)
-        {
-            if (!preview)
+            else
             {
-                if (_communityFeed.IsLoading) DrawCommunitySkeleton();
-                else if (_communityFeed.RefreshFailed) DrawCommunityFeedEmpty(accent);
-                else SpheneUI.Text.Muted("No highlights yet.");
+                SpheneUI.Layout.EmptyState(FontAwesomeIcon.WandMagicSparkles,
+                    "Nothing for you yet",
+                    "Posts buzzing in your communities and by people you follow land here.",
+                    "Find people",
+                    () => NavigateTo(new HubLocation(SpheneHubPage.Community, null, null, 7)),
+                    FontAwesomeIcon.Users, accent);
             }
             return;
         }
 
-        if (preview)
-        {
-            SpheneUI.Text.SectionHeader("Highlights", icon: FontAwesomeIcon.Star, accent: accent);
-        }
-        var count = preview ? Math.Min(2, rows.Count) : rows.Count;
-        for (var i = 0; i < count; i++)
+        for (var i = 0; i < items.Count; i++)
         {
             if (i > 0) SpheneUI.Layout.ItemSeparator();
-            var (item, slot) = rows[i];
-            if (FeedItemRow.Draw($"commhl-{item.Kind}-{item.GroupGID}-{item.Id}",
-                    item, "hub:", fallbackAccent: accent, extraMeta: slot,
+            var item = items[i];
+            if (FeedItemRow.Draw($"commfy-{item.Kind}-{item.GroupGID}-{item.Id}-{item.ActorUid}",
+                    item, "hub:", fallbackAccent: accent,
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
-                    shellAvatarFor: ShellAvatar))
+                    shellAvatarFor: ShellAvatar,
+                    onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
             }
-        }
-        if (preview)
-        {
-            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
-            SpheneUI.Text.SectionHeader("Recent Activity", icon: FontAwesomeIcon.Clock, accent: accent);
         }
     }
 
@@ -5730,7 +5786,12 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var any = false;
         foreach (var item in items)
         {
-            if (only.HasValue && item.Kind != only.Value)
+            // Comment/reaction/RSVP rows are activity ON the viewer's own
+            // content - they live in the Activity tab's stream, never in a
+            // content feed.
+            if (item.Kind is SyncshellFeedItemKind.Comment
+                or SyncshellFeedItemKind.Reaction or SyncshellFeedItemKind.Rsvp
+                || (only.HasValue && item.Kind != only.Value))
             {
                 continue;
             }
@@ -5741,7 +5802,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             if (FeedItemRow.Draw($"commfeed-{item.Kind}-{item.Id}-{item.ActorUid}",
                     item, "hub:", fallbackAccent: accent,
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
-                    shellAvatarFor: ShellAvatar))
+                    shellAvatarFor: ShellAvatar,
+                    onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
             }
@@ -5971,7 +6035,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     item, "hub:",
                     fallbackAccent: SyncshellCommunityView.ParseAccent(item.AccentColor) ?? accent,
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
-                    shellAvatarFor: ShellAvatar))
+                    shellAvatarFor: ShellAvatar,
+                    onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
             }
@@ -5984,11 +6051,24 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private void DrawCommunityActivity(
         IReadOnlyList<SyncshellCommunityFeedItemDto> items, Vector4 accent)
     {
+        var selected = SpheneUI.Controls.TabBar("community-activity",
+            CommunityActivityTabs, _communityActivityTab, accent);
+        if (selected >= 0) _communityActivityTab = selected;
+        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+
+        var only = _communityActivityTab switch
+        {
+            1 => SyncshellFeedItemKind.Comment,
+            2 => SyncshellFeedItemKind.Reaction,
+            3 => SyncshellFeedItemKind.Rsvp,
+            _ => (SyncshellFeedItemKind?)null,
+        };
         var any = false;
         foreach (var item in items)
         {
             if (item.Kind is not (SyncshellFeedItemKind.Comment
-                or SyncshellFeedItemKind.Reaction or SyncshellFeedItemKind.Rsvp))
+                or SyncshellFeedItemKind.Reaction or SyncshellFeedItemKind.Rsvp)
+                || (only.HasValue && item.Kind != only.Value))
             {
                 continue;
             }
@@ -5999,7 +6079,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             if (FeedItemRow.Draw($"commact-{item.Kind}-{item.Id}-{item.ActorUid}",
                     item, "hub:", fallbackAccent: accent,
                     onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
-                    shellAvatarFor: ShellAvatar))
+                    shellAvatarFor: ShellAvatar,
+                    onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
             {
                 NavigateFeedItem(item);
             }
@@ -6019,8 +6102,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         else
         {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.Bolt, "No activity yet",
-                "Comments, reactions and RSVPs on your posts land here.", accent: accent);
+            var (icon, title, hint) = only switch
+            {
+                SyncshellFeedItemKind.Comment => (FontAwesomeIcon.Comments,
+                    "No comments yet", "Comments and replies on your posts land here."),
+                SyncshellFeedItemKind.Reaction => (FontAwesomeIcon.Heart,
+                    "No reactions yet", "Reactions on your posts land here."),
+                SyncshellFeedItemKind.Rsvp => (FontAwesomeIcon.CalendarCheck,
+                    "No sign-ups yet", "Sign-ups to your events land here."),
+                _ => (FontAwesomeIcon.Bolt,
+                    "No activity yet", "Comments, reactions and RSVPs on your posts land here."),
+            };
+            SpheneUI.Layout.EmptyState(icon, title, hint, accent: accent);
         }
     }
 
@@ -6410,6 +6503,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             * (canSeal == false ? 2f : 1f) + SpheneUI.Spacing.X4.Scaled;
         var listH = SpheneUI.Layout.FillToViewBottomHeight(bottomReserve);
 
+        // Hoisted so EndScrollArea below can read the fade strength after
+        // the (possibly clipped) content block.
+        var chatAlpha = 1f;
         if (SpheneUI.Layout.BeginScrollArea("chat-scroll",
                 new Vector2(w, listH), chainWheel: false))
         {
@@ -6638,7 +6734,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 _chatRevealStart = now;
             }
-            var chatAlpha = 1f;
+            chatAlpha = 1f;
             if (_chatIntroActive)
             {
                 chatAlpha = _chatRevealStart < 0.0
@@ -6795,11 +6891,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 ImGui.PopStyleVar();
             }
-            // The edge fades ride the same reveal as the bubbles - while the
-            // conversation is still hidden they would only glow over empty
-            // space.
-            SpheneUI.Layout.EndScrollArea(fadeStrength: chatAlpha);
         }
+        // The edge fades ride the same reveal as the bubbles - while the
+        // conversation is still hidden they would only glow over empty
+        // space.
+        SpheneUI.Layout.EndScrollArea(fadeStrength: chatAlpha);
 
         DrawChatSecurityStrip(pair, uid);
 
@@ -7383,6 +7479,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _profileViewerImages.Clear();
             _friendActivityItems = null;
             _friendActivityCursor = null;
+            _friendActivityPageFailed = false;
         }
         else if (_pendingFriendTab is { } friendTab)
         {
@@ -7504,40 +7601,48 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 if (FeedItemRow.Draw($"fact-{item.Kind}-{item.Id}-{i}", item,
                         "hub:", fallbackAccent: accent,
                         onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
-                        shellAvatarFor: ShellAvatar))
+                        shellAvatarFor: ShellAvatar,
+                    onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
                 {
                     NavigateFeedItem(item);
                 }
             }
-            if (_friendActivityCursor != null)
-            {
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-                using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(_friendActivityLoading))
-                {
-                    if (SpheneUI.Controls.Button("Load more##factmore"))
-                    {
-                        _friendActivityLoading = true;
-                        var uid = pair.UserData.UID;
-                        var cursor = _friendActivityCursor;
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var page = await _apiController.UserGetProfileActivity(
-                                    uid, new FeedPageRequestDto(cursor)).ConfigureAwait(false);
-                                _friendActivityItems?.AddRange(page.Items);
-                                _friendActivityCursor = page.NextCursor;
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogDebug(ex, "Failed to page profile activity for {UID}", uid);
-                            }
-                            finally { _friendActivityLoading = false; }
-                        });
-                    }
-                }
-            }
+            DrawFeedLoadTail("factmore", _friendActivityCursor != null,
+                _friendActivityLoading, _friendActivityPageFailed,
+                () => LoadMoreFriendActivity(pair), accent);
         }, title: "Activity", icon: FontAwesomeIcon.Bolt, accentColor: accent);
+    }
+
+    /// <summary>Pages the next profile-activity slice for the open friend
+    /// view; failures keep the cursor so the tail's retry reuses it.</summary>
+    private Task LoadMoreFriendActivity(Pair pair)
+    {
+        if (_friendActivityLoading || _friendActivityCursor == null)
+        {
+            return Task.CompletedTask;
+        }
+        _friendActivityLoading = true;
+        _friendActivityPageFailed = false;
+        var uid = pair.UserData.UID;
+        var cursor = _friendActivityCursor;
+        return Task.Run(async () =>
+        {
+            try
+            {
+                var page = await _apiController.UserGetProfileActivity(
+                    uid, new FeedPageRequestDto(cursor)).ConfigureAwait(false);
+                _friendActivityItems?.AddRange(page.Items);
+                _friendActivityCursor = page.NextCursor;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to page profile activity for {UID}", uid);
+                _friendActivityPageFailed = true;
+            }
+            finally { _friendActivityLoading = false; }
+        });
     }
 
     /// <summary>The Profile sub-tab of the friend view · connection status and privacy hints.</summary>
@@ -7805,6 +7910,64 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             return pair != null ? $"{pair.UserData.PreferredName} · Gallery" : "Gallery";
         }
         return "My Gallery";
+    }
+
+    /// <summary>Opens a feed row's thumbnail in the image-viewer popout.
+    /// The gallery DTO is synthesized from the row's media hash/base64 -
+    /// deep-link ids keep captions honest but never navigate the page.</summary>
+    private void OpenFeedItemPhoto(SyncshellCommunityFeedItemDto item)
+    {
+        var img = new SyncshellGalleryImageDto(item.ItemId ?? item.Id,
+            item.GroupGID ?? string.Empty, item.ThumbnailBase64, null, null, null,
+            item.Title, 0, item.TimestampUtc, null, item.ActorUid,
+            SyncshellGalleryImageStatus.Published,
+            ImageMediaHash: item.FullMediaHash ?? item.ThumbnailMediaHash);
+        Mediator.Publish(new OpenSyncshellImageViewerMessage(
+            new List<SyncshellGalleryImageDto> { img }, 0,
+            item.GroupGID ?? string.Empty, item.Title));
+    }
+
+    /// <summary>One-click Like toggle from a feed row's engagement strip.
+    /// The response carries the authoritative count and the caller's own
+    /// reaction kinds, so the row patches in place - the feed never
+    /// reloads for a like.</summary>
+    private void ToggleFeedItemLike(SyncshellCommunityFeedItemDto item)
+    {
+        var targetKind = item.Kind switch
+        {
+            SyncshellFeedItemKind.News => ReactionTargetKind.News,
+            SyncshellFeedItemKind.Event => ReactionTargetKind.Event,
+            SyncshellFeedItemKind.Blog => ReactionTargetKind.Blog,
+            _ => (ReactionTargetKind?)null,
+        };
+        if (targetKind == null) return;
+        var targetId = item.ItemId ?? item.Id;
+        var set = !item.LikedByMe;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var summary = await _apiController.SetReaction(new ReactionSetDto(
+                    targetKind.Value, targetId, ReactionKind.Like, set,
+                    OwnerUid: item.TargetOwnerUid,
+                    Emoji: ReactionEmojiMap.ThumbsUp)).ConfigureAwait(false);
+                // toned thumbs carry the base glyph as a prefix - they count
+                // as likes, same rule the server's LikedByMe fill applies
+                var viewerEmojis = summary.ViewerEmojis;
+                var liked = viewerEmojis != null
+                    ? viewerEmojis.Any(e => e.StartsWith(ReactionEmojiMap.ThumbsUp,
+                        StringComparison.Ordinal))
+                    : summary.ViewerKinds.Contains((int)ReactionKind.Like);
+                _communityFeed.ApplyReactionSummary(item.Kind, targetId,
+                    summary.TotalCount, liked);
+                _publicProfiles.ApplyReactionSummary(item.Kind, targetId,
+                    summary.TotalCount, liked);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Feed reaction toggle failed");
+            }
+        });
     }
 
     /// <summary>
@@ -8131,7 +8294,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             ThumbnailMediaHash: captured.CoverMediaHash);
                         if (FeedItemRow.Draw($"own-chron-{captured.Id}", item,
                                 "chron:", accent, ChronicleRowMeta(captured),
-                                profileFor: ProfileForUid))
+                                profileFor: ProfileForUid,
+                                onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
                         {
                             _openChronicle = (me.UID, captured.Id);
                         }
@@ -8276,7 +8442,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             ThumbnailMediaHash: post.CoverMediaHash);
                         if (FeedItemRow.Draw($"friend-chron-{post.Id}", item,
                                 "chron:", accent, ChronicleRowMeta(post),
-                                profileFor: ProfileForUid))
+                                profileFor: ProfileForUid,
+                                onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
                         {
                             _openChronicle = (pair.UserData.UID, post.Id);
                             _ = Task.Run(async () =>
@@ -10942,7 +11111,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     ThumbnailMediaHash: captured.CoverMediaHash);
                 if (FeedItemRow.Draw($"public-chron-{uid}-{captured.Id}", item,
                         "pub:", accent, ChronicleRowMeta(captured),
-                        onActorClick: NavigateToAuthor, profileFor: ProfileForUid))
+                        onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                        onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
                         PublicUid: uid, ChroniclePostId: captured.Id));
@@ -11004,29 +11176,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     }
                     if (FeedItemRow.Draw($"follow-{item.Kind}-{item.Id}-{item.ActorUid}",
                             item, "hub:", fallbackAccent: accent,
-                            onActorClick: NavigateToAuthor, profileFor: ProfileForUid))
+                            onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
+                            onThumbClick: OpenFeedItemPhoto,
+                    onLikeClick: ToggleFeedItemLike,
+                    onCommentClick: NavigateFeedItem))
                     {
                         NavigateFeedItem(item);
                     }
                 }
-                if (_publicProfiles.FollowingPageFailed)
-                {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                    SpheneUI.Text.Colored("Couldn't load more.", SpheneUI.Palette.Warning);
-                }
-                if (_publicProfiles.FollowingHasMore)
-                {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
-                    using (ImRaii.Disabled(_publicProfiles.FollowingLoading))
-                    {
-                        if (SpheneUI.Controls.Button(
-                                _publicProfiles.FollowingPageFailed
-                                    ? "Retry##followmore" : "Load more##followmore"))
-                        {
-                            _ = _publicProfiles.LoadMoreFollowingAsync();
-                        }
-                    }
-                }
+                DrawFeedLoadTail("followmore", _publicProfiles.FollowingHasMore,
+                    _publicProfiles.FollowingLoading, _publicProfiles.FollowingPageFailed,
+                    _publicProfiles.LoadMoreFollowingAsync, accent);
             }
         }, title: "Following", icon: FontAwesomeIcon.Rss,
             description:

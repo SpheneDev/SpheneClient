@@ -296,6 +296,13 @@ public class PublicProfileService : DisposableMediatorSubscriberBase, IHostedSer
 
     public void InvalidateFollowing() => _store.FollowingFeed.Invalidate();
 
+    /// <summary>Patches a like toggle's authoritative result into the
+    /// Following feed - same in-place update the community stores get, so
+    /// a liked chronicle flips its heart without a refetch.</summary>
+    public void ApplyReactionSummary(SyncshellFeedItemKind kind, long itemId,
+        int totalCount, bool likedByMe)
+        => _store.FollowingFeed.PatchReaction(kind, itemId, totalCount, likedByMe);
+
     public async Task RefreshFollowing()
     {
         if (!_store.FollowingFeed.TryBeginRefresh(out var request)) return;

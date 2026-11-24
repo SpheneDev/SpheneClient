@@ -253,16 +253,17 @@ reference `DrawRecentActivity` (community overview) and
   inside the card's `BeginScrollArea` viewport (`contentPadding:
   Vector2.Zero`).
 - **Scrollable page:** size the viewport with
-  `Layout.FillToViewBottomHeight(reserve)` (scroll-invariant: avail −
-  scrollY, height follows the window only). `reserve` is *exactly* what
-  the parent cursor consumes below the viewport inside the card - the
-  `ItemSpacing` before the next item, any persistent footer block (gap
-  + hairline + `GetFrameHeight()` button), the card's
-  `Spacing.CardPadding` bottom pad - **plus** the `ItemSpacing` hair
-  above the baseline. Never add `Spacing.PagePadding`: the avail
-  baseline already ends at the content edge, so reserving padding again
-  lifts the whole card by a full page padding (this was the Home feed
-  bug).
+  `Layout.FillToViewBottomHeight(reserve)` — measured in screen space
+  (`window bottom − window padding − cursorScreenPos − scrollY`), so the
+  height is scroll-invariant under *any* `GetContentRegionAvail`
+  semantics. `reserve` is *exactly* what the parent cursor consumes
+  below the viewport inside the card - the `ItemSpacing` before the
+  next item, any persistent footer block (gap + hairline +
+  `GetFrameHeight()` button), the card's `Spacing.CardPadding` bottom
+  pad - **plus** `ItemSpacing × 2`: one for the hair above the baseline,
+  one for the trailing spacing `ItemSize` counts after the last widget
+  (`CursorMaxPos` includes it — an unreserved notch becomes real
+  phantom scroll range).
 - **Non-scrolling page** (`ownsScrolling`, e.g. community overview):
   capture `bodyBottom = cursorScreenPos.Y + GetContentRegionAvail().Y`
   *before* entering auto-height containers (tables/cards), then
@@ -271,13 +272,39 @@ reference `DrawRecentActivity` (community overview) and
 - **No trailing `VerticalSpace` after a fill-height card** - it sits
   below the card edge, inflates the visual gap and leaks a few px of
   phantom page scroll.
+- **`BeginScrollArea` returns false when the child is fully clipped**
+  (scrolled out of the host viewport, or clipped on the first frame after
+  a scroll-restore). The clipped child is closed internally, so skipping
+  content on `!begun` is safe — but keep `EndScrollArea` *outside* the
+  `if` anyway (canonical pairing; it's a balanced no-op then). Nesting it
+  inside used to leak the child + its `ScrollAreaState`, and the
+  resulting stack desync surfaced as the sporadic "page slides, then
+  snaps back" bug.
+- **Stream tails keep a fixed height.** A scroll tail whose height
+  changes with fetch state (sentinel ↔ "Loading…" ↔ gone) oscillates the
+  host's scrollMax; a shrinking range clamps ScrollY and reads as a snap.
+  `DrawFeedLoadTail` occupies one line-height slot in every state.
 - `chainWheel: false` only when nothing follows the card on the page;
   keep the default chaining when content continues below the fold.
+- **No trailing `VerticalSpace` at a page's tail.** The last emitted
+  element must be a card edge; a `CardGap` before a section that renders
+  nothing (early-return) or after a column's last card is *itself*
+  scrollable range. Emit leading gaps inside the conditional section
+  instead.
+- **`EndScrollArea`'s bottom spacer is gated on the range *excluding*
+  itself.** `ScrollAreaLastMax` stores `scrollMax − spacer` when emitted;
+  gating on the raw measured max makes the spacer a one-way ratchet —
+  once content overflows (window shrink) it latches a permanent
+  ~`ScrollAreaContentInset` phantom range even after the content fits
+  again.
 - **Diagnostic:** when the whole page briefly slides (then snaps back)
   as a nested scroll hits its edge, the *page* carries phantom scroll
-  range - the chained wheel forwards into it. The cause is a fill
-  reserve that over-reserves (`PagePadding` et al.) or a spacer below
-  the card, never the child itself; fix the page's content height.
+  range - the chained wheel forwards into it. Causes seen so far: a
+  scroll-coupled fill height (`avail` not scroll-inflated → `−scrollY`
+  leaks scroll into the height → content shrinks when scrolled → clamp),
+  a `CursorMaxPos` trailing-`ItemSpacing` notch, a trailing gap at the
+  page tail, or the latched spacer above - never the child itself; fix
+  the page's content height.
 - Pages whose entire body is a fill-height stream join `ownsScrolling`
   in the hub so the outer page child does not wrap them in a second
   scroll region.
@@ -1661,7 +1688,18 @@ services or brand textures):
   links + "Open profile"); same language as `Profile.Hero`.
 - `EventCard` - date-block event card with countdown pill.
 - `FeedItemRow` - activity-feed row (bare kind glyph, title, "Shell · time"
-  meta, photo thumbnail) + `RelativeTime`.
+  meta, photo thumbnail) + `RelativeTime`. Chronicle rows lead with the
+  title (no "Published a Chronicle" label) and append a ≤2-line body
+  preview ending in an inline accent "… more" jump - the whole row stays
+  the click target so the link is honest. Rows carrying engagement
+  counters get a muted stats strip (reaction/comment/view icons + counts,
+  only above zero) from `SyncshellCommunityFeedItemDto.Comment/Reaction/
+  ViewCount` - null on activity/photo rows and older servers, so the
+  strip only paints when data exists. Cursor-paged streams end with a
+  fixed-height sentinel tail: prefetch at ~1.3 viewports from the bottom,
+  "Loading…" hint in flight, warning + retry link on failure - never a
+  manual "Load more" button and never a state-dependent height (a
+  shrinking tail clamps ScrollY → the "list snaps back" jump).
 - `NotificationInbox` - shared pending-items list (live pair requests with
   inline accept/decline + `NotificationInboxService` items: mod transfers,
   updates, area-bound consents). Backed by `PendingCount` for badges; used

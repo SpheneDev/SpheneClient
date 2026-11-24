@@ -124,6 +124,13 @@ public partial class ApiController
             nameof(UserGetFollowingFeed), dto).ConfigureAwait(false);
     }
 
+    public async Task<SyncshellCommunityFeedPageDto> UserGetForYouFeed(FeedPageRequestDto dto)
+    {
+        if (!IsConnected) return new SyncshellCommunityFeedPageDto([], null);
+        return await _spheneHub!.InvokeAsync<SyncshellCommunityFeedPageDto>(
+            nameof(UserGetForYouFeed), dto).ConfigureAwait(false);
+    }
+
     public async Task<UserProfileGalleryImageDto?> UserUpsertProfileGalleryImage(UserProfileGalleryImageUpdateDto dto)
     {
         if (!IsConnected) return null;

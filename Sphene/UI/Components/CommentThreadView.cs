@@ -734,9 +734,10 @@ public sealed class CommentThreadView
         EnsureCommentSummary(c.Id, ops, st);
         var summary = st.CommentSummaries.GetValueOrDefault(c.Id);
         ReactionBar.DrawInline(ReactionTargetKind.Comment, c.Id, summary,
-            (k, set) =>
+            (emoji, set) =>
             {
-                var dto = new ReactionSetDto(ReactionTargetKind.Comment, c.Id, k, set);
+                var dto = new ReactionSetDto(ReactionTargetKind.Comment, c.Id,
+                    ReactionKind.Like, set, Emoji: emoji);
                 _ = Task.Run(async () =>
                 {
                     var s = await ops.SetReaction!(dto).ConfigureAwait(false);
@@ -771,10 +772,11 @@ public sealed class CommentThreadView
             CommentTargetKind.Event => ReactionTargetKind.Event,
             _ => ReactionTargetKind.Blog,
         };
-        ReactionBar.DrawInline(rk, targetId, st.TargetSummary, (k, set) =>
+        ReactionBar.DrawInline(rk, targetId, st.TargetSummary, (emoji, set) =>
         {
-            var dto = new ReactionSetDto(rk, targetId, k, set, null, ownerUid,
-                groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null);
+            var dto = new ReactionSetDto(rk, targetId, ReactionKind.Like, set, null, ownerUid,
+                groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null,
+                Emoji: emoji);
             _ = Task.Run(async () =>
             {
                 var summary = await ops.SetReaction(dto).ConfigureAwait(false);

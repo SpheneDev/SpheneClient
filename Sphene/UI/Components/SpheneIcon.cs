@@ -212,11 +212,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
             SpheneUI.Layout.EmptyState(FontAwesomeIcon.BellSlash,
                 "All caught up", "Pair requests, transfers and updates land here.");
         }
-        else if (SpheneUI.Layout.BeginScrollArea("menu-inbox-scroll",
-                new Vector2(w, listH)))
+        else
         {
-            NotificationInbox.Draw(_notificationInbox, _pairManager,
-                _apiController, Mediator);
+            if (SpheneUI.Layout.BeginScrollArea("menu-inbox-scroll",
+                    new Vector2(w, listH)))
+            {
+                NotificationInbox.Draw(_notificationInbox, _pairManager,
+                    _apiController, Mediator);
+            }
             SpheneUI.Layout.EndScrollArea();
         }
     }
@@ -853,11 +856,14 @@ public class SpheneIcon : WindowMediatorSubscriberBase
                     "All caught up",
                     "Pair requests, transfers and updates land here.");
             }
-            else if (SpheneUI.Layout.BeginScrollArea("icon-inbox-scroll",
-                    new Vector2(flyW, flyH)))
+            else
             {
-                NotificationInbox.Draw(_notificationInbox, _pairManager,
-                    _apiController, Mediator);
+                if (SpheneUI.Layout.BeginScrollArea("icon-inbox-scroll",
+                        new Vector2(flyW, flyH)))
+                {
+                    NotificationInbox.Draw(_notificationInbox, _pairManager,
+                        _apiController, Mediator);
+                }
                 SpheneUI.Layout.EndScrollArea();
             }
             SpheneUI.Popups.EndFlyout();

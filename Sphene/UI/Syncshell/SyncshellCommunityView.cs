@@ -41,13 +41,17 @@ internal static partial class SyncshellCommunityView
             ? bytes
             : !string.IsNullOrEmpty(base64) ? Convert.FromBase64String(base64) : null;
 
-    /// <summary>Texture-cache key segment versioned by content - hash media
-    /// change the key by definition; inline base64 payloads get a cheap
-    /// fingerprint so a replaced image can't leave the old texture latched
-    /// under the same key. Versioned keys make manual <c>Media.Evict</c>
-    /// calls unnecessary.</summary>
+    /// <summary>Texture-cache key segment versioned by content AND local
+    /// state: a hash payload still downloading keys as "p" (pending - the
+    /// base64 placeholder may latch there harmlessly) and flips to "f" the
+    /// frame the full file lands, so surfaces upgrade thumbnail→full on
+    /// their own. Inline base64 payloads get a cheap fingerprint so a
+    /// replaced image can't leave the old texture latched under the same
+    /// key. Versioned keys make manual <c>Media.Evict</c> calls unnecessary.</summary>
     internal static string MediaVersion(string? mediaHash, string? base64)
-        => mediaHash ?? $"b64{base64?.Length ?? 0}x{(base64 == null ? 0 : StringComparer.Ordinal.GetHashCode(base64)):x8}";
+        => mediaHash != null
+            ? $"{mediaHash}:{(MediaClient?.TryGetLocalFile(mediaHash) != null ? "f" : "p")}"
+            : $"b64{base64?.Length ?? 0}x{(base64 == null ? 0 : StringComparer.Ordinal.GetHashCode(base64)):x8}";
 
     /// <summary>DisplayName → Alias → null; a raw uid is never a display
     /// name - surfaces without an identity row render "Unknown user".</summary>
@@ -1717,7 +1721,8 @@ internal static partial class SyncshellCommunityView
                     ImGui.SameLine(0f, gap);
                 }
                 var img = images[i];
-                var wrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{img.Id}",
+                var wrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{img.Id}:"
+                        + MediaVersion(img.ImageMediaHash, img.ImageBase64),
                     ResolveBytes(img.ImageMediaHash, img.ImageBase64));
                 var min = ImGui.GetCursorScreenPos();
                 var max = min + new Vector2(tileW, tileH);
@@ -3284,7 +3289,7 @@ internal static partial class SyncshellCommunityView
         IDalamudTextureWrap? wrap = null;
         if (thumbHash != null || ev.ImageBase64 != null)
         {
-            wrap = SpheneUI.Media.Texture($"eventflyer:{ev.Id}:{thumbHash}",
+            wrap = SpheneUI.Media.Texture($"eventflyer:{ev.Id}:{MediaVersion(thumbHash, ev.ImageBase64)}",
                 ResolveBytes(thumbHash, ev.ImageBase64));
             if (wrap != null)
             {
@@ -3904,7 +3909,7 @@ internal static partial class SyncshellCommunityView
             var coverMin = ImGui.GetCursorScreenPos();
             var coverSize = new Vector2(SpheneUI.Controls.BoundedAvailX(), 140f * scale);
             var coverMax = coverMin + coverSize;
-            var wrap = SpheneUI.Media.Texture($"{texturePrefix}event:{ev.Id}:{ev.ImageMediaHash}",
+            var wrap = SpheneUI.Media.Texture($"{texturePrefix}event:{ev.Id}:{MediaVersion(ev.ImageMediaHash, ev.ImageBase64)}",
                 ResolveBytes(ev.ImageMediaHash, ev.ImageBase64));
             if (wrap != null)
             {
@@ -5905,7 +5910,8 @@ internal static partial class SyncshellCommunityView
             // mid-press and could never be clicked.
             var hovered = ImGui.IsMouseHoveringRect(min, max);
             var lift = SpheneUI.Fx.HoverT(ImGui.GetID($"##tile-lift-{gid}-{img.Id}"), hovered);
-            var wrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{img.Id}",
+            var wrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{img.Id}:"
+                    + MediaVersion(img.ImageMediaHash, img.ImageBase64),
                 ResolveBytes(img.ImageMediaHash, img.ImageBase64));
             if (wrap != null)
             {

@@ -40,12 +40,17 @@ public static class FeedItemRow
     /// <paramref name="profileFor"/> resolves actor avatars by uid;
     /// <paramref name="shellAvatarFor"/> resolves syncshell avatars for
     /// shell-owned rows - events always wear their syncshell's identity
-    /// even when a creator uid is attached.</summary>
+    /// even when a creator uid is attached. <paramref name="onThumbClick"/>
+    /// turns the right-side thumbnail into a photo-preview jump that wins
+    /// over the row click.</summary>
     public static bool Draw(string id, SyncshellCommunityFeedItemDto item,
         string texturePrefix, Vector4? fallbackAccent = null,
         string? extraMeta = null, Action<string>? onActorClick = null,
         Func<string, SpheneProfileData?>? profileFor = null,
-        Func<string, IDalamudTextureWrap?>? shellAvatarFor = null)
+        Func<string, IDalamudTextureWrap?>? shellAvatarFor = null,
+        Action<SyncshellCommunityFeedItemDto>? onThumbClick = null,
+        Action<SyncshellCommunityFeedItemDto>? onLikeClick = null,
+        Action<SyncshellCommunityFeedItemDto>? onCommentClick = null)
     {
         var drawList = ImGui.GetWindowDrawList();
         var scale = SpheneUI.Scale;
@@ -101,6 +106,11 @@ public static class FeedItemRow
         var thumb = ResolveThumb(item, texturePrefix);
         var showThumb = thumb != null
             && availX - (padX * 2f) - avatarD - gutter - thumbW - mediaGap >= minTextW;
+        // Text column width - nameX..bodyRight relative to the row origin.
+        var textW = availX - padX * 2f - avatarD - gutter
+            - (showThumb ? thumbW + mediaGap : 0f);
+        var (snippetLines, hasTail) = ExtraContent(item, textW,
+            interactive: onLikeClick != null || onCommentClick != null);
 
         // Event rows: the schedule lives labeled in the context line; the
         // identity line only carries a real activity timestamp
@@ -115,7 +125,8 @@ public static class FeedItemRow
         var tsW = string.IsNullOrEmpty(tsText) ? 0f : ImGui.CalcTextSize(tsText).X;
 
         var lines = context != null ? 3 : 2;
-        var textH = lines * lineH + identGap + (lines - 2) * lineGap;
+        var textH = lines * lineH + identGap + (lines - 2) * lineGap
+            + ExtraHeight(snippetLines, hasTail, lineH, lineGap);
         var bodyH = MathF.Max(MathF.Max(avatarD, textH),
             showThumb ? thumbH : 0f);
         var rowH = padY * 2f + bodyH;
@@ -135,16 +146,24 @@ public static class FeedItemRow
         var nameMax = bodyRight - nameX - sepW - tsW;
         var nameShownW = MathF.Min(nameW, MathF.Max(0f, nameMax));
         var avatarPos = origin + new Vector2(padX, padY);
-        var actorHovered = false;
-        var actorHit = false;
-        if (actorLinkable)
-        {
-            ImGui.SetCursorScreenPos(avatarPos);
-            actorHit = ImGui.InvisibleButton("##actor-" + id,
-                new Vector2(avatarD + gutter + nameShownW, MathF.Max(avatarD, lineH)));
-            actorHovered = ImGui.IsItemHovered();
-            ImGui.SetCursorScreenPos(origin + new Vector2(availX, 0f));
-        }
+        // Hit zones ride the row's single InvisibleButton - a second button
+        // overlapping it can never win ImGui's first-claimed HoveredId.
+        // Rects are screen-space; resolved via the mouse position on click.
+        var actorRect = actorLinkable
+            ? new Vector4(avatarPos.X, avatarPos.Y,
+                avatarPos.X + avatarD + gutter + nameShownW,
+                avatarPos.Y + MathF.Max(avatarD, lineH))
+            : Vector4.Zero;
+        var thumbRect = showThumb && onThumbClick != null
+            ? new Vector4(thumbX, origin.Y + padY,
+                thumbX + thumbW, origin.Y + padY + thumbH)
+            : Vector4.Zero;
+        var actorHovered = actorLinkable && ImGui.IsMouseHoveringRect(
+            new Vector2(actorRect.X, actorRect.Y),
+            new Vector2(actorRect.Z, actorRect.W));
+        var thumbHovered = thumbRect != Vector4.Zero && ImGui.IsMouseHoveringRect(
+            new Vector2(thumbRect.X, thumbRect.Y),
+            new Vector2(thumbRect.Z, thumbRect.W));
 
         if (rowHovered || actorHovered)
         {
@@ -152,8 +171,8 @@ public static class FeedItemRow
             drawList.AddRectFilled(origin, origin + new Vector2(availX, rowH),
                 SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
                     SpheneUI.Colors.TextPrimary, 0.05f)), 4f * scale);
-            ImGui.SetTooltip(actorLinkable && actorHovered
-                ? name!
+            ImGui.SetTooltip(thumbHovered ? "Open photo"
+                : actorLinkable && actorHovered ? name!
                 : tsText.Length > 0 ? $"{kindLabel} · {tsText}" : kindLabel);
         }
 
@@ -182,20 +201,40 @@ public static class FeedItemRow
         var l2Y = l1Y + lineH + identGap;
         var l3Y = l2Y + lineH + lineGap;
 
+        // Actor names wear the user's chosen profile accent; shell-owned
+        // rows (venue/syncshell identities) get a Users glyph marker so
+        // a community name reads differently from a person at a glance.
         var nameColor = SpheneUI.Colors.TextPrimary;
+        if (isActorIdentity && actorProfile != null)
+        {
+            nameColor = actorProfile.ProfileTheme.Value.AccentColor(accent);
+        }
+        var nameDrawX = nameX;
+        if (!isActorIdentity && hasShell)
+        {
+            var marker = FontAwesomeIcon.Users.ToIconString();
+            float markerW;
+            using (SpheneUI.Icons.PushFont())
+            {
+                markerW = ImGui.CalcTextSize(marker).X + 5f * scale;
+                drawList.AddText(new Vector2(nameX, l1Y),
+                    SpheneUI.ColorUtils.ToU32(accent), marker);
+            }
+            nameDrawX += markerW;
+        }
         if (actorLinkable && actorHovered)
         {
-            drawList.AddLine(new Vector2(nameX, l1Y + lineH - 1f),
-                new Vector2(nameX + nameShownW, l1Y + lineH - 1f),
+            drawList.AddLine(new Vector2(nameDrawX, l1Y + lineH - 1f),
+                new Vector2(nameDrawX + nameShownW, l1Y + lineH - 1f),
                 SpheneUI.ColorUtils.ToU32(nameColor));
         }
-        EllipsisEnd(drawList, new Vector2(nameX, l1Y), nameMax, name!, nameColor,
-            medium: true);
+        EllipsisEnd(drawList, new Vector2(nameDrawX, l1Y),
+            nameMax - (nameDrawX - nameX), name!, nameColor, medium: true);
         if (tsW > 0f)
         {
             var muted = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
-            drawList.AddText(new Vector2(nameX + nameShownW, l1Y), muted, sep);
-            drawList.AddText(new Vector2(nameX + nameShownW + sepW, l1Y),
+            drawList.AddText(new Vector2(nameDrawX + nameShownW, l1Y), muted, sep);
+            drawList.AddText(new Vector2(nameDrawX + nameShownW + sepW, l1Y),
                 muted, tsText);
         }
 
@@ -204,23 +243,30 @@ public static class FeedItemRow
         if (item.Kind is SyncshellFeedItemKind.Comment
             or SyncshellFeedItemKind.Reaction or SyncshellFeedItemKind.Rsvp)
         {
-            // Reaction rows carry the enum kind name in Snippet - show the
-            // actual reaction glyph (Wow!=heart), a neutral face otherwise.
-            var glyphIcon = item.Kind == SyncshellFeedItemKind.Reaction
-                && FeedItemSemantics.TryReactionKind(item.Snippet, out var rk)
-                ? ReactionBar.IconFor(rk)
-                : item.Kind == SyncshellFeedItemKind.Reaction
-                    ? FontAwesomeIcon.Smile : kindIcon;
-            var glyph = glyphIcon.ToIconString();
-            using (SpheneUI.Icons.PushFont())
+            // Reaction rows carry the emoji glyph in Snippet - draw the
+            // sprite; legacy enum-name rows resolve through the canonical
+            // map, unparseable snippets get the row's kind icon.
+            var reactionEmoji = item.Kind == SyncshellFeedItemKind.Reaction
+                ? FeedItemSemantics.ReactionEmoji(item.Snippet) : null;
+            var gW = 0f;
+            var gY = l2Y + MathF.Max(0f, (lineH - ImGui.GetTextLineHeight()) * 0.5f);
+            if (reactionEmoji != null)
             {
-                var gW = ImGui.CalcTextSize(glyph).X;
-                var gY = l2Y + MathF.Max(0f, (lineH - ImGui.GetTextLineHeight()) * 0.5f);
-                drawList.AddText(new Vector2(actionX, gY),
-                    SpheneUI.ColorUtils.ToU32(accent), glyph);
-                actionX += gW + 5f * scale;
-                actionW -= gW + 5f * scale;
+                gW = lineH;
+                SpheneUI.Emoji.SpriteAt(drawList, new Vector2(actionX, gY), lineH, reactionEmoji);
             }
+            else
+            {
+                var glyph = kindIcon.ToIconString();
+                using (SpheneUI.Icons.PushFont())
+                {
+                    gW = ImGui.CalcTextSize(glyph).X;
+                    drawList.AddText(new Vector2(actionX, gY),
+                        SpheneUI.ColorUtils.ToU32(accent), glyph);
+                }
+            }
+            actionX += gW + 5f * scale;
+            actionW -= gW + 5f * scale;
         }
         EllipsisEnd(drawList, new Vector2(actionX, l2Y), actionW, action,
             actionStrong ? SpheneUI.Colors.TextPrimary : SpheneUI.Colors.TextSecondary,
@@ -234,14 +280,191 @@ public static class FeedItemRow
                 medium: contextStrong);
         }
 
+        // Chronicle preview + engagement strip: wrapped snippet lines tuck
+        // under the title, the last line ends in an inline accent "… more"
+        // jump (X-style); the tail line carries muted icon/count stats.
+        // The whole row is the click target, so the link is honest.
+        var tailAnchor = context != null ? l3Y : l2Y;
+        if (snippetLines is { Count: > 0 })
+        {
+            var sy = tailAnchor + lineH + lineGap;
+            var secU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextSecondary);
+            for (var i = 0; i < snippetLines.Count - 1; i++)
+            {
+                drawList.AddText(new Vector2(nameX, sy + i * lineH),
+                    secU, snippetLines[i]);
+            }
+            var lastY = sy + (snippetLines.Count - 1) * lineH;
+            var moreW = ImGui.CalcTextSize(" more").X;
+            var dotsW = ImGui.CalcTextSize("…").X;
+            var lastShown = FitToWidth(snippetLines[^1], textW - moreW - dotsW);
+            if (!lastShown.EndsWith('…'))
+            {
+                lastShown += "…";
+            }
+            drawList.AddText(new Vector2(nameX, lastY), secU, lastShown);
+            drawList.AddText(
+                new Vector2(nameX + ImGui.CalcTextSize(lastShown).X, lastY),
+                SpheneUI.ColorUtils.ToU32(accent), " more");
+            tailAnchor = lastY;
+        }
+        var likeRect = Vector4.Zero;
+        var commentRect = Vector4.Zero;
+        if (hasTail)
+        {
+            var engageable = item.Kind is SyncshellFeedItemKind.News
+                or SyncshellFeedItemKind.Event or SyncshellFeedItemKind.Blog;
+            DrawStatsLine(drawList, item, nameX,
+                tailAnchor + lineH + lineGap, lineH, scale, accent,
+                likeClickable: engageable && onLikeClick != null,
+                commentClickable: engageable && onCommentClick != null,
+                out likeRect, out commentRect);
+        }
+
         if (showThumb)
         {
-            DrawThumbFit(drawList, thumb!, new Vector2(thumbX, origin.Y + padY),
+            var thumbPos = new Vector2(thumbX, origin.Y + padY);
+            DrawThumbFit(drawList, thumb!, thumbPos,
                 new Vector2(thumbW, thumbH), accent);
+            if (thumbHovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+                drawList.AddRect(thumbPos,
+                    thumbPos + new Vector2(thumbW, thumbH),
+                    SpheneUI.ColorUtils.ToU32(accent), 6f * scale,
+                    ImDrawFlags.None, 1.5f);
+            }
         }
 
         ImGui.SetCursorScreenPos(origin + new Vector2(0f, rowH));
-        return clicked && !actorHit;
+        if (!clicked) return false;
+        var mouse = ImGui.GetIO().MousePos;
+        bool Inside(Vector4 r) => r != Vector4.Zero
+            && mouse.X >= r.X && mouse.X < r.Z
+            && mouse.Y >= r.Y && mouse.Y < r.W;
+        if (Inside(likeRect))
+        {
+            onLikeClick!(item);
+            return false;
+        }
+        if (Inside(commentRect))
+        {
+            onCommentClick!(item);
+            return false;
+        }
+        if (thumbRect != Vector4.Zero
+            && mouse.X >= thumbRect.X && mouse.X < thumbRect.Z
+            && mouse.Y >= thumbRect.Y && mouse.Y < thumbRect.W)
+        {
+            onThumbClick!(item);
+            return false;
+        }
+        if (actorRect != Vector4.Zero
+            && mouse.X >= actorRect.X && mouse.X < actorRect.Z
+            && mouse.Y >= actorRect.Y && mouse.Y < actorRect.W)
+        {
+            onActorClick!(item.ActorUid!);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>Optional content the row appends under the base stack:
+    /// a Chronicle preview (server-stripped body wrapped to at most two
+    /// text-column lines, ending in the inline "… more" jump) plus a
+    /// stats tail on any row that carries engagement counters.</summary>
+    private static (List<string>? Snippet, bool Tail) ExtraContent(
+        SyncshellCommunityFeedItemDto item, float textW, bool interactive = false)
+    {
+        List<string>? snippet = null;
+        if (item.Kind == SyncshellFeedItemKind.Blog
+            && !string.IsNullOrWhiteSpace(item.Snippet))
+        {
+            var wrapped = SpheneUI.Text.WrapLines(item.Snippet, textW, 2);
+            if (wrapped.Count > 0) snippet = wrapped;
+        }
+        // Interactive tails paint like/comment icons even at zero, so the
+        // line exists whenever the row can react at all - MeasureHeight
+        // must compute with the same flag or sizing drifts a line off.
+        var engageable = interactive
+            && item.Kind is SyncshellFeedItemKind.News
+                or SyncshellFeedItemKind.Event or SyncshellFeedItemKind.Blog;
+        var tail = item.ReactionCount > 0 || item.CommentCount > 0
+            || item.ViewCount > 0 || engageable;
+        return (snippet, tail);
+    }
+
+    /// <summary>Vertical space <see cref="ExtraContent"/> adds to the text
+    /// column: snippet lines stack tightly at lineH, every block is one
+    /// lineGap below the line above it.</summary>
+    private static float ExtraHeight(List<string>? snippet, bool tail,
+        float lineH, float lineGap)
+        => (snippet is { Count: > 0 } ? lineGap + snippet.Count * lineH : 0f)
+            + (tail ? lineGap + lineH : 0f);
+
+    /// <summary>X-style engagement strip: muted icon+count pairs. Reaction
+    /// and comment icons paint even at zero when their click callback is
+    /// wired - a quiet row still invites the first like/jump - while bare
+    /// counters (views) stay zero-suppressed. <paramref name="likeRect"/>/
+    /// <paramref name="commentRect"/> report the icon+count hit boxes so the
+    /// row's single invisible button can route clicks; hovered stats tint
+    /// accent and show the hand.</summary>
+    private static void DrawStatsLine(ImDrawListPtr drawList,
+        SyncshellCommunityFeedItemDto item, float x, float y,
+        float lineH, float scale, Vector4 accent,
+        bool likeClickable, bool commentClickable,
+        out Vector4 likeRect, out Vector4 commentRect)
+    {
+        var mutedU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
+        var accentU = SpheneUI.ColorUtils.ToU32(accent);
+        var iconGap = 4f * scale;
+        var statGap = 13f * scale;
+        var sx = x;
+        likeRect = Vector4.Zero;
+        commentRect = Vector4.Zero;
+        void Stat(FontAwesomeIcon icon, int? count, bool alwaysShow,
+            bool clickable, ref Vector4 rect, bool activeState = false)
+        {
+            if (!alwaysShow && count is not > 0) return;
+            var glyph = icon.ToIconString();
+            var startX = sx;
+            float gw;
+            using (SpheneUI.Icons.PushFont())
+            {
+                gw = ImGui.CalcTextSize(glyph).X;
+            }
+            var num = count is > 0 ? count.Value.ToString() : null;
+            var w = gw + (num != null ? iconGap + ImGui.CalcTextSize(num).X : 0f);
+            var hovered = clickable && ImGui.IsMouseHoveringRect(
+                new Vector2(startX, y), new Vector2(startX + w, y + lineH));
+            // an active (already-cast) stat rides the accent even at rest -
+            // the thumb reads as toggled on, not just hoverable
+            var col = hovered || activeState ? accentU : mutedU;
+            using (SpheneUI.Icons.PushFont())
+            {
+                var gy = y + MathF.Max(0f,
+                    (lineH - ImGui.GetTextLineHeight()) * 0.5f);
+                drawList.AddText(new Vector2(startX, gy), col, glyph);
+            }
+            if (num != null)
+            {
+                drawList.AddText(new Vector2(startX + gw + iconGap, y), col, num);
+            }
+            if (hovered)
+            {
+                ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            }
+            if (clickable)
+            {
+                rect = new Vector4(startX, y, startX + w, y + lineH);
+            }
+            sx = startX + w + statGap;
+        }
+        Stat(FontAwesomeIcon.ThumbsUp, item.ReactionCount, likeClickable,
+            likeClickable, ref likeRect, activeState: item.LikedByMe);
+        Stat(FontAwesomeIcon.Comment, item.CommentCount, commentClickable,
+            commentClickable, ref commentRect);
+        Stat(FontAwesomeIcon.Eye, item.ViewCount, false, false, ref commentRect);
     }
 
     /// <summary>Per-kind display label + glyph for context text, badges
@@ -254,8 +477,8 @@ public static class FeedItemRow
         SyncshellFeedItemKind.Photo => ("Photo", FontAwesomeIcon.Camera),
         SyncshellFeedItemKind.Blog => ("Chronicle", FontAwesomeIcon.FeatherAlt),
         SyncshellFeedItemKind.Comment => ("Comment", FontAwesomeIcon.Comment),
-        SyncshellFeedItemKind.Reaction => ("Reaction", FontAwesomeIcon.Heart),
-        SyncshellFeedItemKind.Rsvp => ("RSVP", FontAwesomeIcon.TicketAlt),
+        SyncshellFeedItemKind.Reaction => ("Reaction", FontAwesomeIcon.Smile),
+        SyncshellFeedItemKind.Rsvp => ("Sign-up", FontAwesomeIcon.TicketAlt),
         _ => ("Post", FontAwesomeIcon.Bolt),
     };
 
@@ -302,9 +525,12 @@ public static class FeedItemRow
         }
         else if (item.Kind == SyncshellFeedItemKind.Blog)
         {
-            action = "Published a Chronicle";
-            context = item.Title;
-            cStrong = true;
+            // Chronicle rows lead with the title - a "Published a
+            // Chronicle" label adds nothing the FeatherAlt glyph + snippet
+            // don't already say.
+            action = item.Title;
+            aStrong = true;
+            context = null;
         }
         else if (item.Kind == SyncshellFeedItemKind.Comment)
         {
@@ -384,28 +610,59 @@ public static class FeedItemRow
         var (_, context, _, _) = ComposeText(item, hasShell ? shellName : null,
             extraMeta);
         var lines = context != null ? 3 : 2;
-        var textH = lines * lineH + IdentGap * scale + (lines - 2) * LineGap * scale;
         var showThumb = (item.ThumbnailMediaHash != null
                 || !string.IsNullOrEmpty(item.ThumbnailBase64))
             && availX - PadX * 2f * scale - AvatarD * scale - Gutter * scale
                 - ThumbW * scale - MediaGap * scale >= MinTextW * scale;
+        var textW = availX - PadX * 2f * scale - AvatarD * scale
+            - Gutter * scale
+            - (showThumb ? ThumbW * scale + MediaGap * scale : 0f);
+        var (snippetLines, hasTail) = ExtraContent(item, textW, interactive: true);
+        var textH = lines * lineH + IdentGap * scale + (lines - 2) * LineGap * scale
+            + ExtraHeight(snippetLines, hasTail, lineH, LineGap * scale);
         var bodyH = MathF.Max(MathF.Max(AvatarD * scale, textH),
             showThumb ? ThumbH * scale : 0f);
         return PadY * 2f * scale + bodyH;
     }
 
-    /// <summary>Short relative activity time ("now" / "5m" / "3h" / "2d"),
-    /// switching to a short date past a week. Shared with hub call sites
-    /// that render feed timestamps outside a row.</summary>
+    /// <summary>Short relative activity time ("just now" / "5 min ago" /
+    /// "3 h ago" / "2 d ago"), switching to a short date past a week.
+    /// Shared with hub call sites that render feed timestamps outside a
+    /// row.</summary>
     public static string RelativeTime(DateTime utc)
     {
         var delta = DateTime.UtcNow - utc;
         if (delta.TotalSeconds < 0) return "soon";
-        if (delta.TotalMinutes < 1) return "now";
-        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes}m";
-        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours}h";
-        if (delta.TotalDays < 7) return $"{(int)delta.TotalDays}d";
+        if (delta.TotalMinutes < 1) return "just now";
+        if (delta.TotalMinutes < 60) return $"{(int)delta.TotalMinutes} min ago";
+        if (delta.TotalHours < 24) return $"{(int)delta.TotalHours} h ago";
+        if (delta.TotalDays < 7) return $"{(int)delta.TotalDays} d ago";
         return SpheneUI.Text.FormatShortDate(utc.ToLocalTime());
+    }
+
+    /// <summary>The substring of <paramref name="text"/> fitting
+    /// <paramref name="maxW"/>, ellipsized on overflow (UTF-8 safe).
+    /// Shared by <see cref="EllipsisEnd"/> and inline tails that append
+    /// their own suffix (like the Chronicle preview's "… more").</summary>
+    private static string FitToWidth(string text, float maxW)
+    {
+        if (maxW <= 0f) return string.Empty;
+        if (ImGui.CalcTextSize(text).X <= maxW) return text;
+        var t = text.AsSpan();
+        var lo = 0; var hi = t.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) / 2;
+            if (ImGui.CalcTextSize(t[..mid].ToString() + "…").X <= maxW)
+            {
+                lo = mid;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+        return t[..lo].ToString() + "…";
     }
 
     /// <summary>Ellipsized drawlist text (UTF-8 safe). <paramref name="medium"/>
@@ -415,30 +672,8 @@ public static class FeedItemRow
         float maxW, string text, Vector4 color, bool medium = false)
     {
         var col = SpheneUI.ColorUtils.ToU32(color);
-        if (maxW <= 0f) return;
-        string shown;
-        if (ImGui.CalcTextSize(text).X <= maxW)
-        {
-            shown = text;
-        }
-        else
-        {
-            var t = text.AsSpan();
-            var lo = 0; var hi = t.Length;
-            while (lo < hi)
-            {
-                var mid = (lo + hi + 1) / 2;
-                if (ImGui.CalcTextSize(t[..mid].ToString() + "…").X <= maxW)
-                {
-                    lo = mid;
-                }
-                else
-                {
-                    hi = mid - 1;
-                }
-            }
-            shown = t[..lo].ToString() + "…";
-        }
+        var shown = FitToWidth(text, maxW);
+        if (shown.Length == 0) return;
         drawList.AddText(pos, col, shown);
         if (medium)
         {

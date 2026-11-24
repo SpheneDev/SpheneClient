@@ -80,7 +80,8 @@ internal static class SyncshellImageViewer
         var imgMin = center + (areaMin - center) * grow + new Vector2(0f, drift);
         var imgMax = center + (areaMax - center) * grow + new Vector2(0f, drift);
 
-        var wrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{img.Id}",
+        var wrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{img.Id}:"
+                + SyncshellCommunityView.MediaVersion(img.ImageMediaHash, img.ImageBase64),
             SyncshellCommunityView.ResolveBytes(img.ImageMediaHash, img.ImageBase64));
         var winRounding = ImGui.GetStyle().WindowRounding;
 
@@ -291,7 +292,8 @@ internal static class SyncshellImageViewer
             {
                 setIndex(i);
             }
-            var tWrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{images[i].Id}",
+            var tWrap = SpheneUI.Media.Texture($"{texturePrefix}gallery:{gid}:{images[i].Id}:"
+                    + SyncshellCommunityView.MediaVersion(images[i].ImageMediaHash, images[i].ImageBase64),
                 SyncshellCommunityView.ResolveBytes(images[i].ImageMediaHash, images[i].ImageBase64));
             if (tWrap != null)
             {

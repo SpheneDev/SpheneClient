@@ -21,6 +21,7 @@ public class CommunityFeedService : DisposableMediatorSubscriberBase, IHostedSer
 {
     private readonly ApiController _apiController;
     private readonly CommunityFeedStore _store = new();
+    private readonly CommunityFeedStore _forYouStore = new();
 
     public CommunityFeedService(ILogger<CommunityFeedService> logger,
         SpheneMediator mediator, ApiController apiController)
@@ -93,7 +94,61 @@ public class CommunityFeedService : DisposableMediatorSubscriberBase, IHostedSer
 
     /// <summary>Drops the cache; the next <see cref="EnsureRequested"/> refetches.
     /// In-flight responses bound to the old generation are discarded.</summary>
-    public void Invalidate() => _store.Invalidate();
+    public void Invalidate()
+    {
+        _store.Invalidate();
+        _forYouStore.Invalidate();
+    }
+
+    // ------------------------------------------------------------------
+    //  "For You" digest - a server-ranked slice, no client paging
+    // ------------------------------------------------------------------
+
+    /// <summary>Ranked For You rows; empty until the first fetch lands.</summary>
+    public IReadOnlyList<SyncshellCommunityFeedItemDto> ForYouItems => _forYouStore.Items;
+
+    /// <summary>True while the ranked fetch is in flight.</summary>
+    public bool ForYouLoading => _forYouStore.IsLoading;
+
+    /// <summary>The last For You fetch failed - the tab surfaces retry.</summary>
+    public bool ForYouRefreshFailed => _forYouStore.RefreshFailed;
+
+    /// <summary>Same first-touch trigger as <see cref="EnsureRequested"/>,
+    /// bound to the For You store's own generation.</summary>
+    public void EnsureForYouRequested()
+    {
+        if (!_forYouStore.ShouldRequest(DateTime.UtcNow)) return;
+        _forYouStore.MarkRequested();
+        _ = RefreshForYou();
+    }
+
+    /// <summary>Fetches the ranked slice; dedupes concurrent calls.</summary>
+    public async Task RefreshForYou()
+    {
+        if (!_forYouStore.TryBeginRefresh(out var request)) return;
+        try
+        {
+            var page = await _apiController.UserGetForYouFeed(
+                new FeedPageRequestDto(Take: 20)).ConfigureAwait(false);
+            _forYouStore.ApplyPage(request, page.Items, page.NextCursor);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "For You feed fetch failed");
+            _forYouStore.ApplyFailure(request, DateTime.UtcNow);
+        }
+        finally { _forYouStore.EndRequest(request); }
+    }
+
+    /// <summary>Patches a like toggle's authoritative result into every
+    /// feed store the row may live in - count and red-heart state update
+    /// in place, no refetch, no feed reload.</summary>
+    public void ApplyReactionSummary(SyncshellFeedItemKind kind, long itemId,
+        int totalCount, bool likedByMe)
+    {
+        _store.PatchReaction(kind, itemId, totalCount, likedByMe);
+        _forYouStore.PatchReaction(kind, itemId, totalCount, likedByMe);
+    }
 
     /// <summary>Fetches the first page; dedupes concurrent calls.</summary>
     public async Task Refresh()

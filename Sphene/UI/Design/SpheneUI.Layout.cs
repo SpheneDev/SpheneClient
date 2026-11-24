@@ -689,7 +689,10 @@ public static partial class SpheneUI
 
         // Last measured scrollMax per scroll-area id · the bottom spacer is
         // gated on it so near-fit pages never gain a phantom scroll range.
+        // Stores the range EXCLUDING the emitted spacer - the spacer's own
+        // height would otherwise keep its gate latched forever.
         private static readonly Dictionary<string, float> ScrollAreaLastMax = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, bool> ScrollFadeLatched = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Begins a child region without a visible scrollbar. Wheel scrolling
@@ -709,6 +712,11 @@ public static partial class SpheneUI
         /// the child's scroll edges is forwarded to the parent window -
         /// disable it for self-managed scroll views (like the chat history)
         /// whose own snap logic would fight the resulting page slide.
+        /// Returns false when the child is fully clipped (e.g. scrolled out
+        /// of the host's viewport); the clipped child is already closed
+        /// internally, so skipping the content - or even EndScrollArea - on
+        /// !begun is always safe. Callers that do call EndScrollArea get a
+        /// balanced no-op.
         /// </summary>
         public static bool BeginScrollArea(string id, Vector2 size, bool border = false,
             ImGuiWindowFlags windowFlags = ImGuiWindowFlags.None, bool noPadding = false,
@@ -755,6 +763,15 @@ public static partial class SpheneUI
                 ImGui.PopClipRect();
             }
             var begun = ImGui.BeginChild(id, size, false, windowFlags | ImGuiWindowFlags.NoScrollbar);
+            if (!begun)
+            {
+                // A clipped child still owns an ImGui window - close it right
+                // away so callers may skip BOTH the content and EndScrollArea
+                // on !begun without leaving an unbalanced child behind (a
+                // leaked child + stale ScrollAreaState was the sporadic
+                // "page slides then snaps back" desync).
+                ImGui.EndChild();
+            }
             if (noPadding || contentPadding.HasValue)
             {
                 ImGui.PopStyleVar();
@@ -859,11 +876,20 @@ public static partial class SpheneUI
                     + 1f * scale;
             }
             var minHeight = ImGui.GetTextLineHeightWithSpacing() * 2f;
-            // GetContentRegionAvail is inflated by the window's scroll offset  · 
-            // subtract it or fill-height elements grow with the scroll and keep
-            // a few pixels of residual scrollMax alive forever.
+            // Screen-space fill to the window's unscrolled content bottom:
+            // the window's own bottom edge (minus its padding) is scroll-free,
+            // and the cursor's content position is its screen position plus
+            // the scroll offset - both terms stay in the same space and the
+            // scroll cancels exactly. An avail-based fill leaks scrollY into
+            // the height whenever the region isn't scroll-inflated: the
+            // element then shrinks with the page's scroll, the parent's
+            // scrollMax collapses and ImGui clamps - the sporadic
+            // slide-then-snap-back on feed pages.
+            var innerBottomScreen = ImGui.GetWindowPos().Y + ImGui.GetWindowSize().Y
+                - ImGui.GetStyle().WindowPadding.Y;
             return MathF.Max(minHeight,
-                ImGui.GetContentRegionAvail().Y - ImGui.GetScrollY() - bottomReserve);
+                innerBottomScreen - ImGui.GetCursorScreenPos().Y
+                - ImGui.GetScrollY() - bottomReserve);
         }
 
         /// <summary>
@@ -1094,8 +1120,9 @@ public static partial class SpheneUI
                 // frame; content heights are stable frame-to-frame, so the
                 // gate converges in one pass and never oscillates.
                 var spacerThreshold = ScrollAreaContentInset * SpheneUI.Scale;
-                if (ScrollAreaLastMax.TryGetValue(state.Id, out var prevScrollMax)
-                    && prevScrollMax > spacerThreshold)
+                var spacerOn = ScrollAreaLastMax.TryGetValue(state.Id,
+                    out var prevScrollMax) && prevScrollMax > spacerThreshold;
+                if (spacerOn)
                 {
                     ImGuiHelpers.ScaledDummy(0, ScrollAreaContentInset);
                 }
@@ -1105,7 +1132,15 @@ public static partial class SpheneUI
                 }
                 var scrollY = ImGui.GetScrollY();
                 var scrollMaxY = ImGui.GetScrollMaxY();
-                ScrollAreaLastMax[state.Id] = scrollMaxY;
+                // Store the range WITHOUT our own spacer: gating on the
+                // measured scrollMax (spacer included) makes the spacer a
+                // one-way ratchet - once content overflows (window shrink)
+                // the emitted inset keeps prevScrollMax above the threshold
+                // forever, leaving a permanent phantom scroll range after the
+                // content fits again. Excluding the spacer, the gate releases
+                // the frame the real range drops back under the threshold.
+                ScrollAreaLastMax[state.Id] = MathF.Max(0f,
+                    spacerOn ? scrollMaxY - spacerThreshold : scrollMaxY);
                 var childHovered = ImGui.IsWindowHovered();
                 var min = ImGui.GetWindowPos();
                 var max = min + ImGui.GetWindowSize();
@@ -1142,9 +1177,11 @@ public static partial class SpheneUI
                         var parentMaxY = ImGui.GetScrollMaxY();
                         if (parentMaxY > ImGui.GetTextLineHeightWithSpacing())
                         {
-                            var parentTarget = ImGui.GetScrollY()
+                            var parentY = ImGui.GetScrollY();
+                            var parentTarget = parentY
                                 - wheel * ImGui.GetTextLineHeightWithSpacing() * 4f;
-                            ImGui.SetScrollY(Math.Clamp(parentTarget, 0f, parentMaxY));
+                            var clamped = Math.Clamp(parentTarget, 0f, parentMaxY);
+                            ImGui.SetScrollY(clamped);
                         }
                     }
                 }
@@ -1168,7 +1205,26 @@ public static partial class SpheneUI
                     Chrome.RoundedFrame(min, max, ImGui.GetStyle().ChildRounding,
                         MathF.Max(ImGui.GetStyle().ChildBorderSize, 1f), openTop: state.HideTopBorder);
                 }
-                Chrome.ScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
+                // Hysteresis on the fade's visibility gate: content sitting
+                // exactly at the overflow boundary jitters scrollMax by a
+                // pixel or two frame-to-frame, so the stateless line-height
+                // gate inside ScrollFades flickers the fade on/off (the
+                // "blinking lip" only a resize cured because it moved the
+                // content off the boundary). Latch per id: enter once the
+                // range clearly scrolls, release only when it drops a dead
+                // band back under the line.
+                var fadeLine = ImGui.GetTextLineHeightWithSpacing();
+                var fadeOn = ScrollFadeLatched.TryGetValue(state.Id, out var latched) && latched;
+                if (!fadeOn && scrollMaxY > fadeLine + 2f * SpheneUI.Scale)
+                {
+                    fadeOn = true;
+                }
+                else if (fadeOn && scrollMaxY < fadeLine - ScrollAreaContentInset * SpheneUI.Scale)
+                {
+                    fadeOn = false;
+                }
+                ScrollFadeLatched[state.Id] = fadeOn;
+                Chrome.ScrollFades(min, max, scrollY, fadeOn ? scrollMaxY : 0f, state.Border, state.TopInset,
                     state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX, fadeMinY,
                     fadeStrength, scrollHints);
                 var styleVars = ImGui.GetStyle();
@@ -1195,10 +1251,8 @@ public static partial class SpheneUI
                 ImGui.EndChild();
                 ImGui.SetCursorScreenPos(resumeCursor);
             }
-            else
-            {
-                ImGui.EndChild();
-            }
+            // !Begun: the clipped child was already closed inside
+            // BeginScrollArea - no ImGui work left to balance.
         }
 
         private static void GetScrollInsets(bool border, out float insetX, out float insetY)

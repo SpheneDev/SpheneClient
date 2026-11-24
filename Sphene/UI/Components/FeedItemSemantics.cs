@@ -23,17 +23,24 @@ public static class FeedItemSemantics
         DateTime timestampUtc, DateTime? activityUtc)
         => (activityUtc != null, activityUtc != timestampUtc);
 
-    /// <summary>Parses the reaction kind a feed row carries in its
-    /// snippet - the server emits <c>((ReactionKind)kind).ToString()</c>,
-    /// so only exact enum names resolve; numbers and free text fail.</summary>
-    public static bool TryReactionKind(string? snippet, out ReactionKind kind)
+    /// <summary>Resolves the reaction emoji a feed row carries in its
+    /// snippet. Post-migration servers emit the glyph itself; rows produced
+    /// before the migration carried the enum name, which translates through
+    /// the canonical map - both render as the emoji the reaction counts as.
+    /// Null when the snippet carries no recognizable reaction.</summary>
+    public static string? ReactionEmoji(string? snippet)
     {
-        if (Enum.TryParse(snippet, out kind) && Enum.IsDefined(kind))
+        if (string.IsNullOrEmpty(snippet)) return null;
+        if (Enum.TryParse(snippet, out ReactionKind kind) && Enum.IsDefined(kind))
         {
-            return true;
+            return ReactionEmojiMap.ForKind(kind);
         }
-        kind = default;
-        return false;
+        // Anything non-ascii is the glyph itself - ascii free text is no reaction.
+        for (var i = 0; i < snippet.Length; i++)
+        {
+            if (snippet[i] > 0x7F) return snippet;
+        }
+        return null;
     }
 
     /// <summary>Server reaction rows arrive titled "Reaction on {target}" -
