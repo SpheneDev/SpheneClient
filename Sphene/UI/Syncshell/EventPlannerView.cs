@@ -155,7 +155,7 @@ internal static class EventPlannerView
         }
         if (wide)
         {
-            ImGui.SameLine(0f, SpheneUI.Spacing.X12);
+            ImGui.SameLine(0f, SpheneUI.Spacing.CardGap);
             using var _ = ImRaii.Child("##ep-summary", Vector2.Zero, false);
             DrawSelectedSummary(page, edit, travel, events);
         }
@@ -528,7 +528,7 @@ internal static class EventPlannerView
         // available width can't host both.
         var availX = SpheneUI.Controls.BoundedAvailX();
         var availY = ImGui.GetContentRegionAvail().Y;
-        var gap = SpheneUI.Spacing.X12.Scaled;
+        var gap = SpheneUI.Spacing.CardGap.Scaled;
         var insW = MathF.Max(240f * scale, availX * 0.33f);
         var footerH = ImGui.GetFrameHeight() + SpheneUI.Spacing.X12.Scaled;
         var formW = availX - insW - gap;

@@ -574,7 +574,7 @@ public static partial class SpheneUI
             {
                 return;
             }
-            var cellGap = gap ?? Spacing.X8.Scaled;
+            var cellGap = gap ?? Spacing.CardGap.Scaled;
             var avail = MathF.Max(minCellWidth, Controls.BoundedAvailX());
             var cols = Math.Clamp((int)((avail + cellGap) / (minCellWidth + cellGap)), 1, maxCols);
             var cellW = (avail - (cols - 1) * cellGap) / cols;

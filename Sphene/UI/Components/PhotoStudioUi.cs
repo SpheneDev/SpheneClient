@@ -532,7 +532,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
             + SpheneUI.Spacing.X4.Scaled + SpheneUI.Spacing.X8.Scaled;
         var bodyH = MathF.Max(120f, ImGui.GetContentRegionAvail().Y - footerH);
         var avail = MathF.Max(200f * scale, SpheneUI.Controls.BoundedAvailX());
-        var gap = SpheneUI.Spacing.X8.Scaled;
+        var gap = SpheneUI.Spacing.CardGap.Scaled;
         var previewW = Math.Clamp(avail * 0.30f, 190f * scale, 380f * scale);
         var treeW = Math.Clamp(TreePanelWidth * scale, 120f * scale,
             MathF.Max(120f * scale, avail * 0.26f));
@@ -1611,7 +1611,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         var body = new Vector2(SpheneUI.Controls.BoundedAvailX(),
             MathF.Max(120f, ImGui.GetContentRegionAvail().Y - footerH));
         var sidebarW = MathF.Min(SidebarWidth * scale, body.X * 0.38f);
-        var gap = SpheneUI.Spacing.X8.Scaled;
+        var gap = SpheneUI.Spacing.CardGap.Scaled;
         var canvasW = MathF.Max(160f, body.X - sidebarW - gap);
         var bodyMin = ImGui.GetCursorScreenPos();
 

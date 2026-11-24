@@ -70,14 +70,37 @@ public static partial class SpheneUI
         /// the click. For names/titles that deep-link; pair with
         /// <see cref="AttachTooltip"/> for the destination hint.
         /// </summary>
-        public static bool Link(string text)
+        public static bool Link(string text) => Link(text, null);
+
+        /// <summary>
+        /// <see cref="Link(string)"/> with a fixed accent tint - the "All X →"
+        /// jump-link style under teasers and streams: accent ~0.75 at rest so
+        /// the affordance reads at a glance, full accent + underline + hand
+        /// cursor on hover. The label carries its own arrow ("More →").
+        /// </summary>
+        public static bool Link(string text, Vector4? accent)
         {
             var pos = ImGui.GetCursorScreenPos();
             var size = ImGui.CalcTextSize(text);
             var hovered = ImGui.IsMouseHoveringRect(pos, pos + size);
-            Colored(text, hovered ? Colors.Accent : null);
+            if (accent.HasValue)
+            {
+                Colored(text, ColorUtils.WithAlpha(accent.Value, hovered ? 1f : 0.75f));
+            }
+            else
+            {
+                Colored(text, hovered ? Colors.Accent : null);
+            }
             if (hovered)
             {
+                if (accent.HasValue)
+                {
+                    var underlineY = pos.Y + size.Y - 1f;
+                    ImGui.GetWindowDrawList().AddLine(
+                        new Vector2(pos.X, underlineY),
+                        new Vector2(pos.X + size.X, underlineY),
+                        ColorUtils.ToU32(accent.Value));
+                }
                 ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             }
             return ImGui.IsItemClicked();

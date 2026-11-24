@@ -769,7 +769,7 @@ internal sealed partial class CharaDataHubUi
         {
             // Two bounded columns · the old SameLine+Space layout overflowed on
             // narrower windows and the list boxes used fixed pixel sizes.
-            using (var specTable = SpheneUI.Tables.Begin("specificAccess", 2,
+            using (var specTable = SpheneUI.Layout.BeginCardColumns("specificAccess", 2,
                 ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
             {
                 if (specTable.Success)

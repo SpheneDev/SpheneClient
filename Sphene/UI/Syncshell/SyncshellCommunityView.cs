@@ -1380,8 +1380,11 @@ internal static partial class SyncshellCommunityView
                     }
                     if (page != null && news.Count > 3)
                     {
-                        TeaserLink(ImGui.GetCursorScreenPos(), accent, "All news",
-                            () => { page.Tab = SyncshellCommunitySection.News; page.SwitchT = 0f; }, scale);
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                        if (SpheneUI.Text.Link("All news →", accent))
+                        {
+                            page.Tab = SyncshellCommunitySection.News; page.SwitchT = 0f;
+                        }
                     }
                 }));
         }
@@ -1400,8 +1403,11 @@ internal static partial class SyncshellCommunityView
                     }
                     if (page != null && upcoming.Count > 3)
                     {
-                        TeaserLink(ImGui.GetCursorScreenPos(), accent, "All events",
-                            () => { page.Tab = SyncshellCommunitySection.Events; page.SwitchT = 0f; }, scale);
+                        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                        if (SpheneUI.Text.Link("All events →", accent))
+                        {
+                            page.Tab = SyncshellCommunitySection.Events; page.SwitchT = 0f;
+                        }
                     }
                 }));
         }
@@ -1409,7 +1415,7 @@ internal static partial class SyncshellCommunityView
         {
             SpheneUI.Layout.CardGrid(widgets, 230f * scale,
                 (w, _) => Widget(w.Id, w.Label, w.Icon, w.Count, accent, w.Body),
-                gap: SpheneUI.Spacing.X8.Scaled, maxCols: 2);
+                maxCols: 2);
         }
         else
         {
@@ -1429,29 +1435,6 @@ internal static partial class SyncshellCommunityView
             });
         }
         return true;
-    }
-
-    /// <summary>"All X →" jump link under a teaser widget's rows.</summary>
-    private static void TeaserLink(Vector2 pos, Vector4 accent, string label, Action jump, float scale)
-    {
-        var dl = ImGui.GetWindowDrawList();
-        var lineH = ImGui.GetTextLineHeight();
-        var text = $"{label} →";
-        var w = ImGui.CalcTextSize(text).X;
-        ImGui.SetCursorScreenPos(pos + new Vector2(0f, 6f * scale));
-        var clicked = ImGui.InvisibleButton($"##teaser-{label}", new Vector2(w, lineH));
-        var hovered = ImGui.IsItemHovered();
-        dl.AddText(pos + new Vector2(0f, 6f * scale), SpheneUI.ColorUtils.ToU32(
-            SpheneUI.ColorUtils.WithAlpha(accent, hovered ? 1f : 0.75f)), text);
-        if (hovered)
-        {
-            dl.AddLine(pos + new Vector2(0f, 6f * scale + lineH - 1f),
-                pos + new Vector2(w, 6f * scale + lineH - 1f), SpheneUI.ColorUtils.ToU32(accent));
-        }
-        if (clicked)
-        {
-            jump();
-        }
     }
 
     /// <summary>
@@ -5087,7 +5070,7 @@ internal static partial class SyncshellCommunityView
                     }
                     SpheneUI.AttachTooltip("Create role · it lands at the bottom of the rank order");
                 }
-                ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
+                ImGui.SameLine(0f, SpheneUI.Spacing.CardGap.Scaled);
 
                 // Right column · the selected role's editor.
                 using (ImRaii.Child("staff-role-edit", new Vector2(0f, 0f), true))

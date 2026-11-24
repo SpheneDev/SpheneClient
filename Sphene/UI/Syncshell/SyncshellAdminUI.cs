@@ -486,7 +486,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
         if (_isOwner)
         {
-            using var board = SpheneUI.Tables.Begin("settings-board-" + GroupFullInfo.Group.GID, 2,
+            using var board = SpheneUI.Layout.BeginCardColumns("settings-board-" + GroupFullInfo.Group.GID, 2,
                 ImGuiTableFlags.SizingStretchSame);
             if (board.Success)
             {

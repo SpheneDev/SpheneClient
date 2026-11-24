@@ -268,7 +268,7 @@ public class ReleaseChangelogUi : WindowMediatorSubscriberBase
         var scale2 = ImGuiHelpers.GlobalScale;
         var origin = ImGui.GetCursorScreenPos();
         var availW = ImGui.GetContentRegionAvail().X;
-        var gap = 14f * scale2;
+        var gap = SpheneUI.Spacing.CardGap.Scaled;
         var colW0 = availW * 0.36f - gap * 0.5f;
         var colW1 = availW * 0.64f - gap * 0.5f;
 

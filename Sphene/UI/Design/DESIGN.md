@@ -26,7 +26,9 @@ SpheneUI
 │               never SetWindowFontScale)/SectionHeader/Header/GroupedCentered/
 │               PageIntro (one-line muted blurb: ellipsized, full text on
 │               hover - for pages whose title lives in the breadcrumb)/
-│               Timestamp/TimestampRight/FormatDate*/Ellipsize/WrapLines
+│               Timestamp/TimestampRight/FormatDate*/Ellipsize/WrapLines/
+│               Link (clickable text, no button chrome; accent variant =
+│               the tinted "All X →" jump link under teasers/streams)
 │               (Text.PageHeader is superseded - use Layout.PageHeader)
 ├─ Icons        Icon/BoolIcon/Button/TextButton/ActionButton + sizing
 │               (Size, PushFont, ButtonSize, TextButtonWidth)
@@ -42,13 +44,14 @@ SpheneUI
 │               Note/StatusPill - group-aware settings rows
 ├─ Layout       AccentCard/SectionCard/Surface/SurfaceFlat/RowGroup/CardGrid/
 │               HeadedRowGroup/HeadedSurface/CardHeader/HeaderBodyGap/
+│               BeginCardColumns(CardColumnsScope)/
 │               SettingsGroup/ContentRegion/ScrollAreas(Begin/End/FillToBottom)/
 │               BeginPane/TabStrip/VerticalTabStrip/VerticalTabNav/
 │               NavRail(BeginNavRail[embedded]/NavRailItem/NavRailSegmentItem/
 │               NavRailCategory/NavRailCategoryLabel/NavRailDivider/
 │               EndNavRail/BeginNavContent[scrollable]/EndNavContent/
 │               NavRailWidth/NavRailSegmentedWidth/NavRailPadX/
-│               PinnedSectionLabel)/Separator/SectionSeparator/
+│               PinnedSectionLabel)/Separator/SectionSeparator/ItemSeparator/
 │               DistanceSeparator/ScrollAreaSeparator/Section/Callout(+title)/
 │               Badge/Group/Expander(Begin/End/Toggle/SetOpen/IsOpen/
 │               ResetExpanders)/Collapsible/Tree/ActionBar/VerticalSpace/Space/
@@ -234,6 +237,53 @@ more means the page wants restructuring.
 Reference implementation: `PhotoStudioUi` - pick stage (header row,
 three-column browser, footer bar) and edit stage (header, canvas +
 sidebar, footer action bar).
+
+### Fill-height streams (card fills the remaining page height)
+
+When a page's last content is a scrollable stream (feed, activity,
+highlights, chat), its card **fills the visible content region down to
+the page bottom** instead of sizing to its content. The contract -
+reference `DrawRecentActivity` (community overview) and
+`DrawHomeFeedCard` (home):
+
+- The card's **outer** edge lands exactly `ItemSpacing.Y` above the
+  bottom baseline (the content child's visible bottom). No bigger gap,
+  no flush contact.
+- The page never gains scroll range from the fill; scrolling happens
+  inside the card's `BeginScrollArea` viewport (`contentPadding:
+  Vector2.Zero`).
+- **Scrollable page:** size the viewport with
+  `Layout.FillToViewBottomHeight(reserve)` (scroll-invariant: avail −
+  scrollY, height follows the window only). `reserve` is *exactly* what
+  the parent cursor consumes below the viewport inside the card - the
+  `ItemSpacing` before the next item, any persistent footer block (gap
+  + hairline + `GetFrameHeight()` button), the card's
+  `Spacing.CardPadding` bottom pad - **plus** the `ItemSpacing` hair
+  above the baseline. Never add `Spacing.PagePadding`: the avail
+  baseline already ends at the content edge, so reserving padding again
+  lifts the whole card by a full page padding (this was the Home feed
+  bug).
+- **Non-scrolling page** (`ownsScrolling`, e.g. community overview):
+  capture `bodyBottom = cursorScreenPos.Y + GetContentRegionAvail().Y`
+  *before* entering auto-height containers (tables/cards), then
+  `height = bodyBottom − cursorY − belowViewportContent − CardPadding −
+  ItemSpacing`.
+- **No trailing `VerticalSpace` after a fill-height card** - it sits
+  below the card edge, inflates the visual gap and leaks a few px of
+  phantom page scroll.
+- `chainWheel: false` only when nothing follows the card on the page;
+  keep the default chaining when content continues below the fold.
+- **Diagnostic:** when the whole page briefly slides (then snaps back)
+  as a nested scroll hits its edge, the *page* carries phantom scroll
+  range - the chained wheel forwards into it. The cause is a fill
+  reserve that over-reserves (`PagePadding` et al.) or a spacer below
+  the card, never the child itself; fix the page's content height.
+- Pages whose entire body is a fill-height stream join `ownsScrolling`
+  in the hub so the outer page child does not wrap them in a second
+  scroll region.
+
+`BeginFillToBottomScrollArea(id, bottomReserve)` packs the scrollable
+variant into one call for plain (non-card) regions.
 
 ## Page help
 
@@ -529,6 +579,16 @@ same language as nav rails and the header band:
   minimum `Metrics.GridMinCell`). Cells get a bounded `ContentRegion` -
   draw a `Surface` or cover card inside. Use for albums, links, staff,
   directory cards.
+- `Layout.BeginCardColumns(id, columns, flags)` is the fixed-column
+  variant: an invisible `ImGuiTable` whose `CellPadding.X` is halved so
+  neighbouring cards sit exactly `Spacing.CardGap` apart while
+  `NoPadOuterX` keeps the outer edges flush with the page (sizing is
+  `SizingStretchProp` by default; `flags` merges in
+  `NoSavedSettings | NoPadOuterX`). **Every** multi-column card layout
+  uses it - never hand-roll `Tables.Begin` + `CellPadding` for card
+  splits, and never put literal/`ItemSpacing` gaps between card columns.
+  Columns: `TableSetupColumn` + `TableNextRow` + one
+  `TableSetColumnIndex` per card.
 - `Layout.SectionCard` is the titled free-content panel for non-settings
   surfaces (admin pages, dialogs, Intro - its ~80 call sites make it the
   workhorse outside Settings): same tonal fill, the accent seam drawing

@@ -302,7 +302,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             .OrderBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        using var layoutTable = SpheneUI.Tables.Begin("SendModLayout" + idSuffix,
+        using var layoutTable = SpheneUI.Layout.BeginCardColumns("SendModLayout" + idSuffix,
             2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp);
         if (layoutTable.Success)
         {

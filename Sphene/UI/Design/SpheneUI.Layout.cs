@@ -878,6 +878,26 @@ public static partial class SpheneUI
                 border, windowFlags, contentPadding: contentPadding);
 
         /// <summary>
+        /// Invisible multi-column layout for side-by-side card surfaces: the
+        /// table's <see cref="ImGuiStyleVar.CellPadding"/> is halved so
+        /// neighbouring cards sit exactly <see cref="Spacing.CardGap"/> apart
+        /// while <see cref="ImGuiTableFlags.NoPadOuterX"/> keeps the outer
+        /// column edges flush with the page. Columns size by
+        /// <see cref="ImGuiTableFlags.SizingStretchProp"/> unless
+        /// <paramref name="flags"/> carries another sizing policy. Set columns
+        /// up with <see cref="ImGui.TableSetupColumn"/> / weight, then emit one
+        /// row and draw a card per <see cref="ImGui.TableSetColumnIndex"/>.
+        /// </summary>
+        public static CardColumnsScope BeginCardColumns(string id, int columns,
+            ImGuiTableFlags flags = ImGuiTableFlags.SizingStretchProp)
+        {
+            ImGui.PushStyleVar(ImGuiStyleVar.CellPadding,
+                new Vector2(Spacing.CardGap.Scaled * 0.5f, 0f));
+            return new CardColumnsScope(ImGui.BeginTable(id, columns,
+                flags | ImGuiTableFlags.NoSavedSettings | ImGuiTableFlags.NoPadOuterX));
+        }
+
+        /// <summary>
         /// Titled bordered pane: muted header label above a bordered box in the
         /// pick-list language. <paramref name="size"/> of (0,0) fills the
         /// cell/region; <paramref name="scrollable"/> keeps the scroll-fade
@@ -1472,6 +1492,30 @@ public static partial class SpheneUI
                 new Vector2(cursor.X, y), new Vector2(cursor.X + width, y),
                 ColorUtils.ToU32(Colors.Border with { W = 0.35f }), thickness);
             ImGui.Dummy(new Vector2(width, gap * 2f + thickness));
+        }
+
+        /// <summary>
+        /// Hairline between stacked free-form entries (feed rows, list items
+        /// living outside a <see cref="RowGroup"/>) - the same white-α0.08
+        /// line <see cref="GroupState.RowStart"/> draws between settings rows,
+        /// spanning the full bounded width so the siblings read as one list.
+        /// Replaces a bare <see cref="VerticalSpace(Space)"/> between entries;
+        /// emits <see cref="Spacing.X2"/> of air around the line, about the
+        /// total height <see cref="Spacing.X4"/> reserved before.
+        /// </summary>
+        public static void ItemSeparator()
+        {
+            var scale = SpheneUI.Scale;
+            var thickness = MathF.Max(1f, scale);
+            var pad = Spacing.X2.Scaled;
+            var cursor = ImGui.GetCursorScreenPos();
+            var width = Controls.BoundedAvailX();
+            var y = MathF.Round(cursor.Y + pad) + thickness * 0.5f;
+            ImGui.GetWindowDrawList().AddLine(
+                new Vector2(cursor.X, y), new Vector2(cursor.X + width, y),
+                ColorUtils.ToU32(ColorUtils.WithAlpha(Vector4.One, 0.08f)),
+                thickness);
+            ImGui.Dummy(new Vector2(0f, pad * 2f + thickness));
         }
 
         /// <summary>Horizontal divider with a centered label flanked by line segments.</summary>
@@ -3254,5 +3298,28 @@ public static partial class SpheneUI
         public static implicit operator bool(PaneScope scope) => scope.Success;
 
         public void Dispose() => Layout.EndScrollArea();
+    }
+
+    /// <summary>RAII scope returned by <see cref="Layout.BeginCardColumns"/>.</summary>
+    public sealed class CardColumnsScope : IDisposable
+    {
+        internal CardColumnsScope(bool success)
+        {
+            Success = success;
+        }
+
+        /// <summary>Whether the underlying ImGui table was successfully begun.</summary>
+        public bool Success { get; }
+
+        public static implicit operator bool(CardColumnsScope scope) => scope.Success;
+
+        public void Dispose()
+        {
+            if (Success)
+            {
+                ImGui.EndTable();
+            }
+            ImGui.PopStyleVar();
+        }
     }
 }

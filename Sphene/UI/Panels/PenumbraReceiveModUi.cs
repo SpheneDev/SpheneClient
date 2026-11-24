@@ -537,7 +537,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
     {
         // Unique table ID: "MainLayout" collides with stored column ratios
         // in imgui.ini · a stale Resizable entry silently overrides the weights.
-        using var layoutTable = SpheneUI.Tables.Begin("ReceiveModLayout" + (isEmbedded ? "Embedded" : "Standalone"),
+        using var layoutTable = SpheneUI.Layout.BeginCardColumns("ReceiveModLayout" + (isEmbedded ? "Embedded" : "Standalone"),
             2, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingStretchProp);
         if (layoutTable.Success)
         {

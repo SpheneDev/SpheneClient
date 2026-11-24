@@ -73,7 +73,8 @@ public static class UpdateOptionPanel
         ChatGifs,
         ChatGifFavorites,
         ChatStickers,
-        PublicProfilesFollow
+        PublicProfilesFollow,
+        CommunityGathering
     }
 
     private static readonly IReadOnlySet<Link> SupporterFeatureLinks = new HashSet<Link>
@@ -132,6 +133,7 @@ public static class UpdateOptionPanel
         new("v.1.1.45", [Link.DirectMessagingE2ee]),
         new("v.1.1.46", [Link.ChatEmoji, Link.ChatGifs, Link.ChatGifFavorites, Link.ChatStickers]),
         new("v.1.1.47", [Link.PublicProfilesFollow]),
+        new("v.1.1.48", [Link.CommunityGathering]),
     ];
 
     private static readonly IReadOnlyDictionary<Link, string> LinkTitles = new Dictionary<Link, string>
@@ -196,7 +198,8 @@ public static class UpdateOptionPanel
         [Link.ChatGifs] = "Social: KLIPY GIFs in private chat · encrypted provider references, bounded animations",
         [Link.ChatGifFavorites] = "Social: GIF favorites + full-size preview before sending",
         [Link.ChatStickers] = "Social: KLIPY stickers + Discord-style media picker",
-        [Link.PublicProfilesFollow] = "Community: Public profiles · Community-Hub search, Follow/Following feed & profile deep-links"
+        [Link.PublicProfilesFollow] = "Community: Public profiles · Community-Hub search, Follow/Following feed & profile deep-links",
+        [Link.CommunityGathering] = "Community overview · your syncshells and Chronicle editor"
     };
 
     private static readonly IReadOnlyDictionary<Link, Action<SpheneConfigService, UiSharedService, SpheneMediator>> LinkDrawers
@@ -521,6 +524,11 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("KLIPY stickers joined the composer: a second icon button next to GIF opens the same picker in sticker mode - search, favorites and the full-size preview all work identically, and stickers travel inside the same encrypted message envelope. The picker itself was reworked into a wider two-column layout that shows each media at its real aspect ratio instead of square crops.");
             SpheneUI.Controls.HelpText("Stickers share the GIF rollout - the button appears once your account is granted access, and the same external-media consent covers loading the media files.");
+        },
+        [Link.CommunityGathering] = (_, _, _) =>
+        {
+            SpheneUI.Text.Wrapped("In Community > Overview, scroll inside Recent Activity to browse the feed. Two highlights lead the stream when available. Switch to Highlights at any time to see the full selection.");
+            SpheneUI.Controls.HelpText("Use the people icon in Recent Activity to visit your syncshells, or the feather to write or continue your Chronicle.");
         },
         [Link.PublicProfilesFollow] = (_, _, _) =>
         {

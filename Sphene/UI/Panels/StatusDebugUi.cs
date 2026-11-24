@@ -569,7 +569,7 @@ public class StatusDebugUi : WindowMediatorSubscriberBase
 
         var scale = ImGuiHelpers.GlobalScale;
         var headerHeight = 210f * scale * SpheneUI.Density.Factor;
-        using (var headerTable = SpheneUI.Tables.Begin("##CharacterDataHeader", 2,
+        using (var headerTable = SpheneUI.Layout.BeginCardColumns("##CharacterDataHeader", 2,
             ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.BordersInnerV))
         {
             if (headerTable.Success)
