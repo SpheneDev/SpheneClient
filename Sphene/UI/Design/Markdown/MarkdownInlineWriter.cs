@@ -167,6 +167,13 @@ internal sealed class MarkdownInlineWriter
                 EmitText(html.Tag, s);
                 break;
             }
+            case SpheneTagLeaf tagLeaf:
+            {
+                var s = style;
+                s.Muted = true;
+                EmitText(tagLeaf.Literal, s);
+                break;
+            }
             case PipeTableDelimiterInline:
                 EmitText("|", style);
                 break;
