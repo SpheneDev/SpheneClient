@@ -896,7 +896,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         return null;
     }
 
-    /// <summary>Reads the digits after a "…/m" marker in a game path.</summary>
+    /// <summary>Reads the digits after a ".../m" marker in a game path.</summary>
     private static uint? ModelIdAfter(string path, string marker)
     {
         var start = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -1513,13 +1513,13 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         if (fileCount > 0)
         {
             var sizeInMB = totalSize / (1024.0 * 1024.0);
-            var updating = _storageInfoTask?.IsCompleted == false ? " · updating…" : string.Empty;
+            var updating = _storageInfoTask?.IsCompleted == false ? " · updating..." : string.Empty;
             SpheneUI.Text.Muted($"Total backup storage: {sizeInMB:F2} MB ({fileCount} files){updating}");
         }
         else
         {
             SpheneUI.Text.Muted(_storageInfoTask?.IsCompleted == false
-                ? "Calculating storage usage…" : "No backup files found.");
+                ? "Calculating storage usage..." : "No backup files found.");
         }
     }
 
@@ -1700,7 +1700,7 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
         // the actual content instead of a permanent list column.
         SpheneUI.Text.Muted("Character");
         ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-        var preview = "Select a character…";
+        var preview = "Select a character...";
         foreach (var entry in config)
         {
             if (string.Equals(_selectedStoredCharacter, entry.Key, StringComparison.Ordinal))

@@ -375,11 +375,11 @@ public static partial class SpheneUI
             var shown = text;
             if (ImGui.CalcTextSize(shown).X > avail)
             {
-                while (shown.Length > 4 && ImGui.CalcTextSize("…" + shown).X > avail)
+                while (shown.Length > 4 && ImGui.CalcTextSize("..." + shown).X > avail)
                 {
                     shown = shown[1..];
                 }
-                shown = "…" + shown;
+                shown = "..." + shown;
             }
             if (muted)
             {
@@ -420,12 +420,12 @@ public static partial class SpheneUI
         {
             cut = false;
             if (ImGui.CalcTextSize(text).X <= avail) return text;
-            while (text.Length > 1 && ImGui.CalcTextSize(text + "…").X > avail)
+            while (text.Length > 1 && ImGui.CalcTextSize(text + "...").X > avail)
             {
                 text = text[..^1];
             }
             cut = true;
-            return text + "…";
+            return text + "...";
         }
 
         /// <summary>

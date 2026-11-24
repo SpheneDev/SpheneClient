@@ -610,7 +610,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         {
             SpheneUI.Media.PlaceholderInRect(dl, imgMin, imgMax,
                 rounding: 6f * scale);
-            var hint = hasFile ? "Loading preview…" : "Click an image to preview";
+            var hint = hasFile ? "Loading preview..." : "Click an image to preview";
             var hintW = ImGui.CalcTextSize(hint).X;
             if (hintW <= innerW)
             {
@@ -699,7 +699,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         }
         if (_entries == null)
         {
-            SpheneUI.Text.Muted("Loading folder…");
+            SpheneUI.Text.Muted("Loading folder...");
             return;
         }
         if (_entries.Count == 0)
@@ -1218,7 +1218,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
     {
         return _thumbs.TryGetValue(path, out var t) && t != null
             ? $"{t.Width}×{t.Height}"
-            : "…";
+            : "...";
     }
 
     /// <summary>Drops the picked file and frees its preview texture.</summary>
@@ -1490,7 +1490,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         }
         if (_loadingFile)
         {
-            SpheneUI.Text.Muted("Loading image…");
+            SpheneUI.Text.Muted("Loading image...");
             return;
         }
         if (_loadFailed)
@@ -1600,7 +1600,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
         }
         if (wrap == null)
         {
-            SpheneUI.Text.Muted("Loading image…");
+            SpheneUI.Text.Muted("Loading image...");
             return;
         }
 
@@ -1909,7 +1909,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
     {
         var spacing = ImGui.GetStyle().ItemSpacing.X;
         var inline = SpheneUI.Spacing.Inline.Scaled;
-        var confirmLabel = _applyBusy ? "Applying…" : "Use image";
+        var confirmLabel = _applyBusy ? "Applying..." : "Use image";
 
         // Exact widths for every control on the row · SegCore buttons carry an
         // icon zone + chevron, so measuring via CalcTextSize would clip them.
@@ -1949,7 +1949,7 @@ public sealed class PhotoStudioUi : WindowMediatorSubscriberBase
             ImGui.SetCursorScreenPos(lineMin + new Vector2(0f,
                 MathF.Max(0f, (rowH - ImGui.GetTextLineHeight()) * 0.5f)));
             SpheneUI.Text.Muted(SpheneUI.Text.Ellipsize(
-                "Drag to move · corners resize" + (_applyBusy ? " · Applying…" : string.Empty),
+                "Drag to move · corners resize" + (_applyBusy ? " · Applying..." : string.Empty),
                 hintW));
             nextX = ImGui.GetItemRectMax().X + inline;
         }

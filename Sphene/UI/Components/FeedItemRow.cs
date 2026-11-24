@@ -282,7 +282,7 @@ public static class FeedItemRow
         }
 
         // Chronicle preview + engagement strip: wrapped snippet lines tuck
-        // under the title, the last line ends in the accent "… more" jump
+        // under the title, the last line ends in the accent "... more" jump
         // (X-style, ellipsis owned by the link); the tail carries stats.
         // The whole row is the click target, so the link is honest.
         var tailAnchor = context != null ? l3Y : l2Y;
@@ -297,14 +297,14 @@ public static class FeedItemRow
             }
             var lastY = sy + (snippetLines.Count - 1) * lineH;
             // the ellipsis belongs to the jump, not the text: the snippet
-            // ends bare and one accent "… more" unit marks both the
+            // ends bare and one accent "... more" unit marks both the
             // truncation and the way in - reading dots as text-owned makes
             // the link look like it starts mid-sentence
             const string moreLink = "... more";
             var linkW = ImGui.CalcTextSize(moreLink).X;
             var gapW = ImGui.CalcTextSize(" ").X;
             var lastShown = FitToWidth(snippetLines[^1], textW - linkW - gapW)
-                .TrimEnd('…', '.', ' ').TrimEnd();
+                .TrimEnd('.', ' ').TrimEnd();
             drawList.AddText(new Vector2(nameX, lastY), secU, lastShown);
             var linkX = nameX + ImGui.CalcTextSize(lastShown).X + gapW;
             drawList.AddText(new Vector2(linkX, lastY),
@@ -392,7 +392,7 @@ public static class FeedItemRow
 
     /// <summary>Optional content the row appends under the base stack:
     /// a Chronicle preview (server-stripped body wrapped to at most two
-    /// text-column lines, ending in the inline "… more" jump) plus a
+    /// text-column lines, ending in the inline "... more" jump) plus a
     /// stats tail on any row that carries engagement counters.</summary>
     private static (List<string>? Snippet, bool Tail) ExtraContent(
         SyncshellCommunityFeedItemDto item, float textW, bool interactive = false)

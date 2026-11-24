@@ -46,7 +46,7 @@ public static partial class SpheneUI
             {
                 line = line[..256];
             }
-            var ellipsisW = ImGui.CalcTextSize("…").X;
+            var ellipsisW = ImGui.CalcTextSize("...").X;
             var lo = 0;
             var hi = line.Length;
             while (lo < hi)
@@ -61,7 +61,7 @@ public static partial class SpheneUI
                     hi = mid - 1;
                 }
             }
-            return lo <= 0 ? "…" : line[..lo].TrimEnd() + "…";
+            return lo <= 0 ? "..." : line[..lo].TrimEnd() + "...";
         }
 
         /// <summary>

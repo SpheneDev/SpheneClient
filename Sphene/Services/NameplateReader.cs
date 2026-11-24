@@ -22,7 +22,7 @@ internal sealed unsafe class NameplateReader : IDisposable
 {
     internal const int MaxNamePlateObjects = 50;
     // image-node mask slots per plate: NameIcon, MarkerIcon, plus extra
-    // nodes found inside the plate component (job icon, …)
+    // nodes found inside the plate component (job icon, ...)
     internal const int IconSlots = 8;
     private static readonly PlateTune DefaultTune = new(Vector2.Zero, Vector2.Zero, 1f, 1f, Vector2.Zero,
         1f, 1f, 1f, Vector2.Zero);
@@ -1398,7 +1398,7 @@ internal sealed unsafe class NameplateReader : IDisposable
         if (iconId == StatusPlaceholderIconId)
         {
             // every plate carries a whole row of these never-drawn badge nodes
-            // (nid 50002, 50005, …) - acknowledge each once, then stay silent
+            // (nid 50002, 50005, ...) - acknowledge each once, then stay silent
             if (DebugLog && _iconPlaceholderSeen.Add(node->NodeId))
                 _logger.LogDebug("[Nameplate] ic{slot} p{plate} nid{nid} placeholder ic{iconId} suppressed",
                     slot, plate, node->NodeId, iconId);
@@ -1512,7 +1512,7 @@ internal sealed unsafe class NameplateReader : IDisposable
     }
 
     /// <summary>Node ancestry as nid/type pairs - shows whether an icon node
-    /// sits inside a nested component (icon component, …).</summary>
+    /// sits inside a nested component (icon component, ...).</summary>
     private static unsafe void AppendParentChain(StringBuilder sb, AtkResNode* node)
     {
         for (var p = node->ParentNode; p != null; p = p->ParentNode)

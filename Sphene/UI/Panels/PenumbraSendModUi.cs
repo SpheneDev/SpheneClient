@@ -377,7 +377,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     {
         ImGui.SetNextItemWidth(-1);
         SpheneUI.Controls.InputTextWithHint("##penumbraModFilter" + idSuffix,
-            "Filter mods…", ref _sendPenumbraModFilter, 128);
+            "Filter mods...", ref _sendPenumbraModFilter, 128);
         DrawCardToolbar(
             $"{_selectedPenumbraModFolders.Count} selected · click a row to toggle",
             _selectedPenumbraModFolders.Count > 0 ? "Clear" : null,
@@ -430,7 +430,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
     {
         ImGui.SetNextItemWidth(-1);
         SpheneUI.Controls.InputTextWithHint("##recipientFilter" + idSuffix,
-            "Filter recipients…", ref _recipientFilter, 64);
+            "Filter recipients...", ref _recipientFilter, 64);
         DrawCardToolbar(
             $"{_selectedPenumbraRecipients.Count} selected · paired users only",
             _selectedPenumbraRecipients.Count > 0 ? "Clear" : null,
@@ -616,7 +616,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
             }
             else
             {
-                SpheneUI.Text.Muted("Preparing packages…");
+                SpheneUI.Text.Muted("Preparing packages...");
             }
             return;
         }
@@ -792,7 +792,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
         if (_isSendingPenumbraMod) return;
 
         _sendPenumbraModStatusIsError = false;
-        _sendPenumbraModStatusText = "Starting…";
+        _sendPenumbraModStatusText = "Starting...";
         _isSendingPenumbraMod = true;
 
         try { _sendPenumbraModCts?.Cancel(); }
@@ -956,7 +956,7 @@ public class PenumbraSendModUi : WindowMediatorSubscriberBase
                 token.ThrowIfCancellationRequested();
 
                 _sendPenumbraModStatusIsError = false;
-                _sendPenumbraModStatusText = "Uploading…";
+                _sendPenumbraModStatusText = "Uploading...";
 
                 var uploadProgress = new Progress<string>(s =>
                 {

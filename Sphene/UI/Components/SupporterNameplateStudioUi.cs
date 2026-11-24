@@ -74,7 +74,7 @@ public sealed class SupporterNameplateStudioUi
     /// <see cref="string.Empty"/> is the None chip, null means nothing
     /// staged.</summary>
     private string? _pendingSymbol;
-    /// <summary>Staged customization settings (colors, label, position, …) ·
+    /// <summary>Staged customization settings (colors, label, position, ...) ·
     /// created lazily on the first change so untouched fields never dirty the
     /// draft. Commits together with the card picks in <see cref="ApplyPending"/>.</summary>
     private StudioDraft? _draft;
@@ -509,7 +509,7 @@ public sealed class SupporterNameplateStudioUi
 
     /// <summary>
     /// The list-row studio sub-page (Supporter › List Row): the live row
-    /// preview stays pinned on top while the setting cards scroll beneath —
+    /// preview stays pinned on top while the setting cards scroll beneath -
     /// every control only stages (theme buffers + <see cref="_stagedRowImage"/>)
     /// and the staged look rides the preview until Apply commits it in a
     /// single profile write. Same contract as the nameplate studio.
@@ -1529,9 +1529,9 @@ public sealed class SupporterNameplateStudioUi
             else
             {
                 // icon still decoding or fetch failed · quiet placeholder
-                var gw = ImGui.CalcTextSize("…").X;
+                var gw = ImGui.CalcTextSize("...").X;
                 drawList.AddText(new Vector2(cx - gw * 0.5f, iconY + (iconH - textH) * 0.5f),
-                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), "…");
+                    SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), "...");
             }
         }
 

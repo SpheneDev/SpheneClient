@@ -919,7 +919,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
 
                 var desc = favorite.Value.Favorite.CustomDescription;
                 ImGui.SetNextItemWidth(SpheneUI.Controls.BoundedAvailX());
-                if (SpheneUI.Controls.InputTextWithHint("##desc", "Custom description for this favorite…", ref desc, 100))
+                if (SpheneUI.Controls.InputTextWithHint("##desc", "Custom description for this favorite...", ref desc, 100))
                 {
                     favorite.Value.Favorite.CustomDescription = desc;
                     _configService.Save();
@@ -1194,7 +1194,7 @@ internal sealed partial class CharaDataHubUi : WindowMediatorSubscriberBase
         }
         else
         {
-            SpheneUI.Text.Muted("Loading character…");
+            SpheneUI.Text.Muted("Loading character...");
         }
     }
 

@@ -104,11 +104,11 @@ public static partial class SpheneUI
             var textAvail = width - textX - padX;
             if (ImGui.CalcTextSize(text).X > textAvail)
             {
-                while (text.Length > 1 && ImGui.CalcTextSize(text + "…").X > textAvail)
+                while (text.Length > 1 && ImGui.CalcTextSize(text + "...").X > textAvail)
                 {
                     text = text[..^1];
                 }
-                text += "…";
+                text += "...";
             }
             drawList.AddText(min + new Vector2(textX, (rowH - lineH) * 0.5f),
                 ColorUtils.ToU32(muted ? Colors.TextMuted : Colors.TextPrimary), text);

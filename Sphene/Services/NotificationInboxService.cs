@@ -197,7 +197,7 @@ public class NotificationInboxService : DisposableMediatorSubscriberBase, IHoste
             ? "[GIF]"
             : msg.Entry.Text ?? "[encrypted message]";
         var preview = text.Length > 80
-            ? string.Concat(text.AsSpan(0, 80), "…")
+            ? string.Concat(text.AsSpan(0, 80), "...")
             : text;
         Add(new InboxItem(id, InboxKind.Chat, $"New message from {name}",
             preview, DateTimeOffset.UtcNow,

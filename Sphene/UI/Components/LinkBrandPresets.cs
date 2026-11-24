@@ -15,41 +15,41 @@ namespace Sphene.UI.Components;
 internal static class LinkBrandPresets
 {
     public static readonly LinkPreset Custom = new("custom", "Custom link",
-        FontAwesomeIcon.Globe, null, "https://…");
+        FontAwesomeIcon.Globe, null, "https://...");
 
     public static readonly IReadOnlyList<LinkPreset> All = new List<LinkPreset>
     {
         Custom,
         new("discord", "Discord", null, null,
-            "https://discord.gg/…", SpheneBrandIcons.Brand.Discord),
+            "https://discord.gg/...", SpheneBrandIcons.Brand.Discord),
         new("x", "X", null, null,
-            "https://x.com/…", SpheneBrandIcons.Brand.X),
+            "https://x.com/...", SpheneBrandIcons.Brand.X),
         new("kofi", "Ko-fi", null, null,
-            "https://ko-fi.com/…", SpheneBrandIcons.Brand.Kofi),
+            "https://ko-fi.com/...", SpheneBrandIcons.Brand.Kofi),
         new("youtube", "YouTube", null, null,
-            "https://youtube.com/…", SpheneBrandIcons.Brand.YouTube),
+            "https://youtube.com/...", SpheneBrandIcons.Brand.YouTube),
         new("twitch", "Twitch", null, null,
-            "https://twitch.tv/…", SpheneBrandIcons.Brand.Twitch),
+            "https://twitch.tv/...", SpheneBrandIcons.Brand.Twitch),
         new("instagram", "Instagram", null, null,
-            "https://instagram.com/…", SpheneBrandIcons.Brand.Instagram),
+            "https://instagram.com/...", SpheneBrandIcons.Brand.Instagram),
         new("bluesky", "Bluesky", null, null,
-            "https://bsky.app/…", SpheneBrandIcons.Brand.Bluesky),
+            "https://bsky.app/...", SpheneBrandIcons.Brand.Bluesky),
         new("tiktok", "TikTok", null, null,
-            "https://tiktok.com/@…", SpheneBrandIcons.Brand.TikTok),
+            "https://tiktok.com/@...", SpheneBrandIcons.Brand.TikTok),
         new("patreon", "Patreon", null, null,
-            "https://patreon.com/…", SpheneBrandIcons.Brand.Patreon),
+            "https://patreon.com/...", SpheneBrandIcons.Brand.Patreon),
         new("github", "GitHub", null, null,
-            "https://github.com/…", SpheneBrandIcons.Brand.GitHub),
+            "https://github.com/...", SpheneBrandIcons.Brand.GitHub),
         new("carrd", "Carrd", null, null,
-            "https://….carrd.co", SpheneBrandIcons.Brand.Carrd),
+            "https://....carrd.co", SpheneBrandIcons.Brand.Carrd),
         new("lodestone", "Lodestone", FontAwesomeIcon.Scroll,
-            SpheneUI.Palette.SpheneGold, "https://eu.finalfantasyxiv.com/lodestone/…"),
+            SpheneUI.Palette.SpheneGold, "https://eu.finalfantasyxiv.com/lodestone/..."),
         new("venue", "Venue", FontAwesomeIcon.MapMarkedAlt,
-            null, "https://…"),
+            null, "https://..."),
         new("shop", "Shop", FontAwesomeIcon.Store,
-            null, "https://…"),
+            null, "https://..."),
         new("email", "E-mail", FontAwesomeIcon.Envelope,
-            null, "mailto:…"),
+            null, "mailto:..."),
     };
 
     public static LinkPreset? Find(string? key)

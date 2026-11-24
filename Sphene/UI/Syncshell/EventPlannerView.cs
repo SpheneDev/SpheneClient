@@ -118,7 +118,7 @@ internal static class EventPlannerView
         var scopes = new[] { "Upcoming", "Past", "Pending", "All" };
         SpheneUI.Controls.Segmented("##ep-scope", ref planner.Scope, scopes);
         ImGui.SameLine(0f, SpheneUI.Spacing.X12);
-        SpheneUI.Controls.InputTextWithHint("##ep-search", "Search events…",
+        SpheneUI.Controls.InputTextWithHint("##ep-search", "Search events...",
             ref planner.Filter, 96, preferredWidth: 200f * scale);
         var modes = new[] { "List", "Calendar" };
         var mw = SpheneUI.Controls.SegmentedWidth(modes);
@@ -598,11 +598,11 @@ internal static class EventPlannerView
         SpheneUI.Layout.HeadedSurface("Event details", () =>
         {
             LabelCol("Title");
-            SpheneUI.Controls.InputTextWithHint("##ep-title", "Name the event…",
+            SpheneUI.Controls.InputTextWithHint("##ep-title", "Name the event...",
                 ref composer.Title, 200,
                 preferredWidth: SpheneUI.Controls.BoundedAvailX());
             LabelCol("Link");
-            SpheneUI.Controls.InputTextWithHint("##ep-url", "https://… (optional)",
+            SpheneUI.Controls.InputTextWithHint("##ep-url", "https://... (optional)",
                 ref composer.Url, 500,
                 preferredWidth: SpheneUI.Controls.BoundedAvailX());
             SpheneUI.Text.Muted("Description");
@@ -627,7 +627,7 @@ internal static class EventPlannerView
                     Action<byte[]?> apply, Action<bool> setCleared)
                 {
                     var hasImage = picked != null || (existing != null && !cleared);
-                    var state = picked != null ? "picked" : hasImage ? "set" : "…";
+                    var state = picked != null ? "picked" : hasImage ? "set" : "...";
                     if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Image, $"{label} {state}"))
                     {
                         var pending = UI.Components.MarkdownComposer.StudioPicker?.Invoke(target)
@@ -838,7 +838,7 @@ internal static class EventPlannerView
             ? events.FirstOrDefault(e => e.Id == composer.EditId) : null;
         if (ev == null || edit.LoadCalendar == null) return;
 
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.CalendarDay, "Edit a specific date…"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.CalendarDay, "Edit a specific date..."))
         {
             ImGui.OpenPopup("##ep-occpick");
         }
@@ -860,7 +860,7 @@ internal static class EventPlannerView
                 .OrderBy(o => o.OccurrenceStartUtc).Take(24).ToList();
             if (forEvent == null)
             {
-                SpheneUI.Text.Muted("Loading dates…");
+                SpheneUI.Text.Muted("Loading dates...");
             }
             else if (forEvent.Count == 0)
             {
@@ -943,7 +943,7 @@ internal static class EventPlannerView
                     .Where(o => !composer.OrganizerUids.Contains(o.Uid, StringComparer.Ordinal))
                     .ToArray();
                 SpheneUI.Controls.Combo("Add organizer##ep-orgadd", available,
-                    o => o is { } v ? v.Label : "Pick a member…",
+                    o => o is { } v ? v.Label : "Pick a member...",
                     onSelected: o =>
                     {
                         if (o is { } picked)
@@ -951,7 +951,7 @@ internal static class EventPlannerView
                             composer.OrganizerUids.Add(picked.Uid);
                         }
                     },
-                    initialSelectedItem: (Uid: string.Empty, Label: "Pick a member…"));
+                    initialSelectedItem: (Uid: string.Empty, Label: "Pick a member..."));
             }
             else
             {

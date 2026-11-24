@@ -460,7 +460,7 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
             using var doc = JsonDocument.Parse(bytes);
             var items = new List<GifItem>();
             var hasMore = false;
-            // v1 envelope: { result, data: { data: [items], has_next, … } }
+            // v1 envelope: { result, data: { data: [items], has_next, ... } }
             // a 200 whose body we can't itemize must leave a debug trail -
             // a shape change otherwise surfaces as an unexplained empty grid
             if (TryItemsArray(doc.RootElement, out var results))
@@ -512,8 +512,8 @@ public sealed class KlipyGifProvider : DisposableMediatorSubscriberBase, IGifPro
         }
     }
 
-    /// <summary>Unwraps the v1 envelope <c>{result, data:{data:[…]}}</c>;
-    /// tolerates a bare <c>data:[…]</c> body too (items lookup shape).</summary>
+    /// <summary>Unwraps the v1 envelope <c>{result, data:{data:[...]}}</c>;
+    /// tolerates a bare <c>data:[...]</c> body too (items lookup shape).</summary>
     private static bool TryItemsArray(JsonElement root, out JsonElement results)
     {
         if (root.TryGetProperty("data", out var data)

@@ -16,8 +16,8 @@ public enum SpheneTagKind
 }
 
 /// <summary>Inline container for the Sphene-specific tags
-/// &lt;color=name|#hex&gt;…&lt;/color&gt;, &lt;u&gt;…&lt;/u&gt; and
-/// &lt;size=N&gt;…&lt;/size&gt;. Produced by post-process pairing of
+/// &lt;color=name|#hex&gt;...&lt;/color&gt;, &lt;u&gt;...&lt;/u&gt; and
+/// &lt;size=N&gt;...&lt;/size&gt;. Produced by post-process pairing of
 /// <see cref="SpheneTagLeaf"/> tokens - never emitted by the parser itself.</summary>
 public sealed class ColorTagInline : ContainerInline
 {
@@ -47,7 +47,7 @@ public sealed class SpheneTagLeaf : LeafInline
 }
 
 /// <summary>
-/// Parses the Sphene inline tags &lt;color=…&gt;, &lt;size=…&gt;, &lt;u&gt; and
+/// Parses the Sphene inline tags &lt;color=...&gt;, &lt;size=...&gt;, &lt;u&gt; and
 /// their closing counterparts into flat leaf tokens, then pairs them in a
 /// post-process pass that runs after emphasis resolution.
 ///

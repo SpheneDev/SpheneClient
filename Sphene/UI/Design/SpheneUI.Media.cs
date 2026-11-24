@@ -49,7 +49,7 @@ public static partial class SpheneUI
         internal static void SetTextureProvider(ITextureProvider provider) => _provider = provider;
 
         /// <summary>
-        /// Shared in-game UI icon (job icons, action icons, …) resolved via
+        /// Shared in-game UI icon (job icons, action icons, ...) resolved via
         /// <see cref="ITextureProvider.GetFromGameIcon"/> · Dalamud owns the
         /// cache, so this is safe to call every frame. Returns null until the
         /// wrap resolves; render a placeholder or leave the slot empty.

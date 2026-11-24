@@ -90,14 +90,14 @@ internal static class PersonCard
 
         if (loading)
         {
-            SpheneUI.Text.Muted("Loading profile…");
+            SpheneUI.Text.Muted("Loading profile...");
         }
         else
         {
             if (!string.IsNullOrWhiteSpace(description))
             {
                 var snippet = description!.Length > 110
-                    ? description[..110].TrimEnd() + "…" : description;
+                    ? description[..110].TrimEnd() + "..." : description;
                 SpheneUI.Text.MutedWrapped(snippet, min.X + width - pad);
             }
             if (links is { Count: > 0 })

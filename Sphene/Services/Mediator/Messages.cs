@@ -216,7 +216,7 @@ public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid 
     /// opened at this section (and scrolled to <see cref="CommunityItemId"/>).</summary>
     SyncshellCommunitySection? CommunitySection = null, long? CommunityItemId = null,
     /// <summary>Syncshell detail-tab deep-link - <see cref="Sphene.UI.Hub.SpheneHubUi"/>'s
-    /// internal tab enum as int (Community = 0 …, EventPlanner = 5); the hub maps
+    /// internal tab enum as int (Community = 0 ..., EventPlanner = 5); the hub maps
     /// it when <paramref name="GroupGid"/> is set.</summary>
     int? DetailTab = null,
     /// <summary>Event-Planner deep-link - opens this event in the planner

@@ -343,7 +343,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                 {
                     if (stillLoading)
                     {
-                        SpheneUI.Text.Muted("Loading history…");
+                        SpheneUI.Text.Muted("Loading history...");
                     }
                     else if (failedSources.Count == 0)
                     {
@@ -380,7 +380,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
     {
         ImGui.SetNextItemWidth(200f * scale);
         if (SpheneUI.Controls.InputTextWithHint("##activityTextFilter",
-                "Search name, author or user…", ref _activityTextFilter, 128))
+                "Search name, author or user...", ref _activityTextFilter, 128))
         {
             _activityCurrentPage = 1;
         }
@@ -642,7 +642,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
             });
     }
 
-    /// <summary>Per-kind row actions · reshare targets the recorded recipient, "Send to…" opens the send flow.</summary>
+    /// <summary>Per-kind row actions · reshare targets the recorded recipient, "Send to..." opens the send flow.</summary>
     private void DrawActivityContextMenu(ActivityRow row, string? otherName)
     {
         if (row.Entry is ModShareHistoryEntryDto share &&
@@ -795,7 +795,7 @@ public class ModPackageHistoryUi : WindowMediatorSubscriberBase
                 }
 
                 _redownloadStatusText = string.IsNullOrWhiteSpace(tuple.Item1)
-                    ? $"Installing: {displayName}… ({tuple.Item2}/{tuple.Item3})"
+                    ? $"Installing: {displayName}... ({tuple.Item2}/{tuple.Item3})"
                     : tuple.Item1;
             });
 

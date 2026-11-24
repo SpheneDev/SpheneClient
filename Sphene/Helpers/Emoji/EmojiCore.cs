@@ -44,7 +44,7 @@ public static class EmojiCore
     /// <summary>
     /// Codepoint ranges that carry Emoji=Yes / Emoji_Presentation. Kept
     /// deliberately tight: real emoji blocks plus the scattered BMP
-    /// singletons (©, ®, ‼, ⁉, ™, ℹ, arrows, ⌚, ⏰, Ⓜ, ▶, 〰, ㊗…).
+    /// singletons (©, ®, ‼, ⁉, ™, ℹ, arrows, ⌚, ⏰, Ⓜ, ▶, 〰, ㊗...).
     /// </summary>
     private static readonly (uint Lo, uint Hi)[] EmojiRanges =
     {
@@ -176,7 +176,7 @@ public static class EmojiCore
     /// Length in codepoints of the emoji sequence starting at
     /// <paramref name="cps"/>[<paramref name="i"/>], or 0 when none starts
     /// there. Implements: flag pair, keycap, base (+VS16? +tone?)
-    /// (+ZWJ base…)*, tag-suffixed sequences.
+    /// (+ZWJ base...)*, tag-suffixed sequences.
     /// </summary>
     public static int MatchSequenceLength(int[] cps, int count, int i, IReadOnlySet<int>? atlasBases = null)
     {
@@ -366,7 +366,7 @@ public static class EmojiCore
         {
             start--;
         }
-        // fold a ZWJ chain (…base ZWJ ext ZWJ ext) to its first base
+        // fold a ZWJ chain (...base ZWJ ext ZWJ ext) to its first base
         while (start > 0)
         {
             var t = start - 1;

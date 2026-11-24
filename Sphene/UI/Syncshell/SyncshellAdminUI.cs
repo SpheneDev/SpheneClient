@@ -1085,7 +1085,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         EnsureCommunityLoaded();
         if (_community == null)
         {
-            SpheneUI.Text.Muted("Loading events…");
+            SpheneUI.Text.Muted("Loading events...");
             return;
         }
         var accent = SyncshellCommunityView.ParseAccent(_community.Profile.AccentColor)
@@ -1272,7 +1272,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
         if (_community == null)
         {
-            SpheneUI.Text.Muted("Loading staff data…");
+            SpheneUI.Text.Muted("Loading staff data...");
             return;
         }
         if (!CanManageStaffRoles())
@@ -1442,7 +1442,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             var filterW = 150f * SpheneUI.Scale;
             SpheneUI.Controls.DockToRightEdge(filterW);
             ImGui.SetNextItemWidth(filterW);
-            SpheneUI.Controls.InputTextWithHint("##roster-filter", "Filter souls…", ref _rosterFilter, 64);
+            SpheneUI.Controls.InputTextWithHint("##roster-filter", "Filter souls...", ref _rosterFilter, 64);
 
             if (_invitePanelOpen)
             {
@@ -1671,7 +1671,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     {
         if (_community == null)
         {
-            SpheneUI.Text.Muted("Loading roles…");
+            SpheneUI.Text.Muted("Loading roles...");
             return;
         }
 
@@ -1857,7 +1857,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             }
 
             SpheneUI.Controls.InputTextWithHint("##rvnote-" + GroupFullInfo.Group.GID,
-                "Review note (optional, applies to the next decision)…", ref _reviewNote, 300,
+                "Review note (optional, applies to the next decision)...", ref _reviewNote, 300,
                 preferredWidth: 280f * SpheneUI.Scale);
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
             foreach (var item in _reviewItems)
@@ -2116,7 +2116,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
         if (_pruneTestTask is { IsCompleted: false })
         {
-            SpheneUI.Text.Muted("Scanning…");
+            SpheneUI.Text.Muted("Scanning...");
         }
         else if (_pruneTestTask != null)
         {
@@ -2138,7 +2138,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         }
         if (_pruneTask is { IsCompleted: false })
         {
-            SpheneUI.Text.Muted("Pruning…");
+            SpheneUI.Text.Muted("Pruning...");
         }
         else if (_pruneTask is { IsCompletedSuccessfully: true })
         {
@@ -2162,7 +2162,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
         if (_bannedUsersTask is { IsCompleted: false })
         {
-            SpheneUI.Text.Muted("Refreshing…");
+            SpheneUI.Text.Muted("Refreshing...");
         }
         else if (_bannedUsersTask != null)
         {

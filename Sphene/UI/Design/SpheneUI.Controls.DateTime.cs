@@ -172,7 +172,7 @@ public static partial class SpheneUI
                     ImGui.SetKeyboardFocusHere();
                 }
                 ImGui.SetNextItemWidth(-1f);
-                if (ImGui.InputTextWithHint($"##{id}filter", "Search time zones…", ref filter, 96))
+                if (ImGui.InputTextWithHint($"##{id}filter", "Search time zones...", ref filter, 96))
                 {
                     _tzFilter[filterKey] = filter;
                 }
@@ -225,7 +225,7 @@ public static partial class SpheneUI
             var display = tz.DisplayName;
             if (!string.IsNullOrWhiteSpace(display))
             {
-                // "(UTC+01:00) Amsterdam, Berlin, …" - strip the offset prefix,
+                // "(UTC+01:00) Amsterdam, Berlin, ..." - strip the offset prefix,
                 // the live offset is appended separately.
                 var close = display.IndexOf(')');
                 if (display.StartsWith("(UTC", StringComparison.Ordinal) && close > 0

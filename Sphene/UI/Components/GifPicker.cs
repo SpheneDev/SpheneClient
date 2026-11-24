@@ -230,7 +230,7 @@ public sealed class GifPicker : IDisposable
             SpheneUI.Layout.BeginScrollArea("##gif-grid", new Vector2(panelW, gridH), border: true);
             SpheneUI.Text.MutedWrapped(_provider.RateLimited
                 ? _provider.DisplayName + " is rate limiting requests - retry in a moment."
-                : (_stickers ? "Loading stickers…" : "Loading GIFs…"));
+                : (_stickers ? "Loading stickers..." : "Loading GIFs..."));
             SpheneUI.Layout.EndScrollArea();
             return;
         }
@@ -565,11 +565,11 @@ public sealed class GifPicker : IDisposable
             return text;
         }
         var n = text.Length;
-        while (n > 1 && ImGui.CalcTextSize(text[..n] + "…").X > maxW)
+        while (n > 1 && ImGui.CalcTextSize(text[..n] + "...").X > maxW)
         {
             n--;
         }
-        return n <= 1 ? text : text[..n].TrimEnd() + "…";
+        return n <= 1 ? text : text[..n].TrimEnd() + "...";
     }
 
     // keys live in the global Media cache - the catalog prefix keeps a

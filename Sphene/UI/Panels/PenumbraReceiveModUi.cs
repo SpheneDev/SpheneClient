@@ -207,7 +207,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
         var next = _installQueue.Peek();
         _batchCurrent++;
         _isInstalling = true;
-        _statusText = $"Batch installing {_batchCurrent}/{_batchTotal}: {next.ModFolderName ?? "Unknown"}…";
+        _statusText = $"Batch installing {_batchCurrent}/{_batchTotal}: {next.ModFolderName ?? "Unknown"}...";
         _progress = 0f;
 
         Mediator.Publish(new InstallReceivedPenumbraModMessage(next));
@@ -552,7 +552,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
             SpheneUI.Layout.SectionCard(() =>
             {
                 ImGui.SetNextItemWidth(-1);
-                SpheneUI.Controls.InputTextWithHint("##pendingFilter", "Filter mods or sender…", ref _pendingFilter, 64);
+                SpheneUI.Controls.InputTextWithHint("##pendingFilter", "Filter mods or sender...", ref _pendingFilter, 64);
 
                 var hasPending = pending.Count > 0;
                 using (ImRaii.Disabled(_isInstalling || !hasPending))
@@ -927,7 +927,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                     accent: accent, enabled: !_isInstalling))
             {
                 _statusIsError = false;
-                _statusText = "Starting download and installation…";
+                _statusText = "Starting download and installation...";
                 _isInstalling = true;
                 Mediator.Publish(new InstallReceivedPenumbraModMessage(_selectedNotification!));
             }
@@ -1006,7 +1006,7 @@ public class PenumbraReceiveModUi : WindowMediatorSubscriberBase
                 ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
             }
             SpheneUI.Text.Muted(string.IsNullOrWhiteSpace(_statusText)
-                ? "Installing packages…" : _statusText);
+                ? "Installing packages..." : _statusText);
         }
         else if (!string.IsNullOrWhiteSpace(_statusText))
         {

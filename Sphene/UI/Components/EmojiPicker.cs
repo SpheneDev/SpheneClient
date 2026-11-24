@@ -101,7 +101,7 @@ public sealed class EmojiPicker
 
         if (!SpheneUI.Emoji.IsReady)
         {
-            SpheneUI.Text.MutedWrapped("Emoji are still loading…",
+            SpheneUI.Text.MutedWrapped("Emoji are still loading...",
                 ImGui.GetCursorPosX() + panelW);
             ImGui.Dummy(new Vector2(panelW, 1f));
             SpheneUI.Popups.EndFlyout();

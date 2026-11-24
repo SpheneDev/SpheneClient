@@ -8,7 +8,7 @@ using Sphene.UI.Design;
 namespace Sphene.UI.Syncshell;
 
 /// <summary>
-/// The pickable staff-role symbol set — carried over from VenuePlus, whose
+/// The pickable staff-role symbol set - carried over from VenuePlus, whose
 /// role icons were stored as <see cref="FontAwesomeIcon"/> enum names. Roles
 /// persist that same string in <c>SyncshellStaffRoleDto.Icon</c>, so a Venue
 /// "Barkeeper · Cocktail" port keeps working and everything syncs through the
@@ -16,7 +16,7 @@ namespace Sphene.UI.Syncshell;
 /// </summary>
 internal static class StaffRoleIcons
 {
-    /// <summary>Icon shown for the shell owner — owners have no role row.</summary>
+    /// <summary>Icon shown for the shell owner - owners have no role row.</summary>
     public const FontAwesomeIcon Owner = FontAwesomeIcon.Crown;
     /// <summary>Fallback for staff members without a role and for roles whose
     /// stored key no longer resolves.</summary>
@@ -45,7 +45,7 @@ internal static class StaffRoleIcons
         => Enum.TryParse<FontAwesomeIcon>(key, ignoreCase: true, out var icon) ? icon : fallback;
 
     /// <summary>
-    /// Icon-browser flyout content — category dropdown, search, "No icon" row
+    /// Icon-browser flyout content - category dropdown, search, "No icon" row
     /// and the icon grid. Returns true on a pick (<paramref name="picked"/> is
     /// the enum key, or null when "No icon" was chosen); the caller then saves
     /// and closes the flyout.
@@ -69,7 +69,7 @@ internal static class StaffRoleIcons
             SpheneUI.Controls.EndComboBox();
         }
         ImGui.SameLine(0f, 6f * scale);
-        _ = SpheneUI.Controls.InputTextWithHint("##roleiconfilter", "Search icons…", ref filter, 48);
+        _ = SpheneUI.Controls.InputTextWithHint("##roleiconfilter", "Search icons...", ref filter, 48);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
         if (SpheneUI.Controls.Selectable("No icon", false))
@@ -137,3 +137,4 @@ internal static class StaffRoleIcons
         return list;
     }
 }
+

@@ -19,7 +19,7 @@ namespace Sphene.UI.Design;
 /// <summary>
 /// Renders Markdown through Markdig (CommonMark + GFM pipe tables, task lists,
 /// autolinks, footnotes, fenced code, strikethrough) plus Sphene extensions:
-/// &lt;color=…&gt;/&lt;u&gt; tags, ||spoilers|| (click to reveal), __underline__,
+/// &lt;color=...&gt;/&lt;u&gt; tags, ||spoilers|| (click to reveal), __underline__,
 /// and ::: fenced containers - <c>:::callout info|warning|danger|success</c>
 /// renders an accent-striped block, <c>:::side img="url" side="left|right" width="38"</c>
 /// renders an image column beside the text column, any other name renders a

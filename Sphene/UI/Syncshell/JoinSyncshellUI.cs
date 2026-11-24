@@ -119,7 +119,7 @@ internal sealed class JoinSyncshellUI : IMediatorSubscriber, IDisposable
     {
         SpheneUI.Layout.SectionCard(() =>
         {
-            SpheneUI.Controls.InputTextWithHint("##syncshellId", "Syncshell ID (MSS-…)", ref _desiredSyncshellToJoin, 20);
+            SpheneUI.Controls.InputTextWithHint("##syncshellId", "Syncshell ID (MSS-...)", ref _desiredSyncshellToJoin, 20);
             SpheneUI.Controls.InputTextWithHint("##syncshellpw", "Password or invite (optional)", ref _syncshellPassword, 50, ImGuiInputTextFlags.Password);
             SpheneUI.AttachTooltip("ID and password are case sensitive. MSS- is part of the ID unless a vanity ID is used."
                 + " Leave the password empty for public or approval-gated syncshells.");

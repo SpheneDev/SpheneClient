@@ -578,7 +578,7 @@ public static partial class SpheneUI
                 // the status edit keeps the inline row
                 var statusBuf = edit!.StatusBuffer;
                 var statusCommit = Controls.InputTextWithHint("##hero-status",
-                        "Set a status message…", ref statusBuf, 100,
+                        "Set a status message...", ref statusBuf, 100,
                         ImGuiInputTextFlags.EnterReturnsTrue,
                         preferredWidth: inputWidth)
                     || ImGui.IsItemDeactivatedAfterEdit();
@@ -628,7 +628,7 @@ public static partial class SpheneUI
                     drawList.AddText(ImGui.GetItemRectMin()
                             + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
                         ColorUtils.ToU32(Colors.TextMuted),
-                        "Your bio · tell others about yourself…");
+                        "Your bio · tell others about yourself...");
                 }
                 edit.DescriptionBuffer = descBuf;
                 if (ImGui.IsItemDeactivatedAfterEdit())
@@ -639,7 +639,7 @@ public static partial class SpheneUI
             else if (hasDesc && !bioPanel)
             {
                 var preview = profile.Description;
-                if (preview.Length > 140) preview = preview[..140] + "…";
+                if (preview.Length > 140) preview = preview[..140] + "...";
                 Emoji.Wrapped(preview,
                     columnMaxX - ImGui.GetWindowPos().X, Colors.TextMuted);
             }
@@ -700,7 +700,7 @@ public static partial class SpheneUI
                     drawList.AddText(ImGui.GetItemRectMin()
                             + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
                         ColorUtils.ToU32(Colors.TextMuted),
-                        "Your bio · tell others about yourself…");
+                        "Your bio · tell others about yourself...");
                 }
                 edit.DescriptionBuffer = descBuf;
                 if (ImGui.IsItemDeactivatedAfterEdit())
@@ -745,7 +745,7 @@ public static partial class SpheneUI
                 var statusIndent = Layout.FlowIndentTo(statusMin.X);
                 var statusBuf = edit!.StatusBuffer;
                 var statusCommit = Controls.InputTextWithHint("##hero-status",
-                        "Set a status message…", ref statusBuf, 100,
+                        "Set a status message...", ref statusBuf, 100,
                         ImGuiInputTextFlags.EnterReturnsTrue,
                         preferredWidth: bubbleInnerW)
                     || ImGui.IsItemDeactivatedAfterEdit();
@@ -885,7 +885,7 @@ public static partial class SpheneUI
             var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
                 MathF.Max(textActualBottom, MathF.Max(bioPanelBottom,
                     hasActionsZone ? actionsZoneMax.Y : 0f)) + 4f * scale);
-            // Anchored full-bio flyout · opens from the panel's "More…"
+            // Anchored full-bio flyout · opens from the panel's "More..."
             // trigger without moving the header.
             if (bioPanel && Popups.BeginFlyout(bioFlyoutId))
             {
@@ -1261,7 +1261,7 @@ public static partial class SpheneUI
         /// <summary>
         /// Right-side "About me" preview panel · a restrained tonal card with
         /// a muted label, a clipped three-line bio preview and, only when the
-        /// text overflows, a "More…" trigger that opens the anchored flyout
+        /// text overflows, a "More..." trigger that opens the anchored flyout
         /// (<paramref name="flyoutId"/>) instead of growing the header.
         /// Returns the panel's bottom screen Y.
         /// </summary>
@@ -1300,7 +1300,7 @@ public static partial class SpheneUI
             ImGui.SetCursorScreenPos(restore);
             if (truncated)
             {
-                const string moreLabel = "More…";
+                const string moreLabel = "More...";
                 var morePos = new Vector2(min.X + pad,
                     textMin.Y + previewH + gap);
                 ImGui.SetCursorScreenPos(morePos);
@@ -1738,7 +1738,7 @@ public static partial class SpheneUI
                     edit.TagInputFocusPending = false;
                 }
                 var buf = edit.NewTagBuffer;
-                var commit = ImGui.InputTextWithHint("##hero-newtag", "New tag…", ref buf, 30,
+                var commit = ImGui.InputTextWithHint("##hero-newtag", "New tag...", ref buf, 30,
                         ImGuiInputTextFlags.EnterReturnsTrue)
                     || ImGui.IsItemDeactivatedAfterEdit();
                 edit.NewTagBuffer = buf;

@@ -21,7 +21,7 @@ public static class EntityChipList
     public static ApiController? Api { get; set; }
 
     /// <summary>Host navigation hook: receives the resolved <c>NavKey</c>
-    /// (<c>user:{uid}</c>, <c>community:{gid}</c>, <c>community:{gid}:post:{id}</c>…)
+    /// (<c>user:{uid}</c>, <c>community:{gid}</c>, <c>community:{gid}:post:{id}</c>...)
     /// and maps it onto <c>HubLocation</c>.</summary>
     public static Action<string>? Navigate { get; set; }
 

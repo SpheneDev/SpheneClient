@@ -39,7 +39,7 @@ internal static class SupporterPerks
     /// <summary>
     /// Renders the perk rows: tinted icon plate + bold title + muted
     /// description. Pass <paramref name="max"/> to show only the first perks
-    /// (promo teasers); a "…and more" line is appended when truncated.
+    /// (promo teasers); a "...and more" line is appended when truncated.
     /// </summary>
     public static void DrawList(int max = int.MaxValue)
     {
@@ -55,7 +55,7 @@ internal static class SupporterPerks
         if (count < All.Count)
         {
             SpheneUI.Layout.Space(SpheneUI.Spacing.X8);
-            SpheneUI.Text.Muted($"…and {All.Count - count} more · see the Supporter page for the full list.");
+            SpheneUI.Text.Muted($"...and {All.Count - count} more · see the Supporter page for the full list.");
         }
     }
 

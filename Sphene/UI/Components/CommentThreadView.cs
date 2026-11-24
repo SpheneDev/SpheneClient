@@ -293,7 +293,7 @@ public sealed class CommentThreadView
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         if (st.Loading && st.Roots.Count == 0)
         {
-            SpheneUI.Text.Muted("Loading comments…");
+            SpheneUI.Text.Muted("Loading comments...");
         }
         else if (st.Roots.Count == 0)
         {

@@ -105,7 +105,7 @@ public class EditProfileUi
                     ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                     var labelW = MathF.Max(140f * scale,
                         SpheneUI.Controls.BoundedAvailX() - iconW - SpheneUI.Spacing.X4.Scaled);
-                    _ = SpheneUI.Controls.InputTextWithHint("##label", "Label…", ref link.Label, 60,
+                    _ = SpheneUI.Controls.InputTextWithHint("##label", "Label...", ref link.Label, 60,
                         trailingWidth: iconW, preferredWidth: labelW);
                     ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                     if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash))

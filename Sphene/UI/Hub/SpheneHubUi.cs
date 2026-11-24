@@ -2955,7 +2955,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 : announcements.Count > 0
                     ? $"{announcements.Count} announcements"
                     : _announcements.IsLoading
-                        ? "Checking…"
+                        ? "Checking..."
                         : _apiController.IsConnected ? "All caught up" : "Offline";
 
         (FontAwesomeIcon Icon, Vector4 Tint, string Title, string Sub,
@@ -3768,7 +3768,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var avail = ImGui.GetContentRegionAvail().X;
         ImGui.SetNextItemWidth(MathF.Min(searchW, avail - addW
             - SpheneUI.Spacing.X8.Scaled));
-        ImGui.InputTextWithHint("##friendsearch", "Search friends by name…",
+        ImGui.InputTextWithHint("##friendsearch", "Search friends by name...",
             ref _friendSearch, 64);
         ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
         if (SpheneUI.Controls.SegmentButton("Add Friend##addfr",
@@ -4879,7 +4879,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
             if (displayTitle.Length != ann.Title.Length)
             {
-                displayTitle = displayTitle.TrimEnd() + "…";
+                displayTitle = displayTitle.TrimEnd() + "...";
             }
             dl.AddText(font, titleSize, new Vector2(tx, titleY), white, displayTitle);
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);
@@ -4983,7 +4983,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
         SpheneUI.Text.Muted("Body · markdown");
         SpheneUI.Text.Muted(
-            "**bold**  *italic*  __underline__  ~~strike~~  ||spoiler||  `code`  ``` block  | table |  :::callout info  :::side img=\"…\" side=\"left\"");
+            "**bold**  *italic*  __underline__  ~~strike~~  ||spoiler||  `code`  ``` block  | table |  :::callout info  :::side img=\"...\" side=\"left\"");
         SpheneUI.Controls.InputTextMultiline("##ann-body", ref _editorBody,
             16000, new Vector2(availW, 200f * scale), preferredWidth: availW);
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
@@ -5049,7 +5049,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         if (busy)
         {
             ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
-            SpheneUI.Text.Muted("Saving…");
+            SpheneUI.Text.Muted("Saving...");
         }
     }
 
@@ -5481,7 +5481,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// <summary>Cursor-paged stream tail, Twitter-style: an invisible
     /// sentinel auto-loads the next page once it scrolls into view - the
     /// store dedups concurrent page fetches. While a page is in flight a
-    /// muted "Loading…" hint keeps the spot; a failed page swaps in a
+    /// muted "Loading..." hint keeps the spot; a failed page swaps in a
     /// warning + retry link (explicit click only - never an auto-retry
     /// loop against a dead backend).</summary>
     private static void DrawFeedLoadTail(string id, bool hasMore, bool loading,
@@ -5506,7 +5506,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         }
         if (loading)
         {
-            SpheneUI.Text.Muted("Loading…");
+            SpheneUI.Text.Muted("Loading...");
             return;
         }
         ImGui.Dummy(new Vector2(1f, ImGui.GetTextLineHeightWithSpacing()));
@@ -5670,7 +5670,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         if (_communityFeed.IsLoading)
         {
             ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-            SpheneUI.Text.Muted("refreshing…");
+            SpheneUI.Text.Muted("refreshing...");
         }
     }
 
@@ -7438,7 +7438,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             SpheneUI.Text.Muted($"Verify {pair.UserData.AliasOrUID}");
             if (!task.IsCompleted)
             {
-                SpheneUI.Text.Muted("Resolving encryption keys…");
+                SpheneUI.Text.Muted("Resolving encryption keys...");
             }
             else if (number == null)
             {
@@ -8006,7 +8006,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var rowH = ImGui.GetFrameHeight();
         var saveW = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Check).X;
         ImGui.SetCursorScreenPos(min);
-        SpheneUI.Controls.InputTextWithHint("##photo-edit-cap", "Caption…",
+        SpheneUI.Controls.InputTextWithHint("##photo-edit-cap", "Caption...",
             ref _photoEditCaption, 200, preferredWidth: w - saveW - gap);
         ImGui.SetCursorScreenPos(new Vector2(min.X + w - saveW, min.Y));
         if (_photoEditSaving)
@@ -8017,7 +8017,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         {
             _ = SavePhotoEdit(img);
         }
-        SpheneUI.AttachTooltip(_photoEditSaving ? "Saving…" : "Save caption & album");
+        SpheneUI.AttachTooltip(_photoEditSaving ? "Saving..." : "Save caption & album");
         var row2Y = min.Y + rowH + 8f * scale;
         ImGui.SetCursorScreenPos(new Vector2(min.X, row2Y));
         var me = new UserData(_apiController.UID);
@@ -8497,7 +8497,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     {
         try
         {
-            _galleryUploadPhase = "Uploading photo…";
+            _galleryUploadPhase = "Uploading photo...";
             var me = new UserData(_apiController.UID);
             var result = await _apiController.UserUpsertProfileGalleryImage(
                 new UserProfileGalleryImageUpdateDto(me, 0, prepared.Base64,
@@ -8564,7 +8564,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var scale = SpheneUI.Scale;
         var gap = SpheneUI.Spacing.X8.Scaled;
         SpheneUI.Text.SectionHeader("Photo albums");
-        SpheneUI.Controls.InputTextWithHint("##own-album-new", "New album name…",
+        SpheneUI.Controls.InputTextWithHint("##own-album-new", "New album name...",
             ref _ownAlbumName, 80, preferredWidth: 220f * scale);
         ImGui.SameLine(0f, gap);
         using (ImRaii.Disabled(string.IsNullOrWhiteSpace(_ownAlbumName)))
@@ -8585,7 +8585,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 {
                     if (_ownAlbumEditId == album.Id)
                     {
-                        SpheneUI.Controls.InputTextWithHint("##own-album-ren", "Album name…",
+                        SpheneUI.Controls.InputTextWithHint("##own-album-ren", "Album name...",
                             ref _ownAlbumEditName, 80, preferredWidth: 180f * scale);
                         ImGui.SameLine(0f, gap);
                         if (SpheneUI.Icons.Button(FontAwesomeIcon.Check))
@@ -8889,7 +8889,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         void EditorBody(bool stacked)
         {
             var chronicleTitle = composer.Title;
-            if (SpheneUI.Controls.InputTextWithHint("##chronicle-title", "Title (optional)…",
+            if (SpheneUI.Controls.InputTextWithHint("##chronicle-title", "Title (optional)...",
                     ref chronicleTitle, 200, preferredWidth: -1f))
             {
                 composer.Title = chronicleTitle;
@@ -8956,7 +8956,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             SpheneUI.Text.Colored(error, SpheneUI.Palette.Warning);
             ImGui.SameLine(0f, SpheneUI.Spacing.X16.Scaled);
         }
-        var saveLabel = _chronicleSaving ? "Saving…"
+        var saveLabel = _chronicleSaving ? "Saving..."
             : editing ? "Save changes"
             : composer.Draft ? "Save draft" : "Publish";
         // Measure with the REAL button width formula (SegAutoWidth -
@@ -9464,7 +9464,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         if (_discover.DirectoryLoading)
         {
-            SpheneUI.Text.Muted("Loading public communities…");
+            SpheneUI.Text.Muted("Loading public communities...");
             return;
         }
         if (_discover.DirectoryError)
@@ -10564,7 +10564,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var community = CommunityFor(group.Group.GID);
         if (community == null)
         {
-            SpheneUI.Text.Muted("Loading events…");
+            SpheneUI.Text.Muted("Loading events...");
             return;
         }
         var manageEdit = BuildManageEdit(group, community);
@@ -11228,7 +11228,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 // EnterReturnsTrue: changed fires once on submit, not per edit.
                 var submitted = SpheneUI.Controls.InputTextWithHint("##query",
-                    "Search public profiles by name…", ref _publicSearchInput, 64,
+                    "Search public profiles by name...", ref _publicSearchInput, 64,
                     ImGuiInputTextFlags.EnterReturnsTrue);
                 ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
                 // A changed query may supersede a still-flying request - only a

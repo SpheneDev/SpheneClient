@@ -13,7 +13,7 @@ public static partial class SpheneUI
         /// Standard empty state: a large muted glyph over a title and an
         /// optional one-line hint, all centered in the available width, plus
         /// an optional call to action. Replaces bare
-        /// <c>Text.Muted("No …")</c> dead ends  ·  every list, tab and panel
+        /// <c>Text.Muted("No ...")</c> dead ends  ·  every list, tab and panel
         /// that can be empty should explain itself and offer the next step.
         /// </summary>
         /// <param name="icon">Glyph shown above the title.</param>

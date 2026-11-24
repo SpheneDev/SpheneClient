@@ -311,7 +311,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             }
 
             Mediator.Publish(new PenumbraModTransferProgressMessage(notification,
-                $"Preparing download for '{modFolderName}' from {GetSenderDisplayName(notification)}…",
+                $"Preparing download for '{modFolderName}' from {GetSenderDisplayName(notification)}...",
                 null));
 
             using var manager = _fileDownloadManagerFactory.Create();
@@ -333,8 +333,8 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
                 }
 
                 var status = overlay == null
-                    ? $"Downloading '{modFolderName}'…"
-                    : $"Downloading '{modFolderName}'… ({overlay})";
+                    ? $"Downloading '{modFolderName}'..."
+                    : $"Downloading '{modFolderName}'... ({overlay})";
 
                 Mediator.Publish(new PenumbraModTransferProgressMessage(notification, status, percent));
             });
@@ -383,7 +383,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
             }
 
             Mediator.Publish(new PenumbraModTransferProgressMessage(notification,
-                $"Download completed. Installing '{modFolderName}'…",
+                $"Download completed. Installing '{modFolderName}'...",
                 0.5f));
 
             var progress = new Progress<(string, int, int)>(tuple =>
@@ -398,7 +398,7 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
                 }
 
                 var status = string.IsNullOrWhiteSpace(stepText)
-                    ? $"Installing '{modFolderName}'… ({current}/{total})"
+                    ? $"Installing '{modFolderName}'... ({current}/{total})"
                     : stepText;
 
                 Mediator.Publish(new PenumbraModTransferProgressMessage(notification, status, percent));

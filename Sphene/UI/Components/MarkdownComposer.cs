@@ -56,7 +56,7 @@ public sealed class MarkdownComposer
 
     /// <summary>Searchable mention candidate - the label is the user's
     /// recognizable alias, the detail disambiguates the source
-    /// ("Syncshell member", "Friend", …); the uid is the stored identity.</summary>
+    /// ("Syncshell member", "Friend", ...); the uid is the stored identity.</summary>
     public sealed record MentionCandidate(string Uid, string Label, string Detail);
 
     /// <summary>Host-scoped member/friend candidates for `@` mentions - set by
@@ -385,7 +385,7 @@ public sealed class MarkdownComposer
     }
 
     private static string SanitizeForLog(string text)
-        => text.Length <= 40 ? text.Replace("\n", "\\n") : text[..40].Replace("\n", "\\n") + "…";
+        => text.Length <= 40 ? text.Replace("\n", "\\n") : text[..40].Replace("\n", "\\n") + "...";
 
     /// <summary>Inserts <paramref name="insert"/> at the caret or replaces the
     /// selection; the caret lands at <paramref name="caretOffsetInInsert"/>
@@ -547,7 +547,7 @@ public sealed class MarkdownComposer
     }
 
     /// <summary>Size presets - each wraps the selection in
-    /// <c>&lt;size=N&gt;…&lt;/size&gt;</c> (or inserts an empty pair).</summary>
+    /// <c>&lt;size=N&gt;...&lt;/size&gt;</c> (or inserts an empty pair).</summary>
     private void DrawSizeFlyout(ref string body)
     {
         SpheneUI.Text.Muted("Text size");
@@ -563,7 +563,7 @@ public sealed class MarkdownComposer
     }
 
     /// <summary>Preset swatches plus a full picker - picks wrap the selection
-    /// in <c>&lt;color=#rrggbb&gt;…&lt;/color&gt;</c>.</summary>
+    /// in <c>&lt;color=#rrggbb&gt;...&lt;/color&gt;</c>.</summary>
     private void DrawColorFlyout(ref string body)
     {
         SpheneUI.Text.Muted("Text color");
@@ -616,7 +616,7 @@ public sealed class MarkdownComposer
             SpheneUI.Text.Muted("Image picking is unavailable in this surface.");
             return;
         }
-        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Upload, "Choose image…"))
+        if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Upload, "Choose image..."))
         {
             _uploadTask ??= ImagePicker();
         }
@@ -635,7 +635,7 @@ public sealed class MarkdownComposer
         }
         if (_uploadTask is { IsCompleted: false })
         {
-            SpheneUI.Text.Muted("Reading image…");
+            SpheneUI.Text.Muted("Reading image...");
         }
     }
 

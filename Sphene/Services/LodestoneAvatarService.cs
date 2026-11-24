@@ -205,7 +205,7 @@ public partial class LodestoneAvatarService : DisposableMediatorSubscriberBase, 
             Match? urlMatch = null;
             foreach (Match candidate in matches)
             {
-                // prefer the full-body portrait (…_fl0) but accept any image
+                // prefer the full-body portrait (..._fl0) but accept any image
                 if (urlMatch == null
                     || candidate.Value.Contains("_fl0", StringComparison.OrdinalIgnoreCase))
                 {

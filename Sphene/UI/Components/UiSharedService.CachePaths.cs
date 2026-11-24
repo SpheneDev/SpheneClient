@@ -314,7 +314,7 @@ public partial class UiSharedService
             }
             else
             {
-                SpheneUI.Controls.ProgressBarIndeterminate(barSize, "Collecting files…");
+                SpheneUI.Controls.ProgressBarIndeterminate(barSize, "Collecting files...");
             }
 
             if (stored > 0)

@@ -184,7 +184,7 @@ public sealed class ChangelogService
     /// gallery). Relative paths resolve against the changelog repo; a leading
     /// "repo/" prefix (repo-folder style) is stripped. Cached per URL.</summary>
     /// <summary>Base URL for repo-relative changelog assets - derived from
-    /// the changelog URL's directory ("…/changelogs/" → repo root).</summary>
+    /// the changelog URL's directory (".../changelogs/" → repo root).</summary>
     private static string ResolveImageUrl(string path)
     {
         if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)

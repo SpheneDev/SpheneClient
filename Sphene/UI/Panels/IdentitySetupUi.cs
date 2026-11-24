@@ -137,7 +137,7 @@ public class IdentitySetupUi : WindowMediatorSubscriberBase
                 if (_checking
                     || !string.Equals(_checkedAlias, current, StringComparison.OrdinalIgnoreCase))
                 {
-                    SpheneUI.Text.Muted("Checking…");
+                    SpheneUI.Text.Muted("Checking...");
                 }
                 else
                 {

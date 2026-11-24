@@ -20,7 +20,7 @@ namespace Sphene.UI.Design;
 /// Walks a Markdig inline tree and emits styled, word-wrap-aware ImGui items.
 /// Styles compose through a copy-down <see cref="SpanStyle"/> stack instead of
 /// per-combination render paths, so any emphasis nesting (bold inside italic
-/// inside a link …) resolves independently. Bold is faked by a second
+/// inside a link ...) resolves independently. Bold is faked by a second
 /// draw-pass since ImGui ships a single face; italic is a synthetic oblique -
 /// neither the default ImGui font nor the shipped Lato-Regular has an italic
 /// face, so emitted glyph vertices are sheared in the draw list instead.
@@ -393,7 +393,7 @@ internal sealed class MarkdownInlineWriter
     }
 
     private static string TrimTooltip(string text)
-        => text.Length > 300 ? string.Concat(text.AsSpan(0, 300), "…") : text;
+        => text.Length > 300 ? string.Concat(text.AsSpan(0, 300), "...") : text;
 
     /// <summary>Splits text into words and emits each via <see cref="EmitWord"/>, tracking runs of whitespace as pending space width.</summary>
     private void EmitText(string text, SpanStyle style)

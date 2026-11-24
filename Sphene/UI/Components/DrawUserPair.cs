@@ -1220,7 +1220,7 @@ public class DrawUserPair : IMediatorSubscriber, IDisposable
             return value;
         }
 
-        return value[..Math.Max(0, maxLength - 1)] + "…";
+        return value[..Math.Max(0, maxLength - 1)] + "...";
     }
 
     private static string FormatTriangleCountCompact(long triangleCount)

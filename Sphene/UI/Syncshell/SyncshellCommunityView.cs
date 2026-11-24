@@ -904,7 +904,7 @@ internal static partial class SyncshellCommunityView
         var rowH = ImGui.GetFrameHeight();
         var saveW = SpheneUI.Icons.ButtonSize(FontAwesomeIcon.Check).X;
         ImGui.SetCursorScreenPos(min);
-        SpheneUI.Controls.InputTextWithHint("##photo-edit-cap", "Caption…",
+        SpheneUI.Controls.InputTextWithHint("##photo-edit-cap", "Caption...",
             ref page.ViewerEditCaption, 200, preferredWidth: w - saveW - gap);
         ImGui.SetCursorScreenPos(new Vector2(min.X + w - saveW, min.Y));
         if (page.ViewerEditSaving)
@@ -916,7 +916,7 @@ internal static partial class SyncshellCommunityView
             CommitPhotoEdit(img, page, ops);
         }
         SpheneUI.AttachTooltip(page.ViewerEditSaving
-            ? "Saving…" : "Save caption, album & visibility");
+            ? "Saving..." : "Save caption, album & visibility");
 
         var row2Y = min.Y + rowH + 8f * scale;
         ImGui.SetCursorScreenPos(new Vector2(min.X, row2Y));
@@ -2852,7 +2852,7 @@ internal static partial class SyncshellCommunityView
             if (hasAbout)
             {
                 var plain = MarkdownRenderer.ToPlainText(profile.Description!);
-                var cut = plain.Length > 220 ? plain[..220].TrimEnd() + "…" : plain;
+                var cut = plain.Length > 220 ? plain[..220].TrimEnd() + "..." : plain;
                 Widget("about-teaser", "About", FontAwesomeIcon.Info, null, accent, () =>
                 {
                     SpheneUI.Text.MutedWrapped(cut);
@@ -3242,7 +3242,7 @@ internal static partial class SyncshellCommunityView
         }
         ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
         SpheneUI.Controls.InputTextWithHint("##ev-filter-" + (page.GetHashCode() & 0xffff),
-            "Filter events…", ref page.EventFilter, 100,
+            "Filter events...", ref page.EventFilter, 100,
             preferredWidth: 170f * SpheneUI.Scale);
     }
 
@@ -3424,7 +3424,7 @@ internal static partial class SyncshellCommunityView
                 return;
         }
 
-        SpheneUI.Controls.InputTextWithHint("Label##ec-dlabel", "Label (optional)…",
+        SpheneUI.Controls.InputTextWithHint("Label##ec-dlabel", "Label (optional)...",
             ref composer.DestLabel, EventDestinationValidator.MaxDisplayLabelLength,
             preferredWidth: 340f * scale);
 
@@ -3470,7 +3470,7 @@ internal static partial class SyncshellCommunityView
 
         if (composer.PropertyCandidatesLoading)
         {
-            SpheneUI.Text.Muted("Resolving bound properties…");
+            SpheneUI.Text.Muted("Resolving bound properties...");
             return;
         }
         if (travel.LoadBoundLocations == null)
@@ -3492,7 +3492,7 @@ internal static partial class SyncshellCommunityView
             initialSelectedItem: composer.DestPropertyIndex >= 0
                 && composer.DestPropertyIndex < items.Length
                     ? items[composer.DestPropertyIndex]
-                    : "Pick a property…",
+                    : "Pick a property...",
             preferredWidth: 340f * scale);
         if (candidates.Count > 1 && composer.DestPropertyIndex < 0)
         {
@@ -3714,7 +3714,7 @@ internal static partial class SyncshellCommunityView
 
         if (page.TravelLoading && state == null)
         {
-            SpheneUI.Text.Muted("Checking travel availability…");
+            SpheneUI.Text.Muted("Checking travel availability...");
         }
         else
         {
@@ -3736,7 +3736,7 @@ internal static partial class SyncshellCommunityView
                         ?? "Lifestream is busy - try again in a moment.");
                     break;
                 case LifestreamTravelState.TravelRequested:
-                    SpheneUI.Text.Muted("Travel in progress…");
+                    SpheneUI.Text.Muted("Travel in progress...");
                     break;
                 case LifestreamTravelState.TravelFailed:
                     SpheneUI.Text.Colored(status?.Detail ?? "Travel failed.",
@@ -4375,7 +4375,7 @@ internal static partial class SyncshellCommunityView
     {
         var scale = SpheneUI.Scale;
         SpheneUI.Text.SectionHeader(composer.EditId == 0 ? "New post" : "Edit post");
-        SpheneUI.Controls.InputTextWithHint("##nc-title", "Title…", ref composer.Title, 200,
+        SpheneUI.Controls.InputTextWithHint("##nc-title", "Title...", ref composer.Title, 200,
             preferredWidth: 340f * scale);
         NewsBodyComposer.MentionProvider = () => edit.MentionCandidates?.Invoke() ?? [];
         NewsBodyComposer.Draw("##nc-body", ref composer.Body, 8000, 100f * scale);
@@ -4551,7 +4551,7 @@ internal static partial class SyncshellCommunityView
                 ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                 var labelW = MathF.Max(140f * scale,
                     SpheneUI.Controls.BoundedAvailX() - iconW - SpheneUI.Spacing.X4.Scaled);
-                _ = SpheneUI.Controls.InputTextWithHint("##label", "Label…", ref link.Label, 60,
+                _ = SpheneUI.Controls.InputTextWithHint("##label", "Label...", ref link.Label, 60,
                     trailingWidth: iconW, preferredWidth: labelW);
                 ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                 if (SpheneUI.Icons.Button(FontAwesomeIcon.Trash))
@@ -4774,7 +4774,7 @@ internal static partial class SyncshellCommunityView
 
                 if (composer.DestKind != 0)
                 {
-                    SpheneUI.Controls.InputTextWithHint("##cl-label", "Label (optional)…",
+                    SpheneUI.Controls.InputTextWithHint("##cl-label", "Label (optional)...",
                         ref composer.DestLabel, EventDestinationValidator.MaxDisplayLabelLength,
                         preferredWidth: 340f * scale);
                 }
@@ -5061,7 +5061,7 @@ internal static partial class SyncshellCommunityView
                     }
 
                     SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                    _ = SpheneUI.Controls.InputTextWithHint("##newrole", "New role…",
+                    _ = SpheneUI.Controls.InputTextWithHint("##newrole", "New role...",
                         ref page.NewRoleName, 60, preferredWidth: 120f * scale);
                     ImGui.SameLine(0f, 6f * scale);
                     using (ImRaii.Disabled(string.IsNullOrWhiteSpace(page.NewRoleName)))
@@ -5116,7 +5116,7 @@ internal static partial class SyncshellCommunityView
                         }
                         ImGui.SameLine(0f, 6f * scale);
                         var name = selected.Name;
-                        if (SpheneUI.Controls.InputTextWithHint("##rolename", "Role name…", ref name, 60,
+                        if (SpheneUI.Controls.InputTextWithHint("##rolename", "Role name...", ref name, 60,
                                 preferredWidth: 180f * scale)
                             && !string.IsNullOrWhiteSpace(name)
                             && !string.Equals(name, selected.Name, StringComparison.Ordinal))
@@ -5344,7 +5344,7 @@ internal static partial class SyncshellCommunityView
                 SpheneUI.Icons.Icon(FontAwesomeIcon.Images, accent);
                 ImGui.SameLine(0f, 6f * scale);
                 var name = draft?.Name ?? album.Name;
-                if (SpheneUI.Controls.InputTextWithHint("##albumname", "Album name…", ref name, 100,
+                if (SpheneUI.Controls.InputTextWithHint("##albumname", "Album name...", ref name, 100,
                         preferredWidth: 150f * scale))
                 {
                     EnsureDraft().Name = name;
@@ -5420,7 +5420,7 @@ internal static partial class SyncshellCommunityView
                 {
                     SpheneUI.Icons.Icon(FontAwesomeIcon.Spinner, SpheneUI.Colors.TextMuted);
                     ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-                    SpheneUI.Text.Muted("Saving…");
+                    SpheneUI.Text.Muted("Saving...");
                 }
                 else
                 {
@@ -5518,7 +5518,7 @@ internal static partial class SyncshellCommunityView
         {
             SpheneUI.Layout.Separator();
         }
-        _ = SpheneUI.Controls.InputTextWithHint("##newalbum", "New album name…",
+        _ = SpheneUI.Controls.InputTextWithHint("##newalbum", "New album name...",
             ref page.NewAlbumName, 100, preferredWidth: 150f * scale);
         ImGui.SameLine(0f, SpheneUI.Spacing.X8.Scaled);
         using (ImRaii.Disabled(string.IsNullOrWhiteSpace(page.NewAlbumName)))
