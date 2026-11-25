@@ -8,27 +8,26 @@ namespace Sphene.UI.Design;
 public static partial class SpheneUI
 {
     /// <summary>
-    /// Application-wide layout density profiles. The active profile is
-    /// resolved per window from its actual unscaled size (never the monitor
-    /// resolution) unless the user pins one in settings · see
+    /// Application-wide layout density profile. Sphene runs a single
+    /// profile - <see cref="Compact"/> - in every window · see
     /// <see cref="Density"/>.
     /// </summary>
     public enum DensityProfile
     {
-        /// <summary>Tight rows and padding for small windows / short viewports.</summary>
+        /// <summary>The one active profile: tight rows and padding everywhere.</summary>
         Compact,
 
-        /// <summary>Default spacing for typical window dimensions.</summary>
+        /// <summary>Retired - kept so legacy switch arms stay valid; never resolved.</summary>
         Balanced,
 
-        /// <summary>Generous spacing for large windows.</summary>
+        /// <summary>Retired - kept so legacy switch arms stay valid; never resolved.</summary>
         Comfortable,
     }
 
     /// <summary>
-    /// The density scope stack and profile resolution. Pushed once per window
-    /// by the window base class right after <see cref="Theme.WindowScope()"/>,
-    /// so <see cref="Current"/> is valid inside every design-system draw.
+    /// The density scope stack. Pushed once per window by the window base
+    /// class right after <see cref="Theme.WindowScope()"/>, so
+    /// <see cref="Current"/> is valid inside every design-system draw.
     /// Semantic <see cref="Spacing"/> aliases and <see cref="Metrics"/>
     /// values remap to neighbor grid steps per profile - raw grid steps never
     /// move, so the lint stays honest.
@@ -41,21 +40,12 @@ public static partial class SpheneUI
         /// <summary>Style-var multiplier applied in <see cref="DensityProfile.Comfortable"/>.</summary>
         public const float ComfortableFactor = 1.15f;
 
-        // Auto-resolution thresholds in unscaled window units. Values below
-        // Compact collapse the profile; Comfortable needs BOTH dimensions
-        // large so a wide-but-short window never inflates vertically.
-        private const float CompactMaxHeight = 640f;
-        private const float CompactMaxWidth = 760f;
-        private const float ComfortableMinHeight = 880f;
-        private const float ComfortableMinWidth = 1400f;
-
         private static readonly List<DensityProfile> Scopes = new();
-        private static Func<DensityProfile?>? _overrideProvider;
 
-        /// <summary>The active profile · <see cref="DensityProfile.Balanced"/> outside any scope.</summary>
-        public static DensityProfile Current => Scopes.Count > 0 ? Scopes[^1] : DensityProfile.Balanced;
+        /// <summary>The active profile · <see cref="DensityProfile.Compact"/>.</summary>
+        public static DensityProfile Current => Scopes.Count > 0 ? Scopes[^1] : DensityProfile.Compact;
 
-        /// <summary>The active profile's style-var multiplier (1 in Balanced).</summary>
+        /// <summary>The active profile's style-var multiplier.</summary>
         public static float Factor => Current switch
         {
             DensityProfile.Compact => CompactFactor,
@@ -63,36 +53,18 @@ public static partial class SpheneUI
             _ => 1f,
         };
 
-        /// <summary>True in <see cref="DensityProfile.Compact"/>.</summary>
+        /// <summary>True in <see cref="DensityProfile.Compact"/> - always.</summary>
         public static bool IsCompact => Current == DensityProfile.Compact;
 
-        /// <summary>True in <see cref="DensityProfile.Comfortable"/>.</summary>
+        /// <summary>True in <see cref="DensityProfile.Comfortable"/> - never.</summary>
         public static bool IsComfortable => Current == DensityProfile.Comfortable;
 
         /// <summary>
-        /// Picks the profile for an unscaled window size. A manual override
-        /// (when set via <see cref="SetOverrideProvider"/>) wins over the
-        /// size-based result.
+        /// Resolves the profile for a window. Sphene only uses
+        /// <see cref="DensityProfile.Compact"/>, regardless of window size.
         /// </summary>
         public static DensityProfile Resolve(Vector2 windowSizeUnscaled)
-        {
-            var manual = _overrideProvider?.Invoke();
-            if (manual.HasValue)
-            {
-                return manual.Value;
-            }
-            if (windowSizeUnscaled.Y <= CompactMaxHeight
-                || windowSizeUnscaled.X <= CompactMaxWidth)
-            {
-                return DensityProfile.Compact;
-            }
-            if (windowSizeUnscaled.Y >= ComfortableMinHeight
-                && windowSizeUnscaled.X >= ComfortableMinWidth)
-            {
-                return DensityProfile.Comfortable;
-            }
-            return DensityProfile.Balanced;
-        }
+            => DensityProfile.Compact;
 
         /// <summary>
         /// Resolves the profile for the window currently being drawn and
@@ -128,13 +100,6 @@ public static partial class SpheneUI
                 Scopes.RemoveAt(Scopes.Count - 1);
             }
         }
-
-        /// <summary>
-        /// Registers the settings override · wired once by
-        /// <c>UiSharedService</c> so the design system stays config-free.
-        /// </summary>
-        internal static void SetOverrideProvider(Func<DensityProfile?> provider)
-            => _overrideProvider = provider;
 
         private sealed class DensityScope : ThemeStyleScope
         {

@@ -163,8 +163,6 @@ public sealed class MarkdownComposer
         if (!previewing)
             body = HandleUndoKeys(body);
         var emoji = SpheneUI.EmojiPickerHook;
-        var emojiW = PlainText && emoji != null && !previewing
-            ? ImGui.GetFrameHeight() + SpheneUI.Spacing.X4.Scaled : 0f;
         if (previewing)
         {
             DrawPreviewPane(body, h);
@@ -172,9 +170,6 @@ public sealed class MarkdownComposer
         else
         {
             var flags = ImGuiInputTextFlags.CallbackAlways;
-            var inputW = emojiW > 0f
-                ? MathF.Max(60f * scale, ImGui.GetContentRegionAvail().X - emojiW)
-                : -1f;
             // 16-bit ImWchar buffer: emoji ride as placeholders, the model keeps real text.
             // The id carries the edit epoch - a managed splice bumps it, the
             // widget state re-initializes from the edited text instead of
@@ -187,8 +182,12 @@ public sealed class MarkdownComposer
                 ImGui.SetKeyboardFocusHere();
                 _refocus = false;
             }
+            // The input owns the full row width (-1 fills) - PlainText
+            // (comment) hosts draw the emoji trigger in their own action row
+            // via DrawEmojiTrigger, next to submit/cancel; rich-text hosts
+            // keep the toolbar trigger.
             SpheneUI.Controls.InputTextMultiline(label + "##me" + _editEpoch, ref view, maxLength,
-                new Vector2(inputW, h), flags, OnInputCallback, ref _edit,
+                new Vector2(-1f, h), flags, OnInputCallback, ref _edit,
                 encodedEmoji: _edit.Codec);
             _inputWasActive = ImGui.IsItemActive();
             var expanded = _edit.Codec.Expand(view);
@@ -202,11 +201,6 @@ public sealed class MarkdownComposer
             _edit.ModelCaret = _edit.Selection.Caret >= 0
                 ? _edit.Codec.Expand(view[..Math.Min(_edit.Selection.Caret, view.Length)]).Length
                 : -1;
-            if (emojiW > 0f)
-            {
-                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
-                emoji!.TriggerButton($"emoji-{_id}", QueueInsertText);
-            }
             if (body.Length > maxLength - maxLength / 10)
             {
                 SpheneUI.Text.Muted($"{body.Length}/{maxLength}");
@@ -242,6 +236,13 @@ public sealed class MarkdownComposer
     {
         _pendingInserts.Enqueue(insert);
     }
+
+    /// <summary>Draws the emoji-picker trigger for hosts that place it in
+    /// their own action row (PlainText comment composers: next to the
+    /// submit/cancel buttons) instead of inline right of the input. The
+    /// flyout itself renders in <see cref="Draw"/>.</summary>
+    public void DrawEmojiTrigger()
+        => SpheneUI.EmojiPickerHook?.TriggerButton($"emoji-{_id}", QueueInsertText);
 
     private string ApplySplice(string body, (string View, int Caret) edit)
     {

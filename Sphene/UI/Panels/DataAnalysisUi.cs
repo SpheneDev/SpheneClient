@@ -1044,14 +1044,18 @@ public class DataAnalysisUi : WindowMediatorSubscriberBase
 
         // The frame body is one invisible button · full-row hit zone, except
         // the nav reserve on the right - submitted first it would claim the
-        // hover id and swallow every click meant for Files/Textures.
+        // hover id and swallow every click meant for Files/Textures. The
+        // painted frame still spans the full row: fMax comes from frameW, not
+        // from the shrunken hit zone, so the card reaches the content's right
+        // edge and the nav buttons dock there without overlapping the hit
+        // zone (an overlap would let the frame swallow their clicks).
         var frameW = MathF.Max(120f * scale, SpheneUI.Controls.BoundedAvailX());
         ImGui.PushID(entry.Label + entry.SubLabel);
+        var fMin = ImGui.GetCursorScreenPos();
+        var fMax = fMin + new Vector2(frameW, frameH);
         var frameClicked = ImGui.InvisibleButton("##unitframe",
             new Vector2(MathF.Max(0f, frameW - navW - pad - 6f * scale), frameH));
         var frameHovered = ImGui.IsItemHovered();
-        var fMin = ImGui.GetItemRectMin();
-        var fMax = ImGui.GetItemRectMax();
         var drawList = ImGui.GetWindowDrawList();
         // SetCursorScreenPos for the nav buttons moves the layout cursor into
         // the frame · restore it afterwards so the next row doesn't overlap.

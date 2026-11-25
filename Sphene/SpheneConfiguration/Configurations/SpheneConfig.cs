@@ -96,10 +96,6 @@ public class SpheneConfig : ISpheneConfiguration
     /// requests, transfers or updates are pending.</summary>
     public bool ShowIconNotificationBubble { get; set; } = true;
 
-    /// <summary>Application-wide layout density override · Auto adapts to each
-    /// window's size, the other modes pin Compact/Balanced/Comfortable.</summary>
-    public LayoutDensityMode LayoutDensity { get; set; } = LayoutDensityMode.Auto;
-
     /// <summary>
     /// One-shot notification ids the user already saw · server info /
     /// seasonal notices land in the inbox once, not on every restart.

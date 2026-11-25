@@ -62,6 +62,13 @@ internal sealed class MarkdownInlineWriter
     private bool _lastWasChip;
     private float _lastChipEndX;
     private float _lastChipY = -1f;
+    // End of the current underline run: while consecutive words on one line
+    // carry underline/link styling in the same color, the inter-word gap is
+    // underlined too, so an underlined sentence reads as one solid line
+    // instead of being interrupted between words. -1 = no open run.
+    private float _underlineRunEndX = -1f;
+    private float _underlineRunY = -1f;
+    private uint _underlineRunColor;
 
     public MarkdownInlineWriter(Action<string, string>? imageBlock)
     {
@@ -88,6 +95,7 @@ internal sealed class MarkdownInlineWriter
         RightBound = rightBound;
         _pendingSpaces = 0;
         _lastWasChip = false;
+        _underlineRunEndX = -1f;
     }
 
     public void NewLine()
@@ -97,6 +105,7 @@ internal sealed class MarkdownInlineWriter
         _lineHeight = ImGui.GetTextLineHeight();
         _pendingSpaces = 0;
         _lastWasChip = false;
+        _underlineRunEndX = -1f;
     }
 
     public void Write(ContainerInline? container, SpanStyle style)
@@ -477,6 +486,7 @@ internal sealed class MarkdownInlineWriter
         _nextX += emojiSize;
         _lineHeight = MathF.Max(_lineHeight, lineH);
         _lastWasChip = false;
+        _underlineRunEndX = -1f; // emoji atom carries no underline - breaks the run
     }
 
     private static Vector4 EffectiveColor(in SpanStyle s)
@@ -571,6 +581,7 @@ internal sealed class MarkdownInlineWriter
                 if (style.SpoilerKey != null && ImGui.IsItemClicked(ImGuiMouseButton.Left))
                     MarkdownRenderer.ToggleSpoiler(style.SpoilerKey);
                 _lastWasChip = false;
+                _underlineRunEndX = -1f;
             }
             else
             {
@@ -606,8 +617,27 @@ internal sealed class MarkdownInlineWriter
                 if (style.Underline || style.Link != null)
                 {
                     var lineY = pos.Y + lineH - 1f;
-                    drawList.AddLine(new Vector2(pos.X, lineY), new Vector2(pos.X + wordW, lineY),
+                    // Bridge the inter-word gap when the previous word on this
+                    // line ended an underline run in the same color - spaces
+                    // inside an underlined span stay underlined, so the line
+                    // reads continuous instead of dashed between words. The
+                    // bridge and the word underline merge into ONE line so no
+                    // sub-pixel seam can appear at the joint.
+                    var startX = pos.X;
+                    if (_underlineRunEndX >= 0f && MathF.Abs(_underlineRunY - pos.Y) < 0.5f
+                        && _underlineRunColor == effU32 && pos.X > _underlineRunEndX)
+                    {
+                        startX = _underlineRunEndX;
+                    }
+                    drawList.AddLine(new Vector2(startX, lineY), new Vector2(pos.X + wordW, lineY),
                         effU32, MathF.Max(1f, scale));
+                    _underlineRunEndX = pos.X + wordW;
+                    _underlineRunY = pos.Y;
+                    _underlineRunColor = effU32;
+                }
+                else
+                {
+                    _underlineRunEndX = -1f;
                 }
                 if (style.Strike)
                 {

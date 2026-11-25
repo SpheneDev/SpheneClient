@@ -317,6 +317,10 @@ public sealed class CommentThreadView
             var draft = st.Draft;
             composer.Draw("##new", ref draft, 4000, 70f * SpheneUI.Scale);
             st.Draft = draft;
+            // action row below the input: the emoji trigger sits with the
+            // submit/cancel buttons, not at the input's right edge
+            composer.DrawEmojiTrigger();
+            ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
             using (ImRaii.Disabled(string.IsNullOrWhiteSpace(st.Draft)))
             {
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.PaperPlane, "Comment"))
@@ -537,9 +541,15 @@ public sealed class CommentThreadView
         {
             if (st.EditingId == c.Id && ops.Save != null)
             {
+                // own id scope: the composer's Save/Cancel/emoji widgets must
+                // not collide with same-labelled widgets of the footer
+                ImGui.PushID("editbox");
+                var editComposer = ComposerFor($"edit{c.Id}", ops);
                 var draft = st.EditDraft;
-                ComposerFor($"edit{c.Id}", ops).Draw("##e", ref draft, 4000, 50f * SpheneUI.Scale);
+                editComposer.Draw("##e", ref draft, 4000, 50f * SpheneUI.Scale);
                 st.EditDraft = draft;
+                editComposer.DrawEmojiTrigger();
+                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                 if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Save"))
                 {
                     var dto = new CommentUpsertDto(kind, targetId, ownerUid, groupGid,
@@ -564,6 +574,7 @@ public sealed class CommentThreadView
                 {
                     st.EditingId = null;
                 }
+                ImGui.PopID();
             }
             else
             {
@@ -584,10 +595,22 @@ public sealed class CommentThreadView
 
             if (st.ReplyTo == c.Id && ops.Save != null)
             {
+                // own id scope: the submit "Reply" button shares its label
+                // with the footer's reply opener under the comment's PushID -
+                // a duplicate ImGui id misdelivers the click (the opener
+                // toggles the composer shut and wipes the draft instead of
+                // sending), so the composer block gets its own scope
+                ImGui.PushID("replybox");
                 SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+                var replyComposer = ComposerFor($"r{c.Id}", ops);
                 var draft = st.ReplyDraft;
-                ComposerFor($"r{c.Id}", ops).Draw("##rp", ref draft, 4000, 50f * SpheneUI.Scale);
+                replyComposer.Draw("##rp", ref draft, 4000, 50f * SpheneUI.Scale);
                 st.ReplyDraft = draft;
+                // action row below the input: the emoji trigger sits with
+                // Reply/Cancel, so the submit button always lands on the
+                // row's own line instead of overhanging the input edge
+                replyComposer.DrawEmojiTrigger();
+                ImGui.SameLine(0f, SpheneUI.Spacing.X4.Scaled);
                 using (ImRaii.Disabled(string.IsNullOrWhiteSpace(st.ReplyDraft)))
                 {
                     if (SpheneUI.Icons.TextButton(FontAwesomeIcon.PaperPlane, "Reply"))
@@ -603,6 +626,7 @@ public sealed class CommentThreadView
                 {
                     st.ReplyTo = null;
                 }
+                ImGui.PopID();
             }
         }
         ImGui.PopID();

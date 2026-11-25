@@ -100,10 +100,11 @@ public static partial class SpheneUI
             _ => X12,
         };
 
-        /// <summary>Gap between sibling cards on a page.</summary>
+        /// <summary>Gap between sibling cards on a page - the former
+        /// Balanced value, so side-by-side cards keep their air in Compact.</summary>
         public static Space CardGap => Density.Current switch
         {
-            DensityProfile.Compact => X2,
+            DensityProfile.Compact => X4,
             DensityProfile.Comfortable => X8,
             _ => X4,
         };
@@ -116,11 +117,12 @@ public static partial class SpheneUI
             _ => X16,
         };
 
-        /// <summary>Horizontal inner padding of cards - about half of
-        /// <see cref="CardPadding"/> so card content uses its width.</summary>
+        /// <summary>Horizontal inner padding of cards - the former Balanced
+        /// value in Compact so card content (e.g. the Overview stat row)
+        /// does not start flush against the card's left edge.</summary>
         public static Space CardPaddingX => Density.Current switch
         {
-            DensityProfile.Compact => X4,
+            DensityProfile.Compact => X8,
             DensityProfile.Comfortable => X10,
             _ => X8,
         };

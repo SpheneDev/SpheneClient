@@ -52,7 +52,6 @@ public static class UpdateOptionPanel
         IconNotificationBubble,
         CommunityRefresh,
         NewsAnnouncements,
-        LayoutDensity,
         SyncshellMembershipApplications,
         SyncshellPublishingPipeline,
         SyncshellCommunityEvents,
@@ -116,7 +115,6 @@ public static class UpdateOptionPanel
         new("v.1.1.28", [Link.SupporterNameplateStudio]),
         new("v.1.1.29", [Link.IconNotificationBubble, Link.CommunityRefresh]),
         new("v.1.1.30", [Link.NewsAnnouncements]),
-        new("v.1.1.31", [Link.LayoutDensity]),
         new("v.1.1.32", [Link.SyncshellMembershipApplications]),
         new("v.1.1.33", [Link.SyncshellPublishingPipeline]),
         new("v.1.1.34", [Link.SyncshellCommunityEvents]),
@@ -177,7 +175,6 @@ public static class UpdateOptionPanel
         [Link.IconNotificationBubble] = "Interface: Icon notification bubble & quick panel (Default: Enabled)",
         [Link.CommunityRefresh] = "Community: Activity feed, notification inbox, linked names & richer pages",
         [Link.NewsAnnouncements] = "News: Persisted announcements · article reader, live push & admin authoring",
-        [Link.LayoutDensity] = "Interface: Responsive layout density · auto / compact / balanced / comfortable (Default: Auto)",
         [Link.SyncshellMembershipApplications] = "Syncshells: Join policies & membership applications · public, approval, invite-only or closed",
         [Link.SyncshellPublishingPipeline] = "Syncshells: Publishing pipeline · drafts, staff review, scheduled posts & media uploads",
         [Link.SyncshellCommunityEvents] = "Syncshells: Events · RSVP, capacity & waitlists, calendar, reminders & recurring dates",
@@ -418,10 +415,6 @@ public static class UpdateOptionPanel
         {
             SpheneUI.Text.Wrapped("Announcements on the News page are now real persisted articles stored on the server · they survive restarts and inbox clearing, arrive live the moment they publish, and open into a proper article reader with banner, markdown body and links. Markdown gained lists, blockquotes, rules, links and inline images.");
             SpheneUI.Controls.HelpText("Admins and moderators get a + New button on the News page with a markdown editor and live preview · drafts sit in the feed with their own badge until they go live. Notifications stay in the inbox; announcements live in their own store now.");
-        },
-        [Link.LayoutDensity] = (configService, _, _) =>
-        {
-            AppearanceOptionBlock.DrawLayoutDensityOption(configService, "UpdateOptionLayoutDensity");
         },
         [Link.SyncshellMembershipApplications] = (_, _, _) =>
         {

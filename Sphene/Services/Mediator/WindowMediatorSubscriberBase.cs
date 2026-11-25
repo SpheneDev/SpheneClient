@@ -145,7 +145,7 @@ public abstract class WindowMediatorSubscriberBase : Window, IMediatorSubscriber
     /// frame's profile rides the frame marker pushed below, keeping fold math
     /// and token lookups consistent with the content pass.
     /// </summary>
-    private SpheneUI.DensityProfile _resolvedDensity = SpheneUI.DensityProfile.Balanced;
+    private SpheneUI.DensityProfile _resolvedDensity = SpheneUI.DensityProfile.Compact;
 
     public override void PreDraw()
     {

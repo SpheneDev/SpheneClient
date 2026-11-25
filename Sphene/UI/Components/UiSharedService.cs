@@ -135,13 +135,6 @@ public partial class UiSharedService : DisposableMediatorSubscriberBase
 
         SpheneUI.Initialize(logger, Mediator, IconFont, UidFont, DisplayFont, HeadingFont, GameFont);
         SpheneUI.MarkdownFontResolver = MarkdownFontForSize;
-        SpheneUI.Density.SetOverrideProvider(() => _configService.Current.LayoutDensity switch
-        {
-            Sphene.SpheneConfiguration.Models.LayoutDensityMode.Compact => SpheneUI.DensityProfile.Compact,
-            Sphene.SpheneConfiguration.Models.LayoutDensityMode.Balanced => SpheneUI.DensityProfile.Balanced,
-            Sphene.SpheneConfiguration.Models.LayoutDensityMode.Comfortable => SpheneUI.DensityProfile.Comfortable,
-            _ => null,
-        });
         SpheneUI.Media.SetTextureProvider(textureProvider);
     }
 

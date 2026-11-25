@@ -1,7 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Sphene.Services.Mediator;
 using Sphene.SpheneConfiguration;
-using Sphene.SpheneConfiguration.Models;
 using System.Numerics;
 using Sphene.UI.Design;
 
@@ -75,35 +74,6 @@ public static class AppearanceOptionBlock
                 configService.Save();
             }
             SpheneUI.AttachTooltip("Show a count bubble on the floating icon while requests, transfers or updates are pending · click it for the inbox.");
-        }
-        finally
-        {
-            ImGui.PopID();
-        }
-    }
-
-    /// <summary>Combo: application-wide layout density (auto / compact / balanced / comfortable).</summary>
-    public static void DrawLayoutDensityOption(SpheneConfigService configService, string blockId = "LayoutDensity")
-    {
-        ImGui.PushID(blockId);
-        try
-        {
-            SpheneUI.Controls.Combo("Layout density##" + blockId,
-                (LayoutDensityMode[])Enum.GetValues(typeof(LayoutDensityMode)),
-                i => i switch
-                {
-                    LayoutDensityMode.Auto => "Auto (adapts to window size)",
-                    LayoutDensityMode.Compact => "Compact",
-                    LayoutDensityMode.Balanced => "Balanced",
-                    LayoutDensityMode.Comfortable => "Comfortable",
-                    _ => i.ToString(),
-                },
-                i =>
-                {
-                    configService.Current.LayoutDensity = i;
-                    configService.Save();
-                }, configService.Current.LayoutDensity);
-            SpheneUI.Controls.HelpText("Controls spacing, row heights and heading sizes across all Sphene windows. Auto picks the density from each window's size; the other modes pin it everywhere.");
         }
         finally
         {

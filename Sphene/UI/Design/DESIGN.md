@@ -20,7 +20,7 @@ SpheneUI
 │               AccentRamp…)
 ├─ Metrics      control metrics (ControlHeight, ControlRadius, SwatchSize,
 │               RowHeight, GridMinCell…)
-├─ Density      Compact/Balanced/Comfortable profiles, Factor, AutoWindowScope
+├─ Density      Compact-only profile scope, Factor, AutoWindowScope
 ├─ Text         Plain/Wrapped/Colored/ColoredWrapped/Muted/Big/Bullet/Outlined/
 │               Display (crisp ~26px headings via the DisplayFont handle -
 │               never SetWindowFontScale)/SectionHeader/Header/GroupedCentered/
@@ -97,8 +97,8 @@ them.
   regions, right-docked panels and inline previews wherever width allows.
   Stack vertically only when *measured* width requires it - the approved
   pattern is "compute whether the side element fits, fall back to inline"
-  (see the hero bio panel). `Density` adapts spacing and metrics to window
-  size; it never changes a page's layout structure.
+  (see the hero bio panel). `Density` adapts spacing and metrics to the
+  active profile; it never changes a page's layout structure.
 - **Structural chrome stays put; decorative chrome scrolls.** Rails,
   header bands, tab strips and action bars are structural - pin or dock
   them. Banner art, heroes and previews are decorative - they scroll with
@@ -404,14 +404,14 @@ escape hatch that always records a lint violation - extend the scale instead.
 
 ## Layout density (`SpheneUI.Density`)
 
-Three application-wide density profiles adapt spacing, row heights and
-headline sizes to the space a window actually has:
+Sphene runs a single application-wide density profile - `Compact` - in
+every window, regardless of window size (the former Auto/Balanced/
+Comfortable resolution and the Settings ▸ Appearance "Layout density"
+override were removed):
 
-| Profile | Auto rule (unscaled window units) | Effect |
-|---|---|---|
-| `Compact` | height ≤ 640 **or** width ≤ 760 | style vars ×0.75, tighter token steps |
-| `Balanced` | otherwise | unchanged baseline |
-| `Comfortable` | height ≥ 880 **and** width ≥ 1400 | style vars ×1.15, looser token steps |
+| Profile | Effect |
+|---|---|
+| `Compact` (always active) | style vars ×0.75, tighter token steps |
 
 - **Scope**: the window base class resolves the profile once per frame -
   `PushFrame` carries the previous frame's value through PreDraw (fold math)
@@ -419,15 +419,14 @@ headline sizes to the space a window actually has:
   style-var pass (`ItemSpacing`, `ItemInnerSpacing`, `FramePadding`,
   `CellPadding`, `IndentSpacing`). Embedded pages inherit the host's scope;
   CompactUI stays Balanced.
-- **Manual override**: `SpheneConfig.LayoutDensity` (`LayoutDensityMode`
-  Auto/Compact/Balanced/Comfortable) via `Density.SetOverrideProvider` -
-  Settings ▸ Appearance ▸ "Layout density".
 - **Token remap**: semantic `Spacing` aliases step to a neighbor grid value
-  per profile (e.g. `CardPadding` 10/16/20, `Row` 4/8/10); raw steps never
-  move. `Metrics.RowHeight` 24/28/32, `GridMinCell` 180/200/230,
-  `NavRailItemHeight` 26/30/34, `NavRailDividerHeight`, `BadgeHeight`,
-  `Chrome.TitleBarPaddingY` and `Profile.HeroBannerHeight`/`HeroAvatarSize`
-  follow the same pattern.
+  per profile (e.g. `CardPadding` 10/16/20, `Row` 4/8/10 - `CardGap` and
+  `CardPaddingX` keep their Balanced values 4/8 in Compact so
+  side-by-side cards keep their gap and card content keeps its inset);
+  raw steps never move. `Metrics.RowHeight` 24/28/32,
+  `GridMinCell` 180/200/230, `NavRailItemHeight` 26/30/34,
+  `NavRailDividerHeight`, `BadgeHeight`, `Chrome.TitleBarPaddingY` and
+  `Profile.HeroBannerHeight`/`HeroAvatarSize` follow the same pattern.
 - **Typography**: `Text.Big` renders in the 26px display font under Compact
   instead of the 35px Uid font - page titles stay proportional.
 - **Hardcoded sizes**: multiply page-level structural dimensions (hero

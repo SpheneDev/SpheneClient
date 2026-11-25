@@ -3021,7 +3021,6 @@ public class SettingsUi : WindowMediatorSubscriberBase
             AppearanceOptionBlock.DrawIconNotificationBubbleOption(_configService, "AppearanceIconNotificationBubble");
             AppearanceOptionBlock.DrawEnableGameRightClickMenusOption(_configService, "AppearanceEnableGameRightClickMenus");
             AppearanceOptionBlock.DrawReopenSpheneHubOnStartupOption(_configService, "AppearanceReopenSpheneHubOnStartup");
-            AppearanceOptionBlock.DrawLayoutDensityOption(_configService, "AppearanceLayoutDensity");
         });
 
         DrawSettingsCard("Window Effects", FontAwesomeIcon.Magic, () =>
