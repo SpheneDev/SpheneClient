@@ -79,20 +79,13 @@ internal static class ReactionPillBar
     internal static bool Contains(Vector4 rect, Vector2 point) => rect != Vector4.Zero
         && point.X >= rect.X && point.X < rect.Z && point.Y >= rect.Y && point.Y < rect.W;
 
-    private static string? _lastGlyph;
-    private static string? _lastName;
-
+    /// <summary>Chip tooltip shows the emoji glyph itself, not the catalog
+    /// name - the CLDR names carry the raw glyph plus an "E0.6"-style version
+    /// tag, which read as noise ("Remove your ❤️ E0.6 red heart reaction"),
+    /// and the glyph inside the name rendered as tofu in the tooltip font.
+    /// AttachTooltip renders the sequence as an inline atlas sprite instead.</summary>
     internal static string ChipTooltip(ChipHit chip)
-    {
-        if (!string.Equals(chip.Emoji, _lastGlyph, StringComparison.Ordinal))
-        {
-            _lastGlyph = chip.Emoji;
-            _lastName = SpheneUI.Emoji.Catalog?.FirstOrDefault(e =>
-                string.Equals(e.Glyph, chip.Emoji, StringComparison.Ordinal)
-                || e.ToneTexts?.Contains(chip.Emoji, StringComparer.Ordinal) == true)?.Name ?? chip.Emoji;
-        }
-        return chip.ByMe ? $"Remove your {_lastName} reaction" : $"React with {_lastName}";
-    }
+        => chip.ByMe ? $"Remove your {chip.Emoji} reaction" : $"React with {chip.Emoji}";
 
     private static float ChipWidth(int count, float lineH, float scale)
         => lineH + 4f * scale + ImGui.CalcTextSize(count.ToString()).X;

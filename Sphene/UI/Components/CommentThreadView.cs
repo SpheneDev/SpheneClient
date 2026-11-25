@@ -108,9 +108,28 @@ public sealed class CommentThreadView
     private readonly Dictionary<string, ThreadState> _threads = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MarkdownComposer> _composers = new(StringComparer.Ordinal);
 
-    // The host replaces this one-shot destination on navigation. It also works
-    // before the roots load, including a discussion that has no first comment.
-    public (CommentTargetKind Kind, long Id)? PendingDiscussion { get; set; }
+    private (CommentTargetKind Kind, long Id)? _pendingDiscussion;
+    /// <summary>Frame time the armed destination was first seen drawing -
+    /// stamped on the UI thread inside Draw (the setter also runs from
+    /// mediator-driven navigation, where ImGui.GetTime is not safe).</summary>
+    private double _pendingDiscussionArmedAt = -1;
+
+    /// <summary>The host arms this destination on navigation. It is consumed
+    /// only once the matching thread has loaded and a short grace period has
+    /// passed, and the scroll is re-applied every frame meanwhile - a post
+    /// whose media is still loading must still land on its comments, not
+    /// above them. A manual wheel scroll cancels the auto-scroll early.
+    /// Also works before the roots load, including a discussion that has no
+    /// first comment.</summary>
+    public (CommentTargetKind Kind, long Id)? PendingDiscussion
+    {
+        get => _pendingDiscussion;
+        set
+        {
+            _pendingDiscussion = value;
+            _pendingDiscussionArmedAt = -1;
+        }
+    }
 
     private static void ScrollToDiscussion()
         => ImGui.SetScrollFromPosY(ImGui.GetCursorScreenPos().Y - ImGui.GetWindowPos().Y, 0.12f);
@@ -228,8 +247,21 @@ public sealed class CommentThreadView
             if (PendingDiscussion == (kind, targetId))
             {
                 st.PendingFocusCommentId = null;
-                PendingDiscussion = null;
+                if (_pendingDiscussionArmedAt < 0) _pendingDiscussionArmedAt = ImGui.GetTime();
+                var armedFor = ImGui.GetTime() - _pendingDiscussionArmedAt;
+                // Re-apply every frame while armed: content above the thread
+                // (post cover, markdown images) can still be loading and would
+                // shift a one-shot scroll off the discussion. Consume only once
+                // the thread itself has loaded (plus a short grace window for
+                // late media), on a manual wheel scroll, or after a timeout so
+                // a failed load can never pin the scroll forever.
                 ScrollToDiscussion();
+                if (MathF.Abs(ImGui.GetIO().MouseWheel) > 0.001f
+                    || armedFor > 8f
+                    || (st.Loaded && armedFor > 0.5f))
+                {
+                    PendingDiscussion = null;
+                }
             }
             ResolveFocus(ops, st);
             DrawThread(kind, targetId, ownerUid, groupGid, ops, locked,

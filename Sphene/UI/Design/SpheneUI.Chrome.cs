@@ -945,10 +945,13 @@ public static partial class SpheneUI
             float? fadeMinY = null, float strength = 1f, bool drawHints = true)
         {
             var scale = SpheneUI.Scale;
-            // A child whose scrollable range is shorter than a line of text has
-            // no meaningful "more content" to hint at; the fade lip would only
-            // read as a stray shadow at the edge.
-            if (scrollMaxY <= ImGui.GetTextLineHeightWithSpacing())
+            // Below a small dead zone there is no meaningful "more content" to
+            // hint at. Above it the strength ramps below ease the band in and
+            // out over the whole fade range, so the lip dissolves smoothly
+            // instead of popping off at a hard line-height cut - that cut
+            // flickered the fade on/off whenever scrollMax jittered across the
+            // line at the overflow boundary.
+            if (scrollMaxY <= ScrollFadeDeadZone * scale)
             {
                 return;
             }

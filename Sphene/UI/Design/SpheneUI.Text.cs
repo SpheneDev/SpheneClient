@@ -454,14 +454,15 @@ public static partial class SpheneUI
         }
         using var scope = Theme.TooltipScope();
         ImGui.BeginTooltip();
-        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35f);
+        var wrapW = ImGui.GetFontSize() * 35f;
+        ImGui.PushTextWrapPos(wrapW);
         if (text.IndexOf(separator, StringComparison.Ordinal) >= 0)
         {
             var segments = _tooltipSegmentsCache.GetOrAdd(text,
                 t => t.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
             for (var i = 0; i < segments.Length; i++)
             {
-                ImGui.TextUnformatted(segments[i]);
+                TooltipText(segments[i], wrapW);
                 if (i != segments.Length - 1)
                 {
                     ImGui.Separator();
@@ -470,10 +471,26 @@ public static partial class SpheneUI
         }
         else
         {
-            ImGui.TextUnformatted(text);
+            TooltipText(text, wrapW);
         }
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
+    }
+
+    /// <summary>One tooltip segment: emoji sequences render as atlas sprites
+    /// inline (the Dalamud font chain carries no emoji glyphs, so a raw glyph
+    /// in <see cref="ImGui.TextUnformatted"/> would show tofu); plain text
+    /// keeps the native wrapped-text path.</summary>
+    private static void TooltipText(string segment, float wrapW)
+    {
+        if (Emoji.ContainsEmoji(segment))
+        {
+            Emoji.Wrapped(segment, wrapW, ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
+        }
+        else
+        {
+            ImGui.TextUnformatted(segment);
+        }
     }
 
     /// <summary>

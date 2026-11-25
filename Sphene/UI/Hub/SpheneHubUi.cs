@@ -1427,6 +1427,25 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
             }
         }
+        else if (_openChronicle is { OwnerUid: var openOwner })
+        {
+            // A plain profile visit (name/avatar deep-link, friends-list row,
+            // back/forward to a list location) lands on the profile page
+            // itself - a reader left open on that same profile must not
+            // survive the navigation.
+            var hostUid = target.Page switch
+            {
+                SpheneHubPage.PublicProfile => target.PublicUid,
+                SpheneHubPage.Friends => target.Friend?.UserData.UID,
+                SpheneHubPage.Profile => _apiController.UID,
+                _ => null,
+            };
+            if (hostUid != null
+                && string.Equals(openOwner, hostUid, StringComparison.Ordinal))
+            {
+                _openChronicle = null;
+            }
+        }
         if (IsProfileFamily(_activePage) && !IsProfileFamily(target.Page))
         {
             _profileEditMode = false;
@@ -3653,7 +3672,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             }
             if (clicked)
             {
-                NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair));
+                NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair, SubPage: 0));
                 return;
             }
             drawn++;
@@ -4176,7 +4195,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         if (clicked && navigateOnClick && pair != null)
         {
-            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair));
+            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair, SubPage: 0));
         }
 
         ImGui.SetCursorScreenPos(new Vector2(pos.X + width - actPad - actBtn,
@@ -4484,7 +4503,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
 
         if (clicked)
         {
-            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair));
+            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair, SubPage: 0));
         }
         // DM shortcut as the first overlay action - an accent dot marks
         // unread conversations so the list itself signals pending chats.
@@ -8913,18 +8932,19 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             case "blog" when parts.Length > 2:
             {
                 // Chronicle refs land on the author's Chronicles tab; plain
-                // user refs keep the default profile tab.
+                // user refs land on the profile's main page, not on whatever
+                // sub-page was open the last time this profile was viewed.
                 var isBlog = string.Equals(parts[0], "blog", StringComparison.Ordinal);
                 if (string.Equals(parts[1], _apiController.UID, StringComparison.Ordinal))
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
-                        SubPage: isBlog ? 2 : null));
+                        SubPage: isBlog ? 2 : 0));
                     break;
                 }
                 var pair = _pairManager.DirectPairs
                     .FirstOrDefault(p => string.Equals(p.UserData.UID, parts[1], StringComparison.Ordinal));
                 NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
-                    SubPage: pair != null && isBlog ? 2 : null));
+                    SubPage: pair != null && isBlog ? 2 : 0));
                 break;
             }
             case "community" when parts.Length > 1:
@@ -10476,7 +10496,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     var pair = _pairManager.GetPairByUID(uid);
                     if (pair != null)
                     {
-                        NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair));
+                        NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair, SubPage: 0));
                     }
                 }),
             onLikeImage: img => ToggleCommunityImageLike(group.Group, img));
@@ -10992,14 +11012,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private void NavigateToAuthor(string uid)
     {
         if (string.IsNullOrEmpty(uid)) return;
+        // Name/avatar deep-links always land on the profile's main page
+        // (SubPage 0), never on the sub-page that happened to be open the
+        // last time this profile was viewed; ApplyLocation drops an open
+        // chronicle reader on the target profile as well.
         if (string.Equals(uid, _apiController.UID, StringComparison.Ordinal))
         {
-            NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null));
+            NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null, SubPage: 0));
             return;
         }
         if (FindPairByUid(uid) is { } authorPair)
         {
-            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, authorPair));
+            NavigateTo(new HubLocation(SpheneHubPage.Friends, null, authorPair, SubPage: 0));
             return;
         }
         // Always land on the public page - it resolves to the explicit

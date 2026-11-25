@@ -692,7 +692,15 @@ public static partial class SpheneUI
         // Stores the range EXCLUDING the emitted spacer - the spacer's own
         // height would otherwise keep its gate latched forever.
         private static readonly Dictionary<string, float> ScrollAreaLastMax = new(StringComparer.Ordinal);
+        // Whether the spacer was emitted in the last EndScrollArea pass per id -
+        // GetScrollMaxY lags one Begin pass, so the measured range contains the
+        // PREVIOUS pass's spacer; this tells us how much to subtract.
+        private static readonly Dictionary<string, bool> ScrollAreaLastSpacer = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, bool> ScrollFadeLatched = new(StringComparer.Ordinal);
+        // Eased fade visibility per scroll-area id · the latch above only picks
+        // the on/off target; this eases the rendered strength toward it so the
+        // band fades in/out instead of popping when the gate flips.
+        private static readonly Dictionary<string, float> ScrollFadeVis = new(StringComparer.Ordinal);
 
         /// <summary>
         /// Begins a child region without a visible scrollbar. Wheel scrolling
@@ -1116,10 +1124,9 @@ public static partial class SpheneUI
                 // content clears the bottom fade. Inside a child whose
                 // content (nearly) fits it IS the overflow · a ~inset-sized
                 // phantom scroll range users can wheel into. Emit it only
-                // when the child already scrolled past the spacer last
-                // frame; content heights are stable frame-to-frame, so the
-                // gate converges in one pass and never oscillates.
+                // when the real range (spacer excluded) exceeds the inset.
                 var spacerThreshold = ScrollAreaContentInset * SpheneUI.Scale;
+                var prevSpacerOn = ScrollAreaLastSpacer.TryGetValue(state.Id, out var ps) && ps;
                 var spacerOn = ScrollAreaLastMax.TryGetValue(state.Id,
                     out var prevScrollMax) && prevScrollMax > spacerThreshold;
                 if (spacerOn)
@@ -1137,10 +1144,16 @@ public static partial class SpheneUI
                 // one-way ratchet - once content overflows (window shrink)
                 // the emitted inset keeps prevScrollMax above the threshold
                 // forever, leaving a permanent phantom scroll range after the
-                // content fits again. Excluding the spacer, the gate releases
-                // the frame the real range drops back under the threshold.
+                // content fits again. GetScrollMaxY lags one Begin pass, so
+                // the measured value still contains LAST frame's spacer -
+                // subtract that one (prevSpacerOn), never this frame's
+                // decision. Subtracting the current decision made the stored
+                // range jump by the spacer height every other frame near the
+                // threshold, which pulsed the rendered fade on/off (the
+                // 50-100 ms blinking at one specific window size).
                 ScrollAreaLastMax[state.Id] = MathF.Max(0f,
-                    spacerOn ? scrollMaxY - spacerThreshold : scrollMaxY);
+                    prevSpacerOn ? scrollMaxY - spacerThreshold : scrollMaxY);
+                ScrollAreaLastSpacer[state.Id] = spacerOn;
                 var childHovered = ImGui.IsWindowHovered();
                 var min = ImGui.GetWindowPos();
                 var max = min + ImGui.GetWindowSize();
@@ -1207,26 +1220,42 @@ public static partial class SpheneUI
                 }
                 // Hysteresis on the fade's visibility gate: content sitting
                 // exactly at the overflow boundary jitters scrollMax by a
-                // pixel or two frame-to-frame, so the stateless line-height
-                // gate inside ScrollFades flickers the fade on/off (the
-                // "blinking lip" only a resize cured because it moved the
-                // content off the boundary). Latch per id: enter once the
-                // range clearly scrolls, release only when it drops a dead
-                // band back under the line.
+                // pixel or two frame-to-frame (loading rows, the critical
+                // window size). Latch per id: enter once the range clearly
+                // scrolls, release only when it drops a dead band back under
+                // the line. The latch only picks the target - the rendered
+                // strength eases toward it below, and ScrollFades itself now
+                // dissolves the band over the whole fade range instead of a
+                // hard line-height cut, so boundary jitter can no longer
+                // blink the lip on/off (only a resize used to cure that).
+                var scale = SpheneUI.Scale;
                 var fadeLine = ImGui.GetTextLineHeightWithSpacing();
+                // Gate on the spacer-corrected real range (stored above), not
+                // the raw measured scrollMax - the spacer would otherwise
+                // shift the enter threshold by its own height.
+                var realRange = ScrollAreaLastMax.TryGetValue(state.Id, out var rr) ? rr : scrollMaxY;
                 var fadeOn = ScrollFadeLatched.TryGetValue(state.Id, out var latched) && latched;
-                if (!fadeOn && scrollMaxY > fadeLine + 2f * SpheneUI.Scale)
+                if (!fadeOn && realRange > fadeLine + 2f * scale)
                 {
                     fadeOn = true;
                 }
-                else if (fadeOn && scrollMaxY < fadeLine - ScrollAreaContentInset * SpheneUI.Scale)
+                else if (fadeOn && realRange < fadeLine - ScrollAreaContentInset * scale)
                 {
                     fadeOn = false;
                 }
                 ScrollFadeLatched[state.Id] = fadeOn;
-                Chrome.ScrollFades(min, max, scrollY, fadeOn ? scrollMaxY : 0f, state.Border, state.TopInset,
+                var visTarget = fadeOn ? 1f : 0f;
+                var vis = ScrollFadeVis.TryGetValue(state.Id, out var prevVis) ? prevVis : visTarget;
+                var visDt = ImGui.GetIO().DeltaTime;
+                vis += (visTarget - vis) * MathF.Min(1f, visDt * 12f);
+                if (MathF.Abs(visTarget - vis) < 0.02f)
+                {
+                    vis = visTarget;
+                }
+                ScrollFadeVis[state.Id] = vis;
+                Chrome.ScrollFades(min, max, scrollY, scrollMaxY, state.Border, state.TopInset,
                     state.ParentMin, state.ParentMax, fadeBaseColor, edgePaddingX, fadeSpanX, fadeMinY,
-                    fadeStrength, scrollHints);
+                    fadeStrength * vis, scrollHints);
                 var styleVars = ImGui.GetStyle();
                 var cornerReach = MathF.Max(styleVars.WindowBorderSize,
                         MathF.Max(styleVars.WindowPadding.X, styleVars.WindowPadding.Y))
