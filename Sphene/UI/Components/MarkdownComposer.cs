@@ -16,9 +16,8 @@ namespace Sphene.UI.Components;
 /// toolbar, media upload via <see cref="CommunityMediaClientService"/> and an
 /// entity-reference picker that inserts <c>@uid</c>/<c>#gid</c>/<c>post:id</c>
 /// tokens the server resolves with visibility checks.
-/// Toolbar edits run inside the input's <see cref="ImGuiInputTextFlags.CallbackAlways"/>
-/// callback so every format, insert and wrap happens at the real caret /
-/// selection in UTF-8 byte space - never an append at the document end.
+/// The editor uses the input's <see cref="ImGuiInputTextFlags.CallbackAlways"/>
+/// callback to capture the caret and selection for managed edits.
 /// </summary>
 public sealed class MarkdownComposer
 {
@@ -69,16 +68,14 @@ public sealed class MarkdownComposer
     /// it can be handed to the callback by ref.</summary>
     private sealed class EditContext
     {
-        public int CaretB = -1;
-        public int SelStartB = -1;
-        public int SelEndB = -1;
+        public MarkdownSelection Selection = MarkdownSelection.At(-1);
         /// <summary>Caret as an index into the model string - view offsets
         /// differ once placeholders (1 char) stand in for sequences (N chars).</summary>
         public int ModelCaret = -1;
         /// <summary>When &gt;= 0 the callback forces caret+selection to this
-        /// view offset once - markup edits set it so the caret lands behind
+        /// UTF-8 byte offset once - markup edits set it so the caret lands behind
         /// the inserted markers after the managed splice.</summary>
-        public int CaretTarget = -1;
+        public int CaretTargetByte = -1;
         /// <summary>Placeholder codec: emoji occupy one BMP char each in the
         /// 16-bit ImWchar buffer - real sequences live only in the model.</summary>
         public readonly Helpers.Emoji.EmojiTextCodec Codec = new();
@@ -99,6 +96,8 @@ public sealed class MarkdownComposer
     private bool _refocus;
     private string? _pendingInsert;
     private int _editEpoch;
+    private (string Body, MarkdownSelection Selection) _colorTarget;
+    private (string Body, MarkdownSelection Selection) _sizeTarget;
     private string _colorHex = "#ffffff";
 
     /// <summary>Undo/redo snapshots of the model text plus the view-space
@@ -207,8 +206,8 @@ public sealed class MarkdownComposer
                     + $"expanded='{SanitizeForLog(expanded)}'");
                 body = expanded;
             }
-            _edit.ModelCaret = _edit.CaretB >= 0
-                ? _edit.Codec.Expand(view[..Math.Min(_edit.CaretB, view.Length)]).Length
+            _edit.ModelCaret = _edit.Selection.Caret >= 0
+                ? _edit.Codec.Expand(view[..Math.Min(_edit.Selection.Caret, view.Length)]).Length
                 : -1;
             if (emojiW > 0f)
             {
@@ -229,37 +228,17 @@ public sealed class MarkdownComposer
     private static string Validate(string body, int maxLength)
         => body.Length > maxLength ? $"Body exceeds the {maxLength}-character limit." : string.Empty;
 
-    private static int OnInputCallback(ref ImGuiInputTextCallbackData data,
-        ref EditContext ctx)
+    private static unsafe int OnInputCallback(ref ImGuiInputTextCallbackData data, ref EditContext ctx)
     {
-        if (ctx.CaretTarget >= 0)
+        if (ctx.CaretTargetByte >= 0)
         {
-            var t = Math.Min(ctx.CaretTarget, data.BufTextLen);
-            data.SelectionStart = data.SelectionEnd = data.CursorPos = t;
-            ctx.CaretTarget = -1;
+            var target = Math.Min(ctx.CaretTargetByte, data.BufTextLen);
+            data.SelectionStart = data.SelectionEnd = data.CursorPos = target;
+            ctx.CaretTargetByte = -1;
         }
-        if (ctx.SelStartB != data.SelectionStart || ctx.SelEndB != data.SelectionEnd
-            || ctx.CaretB != data.CursorPos)
-        {
-            SpheneUI.LogDebug($"[ComposerDebug] snapshot sel=({data.SelectionStart},{data.SelectionEnd}) "
-                + $"caret={data.CursorPos} bufLen={data.BufTextLen} "
-                + $"was=({ctx.SelStartB},{ctx.SelEndB})/{ctx.CaretB}");
-        }
-        ctx.SelStartB = data.SelectionStart;
-        ctx.SelEndB = data.SelectionEnd;
-        ctx.CaretB = data.CursorPos;
+        var buffer = new ReadOnlySpan<byte>(data.Buf, data.BufTextLen);
+        ctx.Selection = MarkdownSelection.FromCallback(buffer, data.SelectionStart, data.SelectionEnd, data.CursorPos);
         return 0;
-    }
-
-    /// <summary>The byte range the next edit splices around: the live
-    /// selection when one exists, else the caret.</summary>
-    private (int Start, int End, bool HadSelection) EditRange()
-    {
-        var s = _edit.SelStartB >= 0 ? Math.Min(_edit.SelStartB, _edit.SelEndB) : -1;
-        var e = _edit.SelStartB >= 0 ? Math.Max(_edit.SelStartB, _edit.SelEndB) : -1;
-        if (s >= 0 && e > s) return (s, e, true);
-        var caret = Math.Max(0, _edit.CaretB);
-        return (caret, caret, false);
     }
 
     /// <summary>Queues a caret insertion from an outside control (emoji
@@ -272,44 +251,16 @@ public sealed class MarkdownComposer
         _refocus = true;
     }
 
-    /// <summary>Splices <paramref name="payload"/> over the captured range
-    /// of the encoded view and writes the expanded model back. Positions are
-    /// ImWchar units; the buffer is BMP-only by codec construction, so they
-    /// index the view string directly. All markup editing goes through here
-    /// - pure managed string surgery, immune to input activation timing:
-    /// the text can never be eaten by a lost or mistimed callback edit.</summary>
-    private string ApplySplice(string body, string payload, int caretInView)
+    private string ApplySplice(string body, (string View, int Caret) edit)
     {
         PushUndo(body);
-        var result = SpliceView(body, payload, caretInView);
-        _undoBaseline = result;
-        return result;
-    }
-
-    /// <summary>The managed-string splice machinery shared by edits and
-    /// undo/redo restores - positions are ImWchar units; the buffer is
-    /// BMP-only by codec construction, so they index the view string
-    /// directly. All markup editing funnels here - pure managed string
-    /// surgery, immune to input activation timing: the text can never be
-    /// eaten by a lost or mistimed callback edit.</summary>
-    private string SpliceView(string body, string payload, int caretInView)
-    {
-        var view = _edit.Codec.Encode(body);
-        var (s, e, _) = EditRange();
-        s = Math.Clamp(s, 0, view.Length);
-        e = Math.Clamp(e, s, view.Length);
-        var newView = string.Concat(view.AsSpan(0, s), payload, view.AsSpan(e));
-        _edit.CaretTarget = s + Math.Clamp(caretInView, 0, payload.Length);
+        _edit.Selection = MarkdownSelection.At(edit.Caret);
+        _edit.CaretTargetByte = MarkdownSelection.CallbackOffset(edit.View, edit.Caret);
         _refocus = true;
-        // force the input state to reload from the edited model: ImGui keys
-        // buffer/selection/undo per widget id and never follows externally
-        // rewritten text mid-edit - without a fresh id the stale buffer
-        // round-trips back over the splice and reverts it
+        // Give the edited buffer a fresh widget ID so ImGui reloads it from the model.
         _editEpoch++;
-        SpheneUI.LogDebug($"[ComposerDebug] splice id={_id} s={s} e={e} viewLen={view.Length} "
-            + $"payload='{SanitizeForLog(payload)}' caret={_edit.CaretTarget} "
-            + $"sel=({_edit.SelStartB},{_edit.SelEndB}) caretB={_edit.CaretB}");
-        return _edit.Codec.Expand(newView);
+        _undoBaseline = _edit.Codec.Expand(edit.View);
+        return _undoBaseline;
     }
 
     /// <summary>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z while the input is focused.
@@ -339,7 +290,7 @@ public sealed class MarkdownComposer
         if (_undoStack.Count > 0
             && string.Equals(_undoStack[^1].Text, body, StringComparison.Ordinal))
             return;
-        _undoStack.Add((body, Math.Max(0, _edit.CaretB)));
+        _undoStack.Add((body, Math.Max(0, _edit.Selection.Caret)));
         if (_undoStack.Count > MaxUndoEntries)
             _undoStack.RemoveAt(0);
         _redoStack.Clear();
@@ -356,7 +307,7 @@ public sealed class MarkdownComposer
             return null;
         var (text, caret) = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
-        _redoStack.Add((body, Math.Max(0, _edit.CaretB)));
+        _redoStack.Add((body, Math.Max(0, _edit.Selection.Caret)));
         return Restore(text, caret);
     }
 
@@ -367,7 +318,7 @@ public sealed class MarkdownComposer
             return null;
         var (text, caret) = _redoStack[^1];
         _redoStack.RemoveAt(_redoStack.Count - 1);
-        _undoStack.Add((body, Math.Max(0, _edit.CaretB)));
+        _undoStack.Add((body, Math.Max(0, _edit.Selection.Caret)));
         return Restore(text, caret);
     }
 
@@ -377,7 +328,8 @@ public sealed class MarkdownComposer
     private string Restore(string text, int caret)
     {
         var view = _edit.Codec.Encode(text);
-        _edit.CaretTarget = Math.Clamp(caret, 0, view.Length);
+        _edit.Selection = MarkdownSelection.At(Math.Clamp(caret, 0, view.Length));
+        _edit.CaretTargetByte = MarkdownSelection.CallbackOffset(view, _edit.Selection.Caret);
         _refocus = true;
         _editEpoch++;
         _undoBaseline = text;
@@ -393,37 +345,15 @@ public sealed class MarkdownComposer
     private string ApplyInsert(string body, string insert, int caretOffsetInInsert = -1)
     {
         var encoded = _edit.Codec.Encode(insert);
-        return ApplySplice(body, encoded,
-            caretOffsetInInsert < 0 ? encoded.Length : caretOffsetInInsert);
+        return ApplySplice(body, _edit.Selection.Replace(_edit.Codec.Encode(body), encoded,
+            caretOffsetInInsert < 0 ? encoded.Length : caretOffsetInInsert));
     }
 
-    /// <summary>Wraps the selection in <paramref name="prefix"/>/<paramref name="suffix"/>;
-    /// without a selection inserts the empty pair with the caret between
-    /// the markers.</summary>
-    private string ApplyWrap(string body, string prefix, string suffix)
-    {
-        var view = _edit.Codec.Encode(body);
-        var (s, e, had) = EditRange();
-        s = Math.Clamp(s, 0, view.Length);
-        e = Math.Clamp(e, s, view.Length);
-        var inner = view[s..e];
-        return ApplySplice(body, prefix + inner + suffix,
-            had ? inner.Length + prefix.Length + suffix.Length : prefix.Length);
-    }
+    private string ApplyWrap(string body, string prefix, string suffix, MarkdownSelection? target = null)
+        => ApplySplice(body, (target ?? _edit.Selection).Wrap(_edit.Codec.Encode(body), prefix, suffix));
 
     private string ApplyLink(string body)
-    {
-        var view = _edit.Codec.Encode(body);
-        var (s, e, had) = EditRange();
-        s = Math.Clamp(s, 0, view.Length);
-        e = Math.Clamp(e, s, view.Length);
-        if (had)
-        {
-            // Selected text becomes the link label; caret waits in the URL.
-            return ApplySplice(body, "[" + view[s..e] + "]()", view[s..e].Length + 3);
-        }
-        return ApplySplice(body, "[]()", 1);
-    }
+        => ApplySplice(body, _edit.Selection.Wrap(_edit.Codec.Encode(body), "[", "]()", caretInSuffix: 2));
 
     private void DrawToolbar(float scale, ref string body, bool previewing)
     {
@@ -452,8 +382,7 @@ public sealed class MarkdownComposer
             ImGui.SameLine(0f, gap);
         }
 
-        // formatting writes through the input callback - inert while the
-        // preview pane owns the slot
+        // Formatting controls share the last selection captured by the input.
         using (ImRaii.Disabled(previewing))
         {
             WrapBtn(FontAwesomeIcon.Bold, "Bold", "**", "**");
@@ -474,6 +403,7 @@ public sealed class MarkdownComposer
             ImGui.SameLine(0f, gap);
             if (SpheneUI.Icons.Button(FontAwesomeIcon.TextHeight))
             {
+                _sizeTarget = (text, _edit.Selection);
                 SpheneUI.Popups.OpenFlyout("size-" + _id);
             }
             SpheneUI.AttachTooltip("Text size");
@@ -482,6 +412,7 @@ public sealed class MarkdownComposer
             if (SpheneUI.Controls.ColorSwatch("##mccolor" + _id,
                     ParseHex(_colorHex) ?? SpheneUI.Colors.Accent, selected: colorOpen))
             {
+                if (!colorOpen) _colorTarget = (text, _edit.Selection);
                 SpheneUI.Popups.ToggleFlyout("color-" + _id);
             }
             SpheneUI.AttachTooltip("Text color");
@@ -533,12 +464,14 @@ public sealed class MarkdownComposer
         }
         if (SpheneUI.Popups.BeginFlyout("size-" + _id))
         {
-            DrawSizeFlyout(ref text);
+            if (string.Equals(text, _sizeTarget.Body, StringComparison.Ordinal)) DrawSizeFlyout(ref text);
+            else SpheneUI.Popups.CloseFlyout("size-" + _id);
             SpheneUI.Popups.EndFlyout();
         }
         if (SpheneUI.Popups.BeginFlyout("color-" + _id))
         {
-            DrawColorFlyout(ref text);
+            if (string.Equals(text, _colorTarget.Body, StringComparison.Ordinal)) DrawColorFlyout(ref text);
+            else SpheneUI.Popups.CloseFlyout("color-" + _id);
             SpheneUI.Popups.EndFlyout();
         }
         DrawMentionTypeahead(ref text);
@@ -556,7 +489,7 @@ public sealed class MarkdownComposer
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.TextHeight,
                     $"{pt} pt", isInPopup: true))
             {
-                body = ApplyWrap(body, $"<size={pt}>", "</size>");
+                body = ApplyWrap(body, $"<size={pt}>", "</size>", _sizeTarget.Selection);
                 SpheneUI.Popups.CloseFlyout("size-" + _id);
             }
         }
@@ -572,7 +505,7 @@ public sealed class MarkdownComposer
             if (SpheneUI.Controls.ColorSwatch($"##mcp{name}" + _id, col,
                     selected: false))
             {
-                body = ApplyWrap(body, $"<color={HexOf(col)}>", "</color>");
+                body = ApplyWrap(body, $"<color={HexOf(col)}>", "</color>", _colorTarget.Selection);
                 SpheneUI.Popups.CloseFlyout("color-" + _id);
             }
             SpheneUI.AttachTooltip(name);
@@ -589,7 +522,7 @@ public sealed class MarkdownComposer
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Check, "Apply custom color",
                 isInPopup: true))
         {
-            body = ApplyWrap(body, $"<color={_colorHex}>", "</color>");
+            body = ApplyWrap(body, $"<color={_colorHex}>", "</color>", _colorTarget.Selection);
             SpheneUI.Popups.CloseFlyout("color-" + _id);
         }
     }
