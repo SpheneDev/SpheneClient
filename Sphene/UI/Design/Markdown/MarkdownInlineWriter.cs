@@ -62,13 +62,17 @@ internal sealed class MarkdownInlineWriter
     private bool _lastWasChip;
     private float _lastChipEndX;
     private float _lastChipY = -1f;
-    // End of the current underline run: while consecutive words on one line
-    // carry underline/link styling in the same color, the inter-word gap is
-    // underlined too, so an underlined sentence reads as one solid line
-    // instead of being interrupted between words. -1 = no open run.
-    private float _underlineRunEndX = -1f;
-    private float _underlineRunY = -1f;
-    private uint _underlineRunColor;
+    // End of the last drawn underline segment: while consecutive words on one
+    // line carry underline/link styling in the same color, the next segment
+    // starts slightly BEFORE this end (overlap) and covers the inter-word
+    // space, so the underline reads as one solid line. The overlap hides
+    // segment joints, which can show as gaps at fractional DPI scales on
+    // secondary monitors (per-viewport DpiScale). The line is drawn
+    // immediately with the word - deferred drawing does not reach secondary
+    // viewports. -1 = no open run.
+    private float _uRunEndX = -1f;
+    private float _uRunLineY = -1f;
+    private uint _uRunColor;
 
     public MarkdownInlineWriter(Action<string, string>? imageBlock)
     {
@@ -76,6 +80,11 @@ internal sealed class MarkdownInlineWriter
     }
 
     public float RightBound { get; set; }
+
+    /// <summary>Closes the current underline run (next underlined word starts a
+    /// fresh segment). The segments themselves are drawn immediately with each
+    /// word - never deferred.</summary>
+    private void ResetUnderlineRun() => _uRunEndX = -1f;
 
     /// <summary>
     /// Marks the current cursor as the left edge of a logical line. ImGui's
@@ -95,7 +104,7 @@ internal sealed class MarkdownInlineWriter
         RightBound = rightBound;
         _pendingSpaces = 0;
         _lastWasChip = false;
-        _underlineRunEndX = -1f;
+        ResetUnderlineRun();
     }
 
     public void NewLine()
@@ -105,7 +114,7 @@ internal sealed class MarkdownInlineWriter
         _lineHeight = ImGui.GetTextLineHeight();
         _pendingSpaces = 0;
         _lastWasChip = false;
-        _underlineRunEndX = -1f;
+        ResetUnderlineRun();
     }
 
     public void Write(ContainerInline? container, SpanStyle style)
@@ -230,6 +239,7 @@ internal sealed class MarkdownInlineWriter
             }
             case LinkInline link when link.IsImage:
             {
+                ResetUnderlineRun(); // image block breaks the run
                 ImGui.SetCursorScreenPos(new Vector2(_nextX, _lineY + _lineHeight));
                 _imageBlock?.Invoke(link.Url ?? string.Empty, CollectText(link));
                 _nextX = _lineStartX;
@@ -452,7 +462,14 @@ internal sealed class MarkdownInlineWriter
             while (k < n && !char.IsWhiteSpace(text[k])
                 && !(runIdx < runs.Count && runs[runIdx].Start == k))
                 k++;
-            EmitWord(text[i..k], _pendingSpaces, style);
+            // Whitespace right after the word: when the word is underlined,
+            // its underline segment extends over these spaces, so spaces
+            // inside an underlined span are covered by the preceding word
+            // itself - independent of any run state.
+            var t = k;
+            while (t < n && text[t] != '\n' && char.IsWhiteSpace(text[t]))
+                t++;
+            EmitWord(text[i..k], _pendingSpaces, style, trailingSpaces: t - k);
             _pendingSpaces = 0;
             i = k;
         }
@@ -486,7 +503,7 @@ internal sealed class MarkdownInlineWriter
         _nextX += emojiSize;
         _lineHeight = MathF.Max(_lineHeight, lineH);
         _lastWasChip = false;
-        _underlineRunEndX = -1f; // emoji atom carries no underline - breaks the run
+        ResetUnderlineRun(); // emoji atom carries no underline - breaks the run
     }
 
     private static Vector4 EffectiveColor(in SpanStyle s)
@@ -504,7 +521,8 @@ internal sealed class MarkdownInlineWriter
         return ImGui.GetStyle().Colors[(int)ImGuiCol.Text];
     }
 
-    private void EmitWord(string word, int spaces, in SpanStyle style, bool linkColorOnly = false)
+    private void EmitWord(string word, int spaces, in SpanStyle style, bool linkColorOnly = false,
+        int trailingSpaces = 0)
     {
         var scale = SpheneUI.Scale;
         // Headings carry a real font face - FontScale is only the sup/sub
@@ -581,7 +599,7 @@ internal sealed class MarkdownInlineWriter
                 if (style.SpoilerKey != null && ImGui.IsItemClicked(ImGuiMouseButton.Left))
                     MarkdownRenderer.ToggleSpoiler(style.SpoilerKey);
                 _lastWasChip = false;
-                _underlineRunEndX = -1f;
+                ResetUnderlineRun();
             }
             else
             {
@@ -617,27 +635,31 @@ internal sealed class MarkdownInlineWriter
                 if (style.Underline || style.Link != null)
                 {
                     var lineY = pos.Y + lineH - 1f;
-                    // Bridge the inter-word gap when the previous word on this
-                    // line ended an underline run in the same color - spaces
-                    // inside an underlined span stay underlined, so the line
-                    // reads continuous instead of dashed between words. The
-                    // bridge and the word underline merge into ONE line so no
-                    // sub-pixel seam can appear at the joint.
+                    // Draw immediately with the word (deferred drawing does
+                    // not reach secondary viewports). The segment spans the
+                    // word PLUS its trailing spaces, so spaces inside an
+                    // underlined span are underlined by the preceding word
+                    // itself. When this word continues an open run on the
+                    // same line in the same color, start slightly before the
+                    // previous end so the joint overlaps - at fractional DPI
+                    // scales on secondary monitors abutting 1px segments can
+                    // otherwise show as gaps between words.
                     var startX = pos.X;
-                    if (_underlineRunEndX >= 0f && MathF.Abs(_underlineRunY - pos.Y) < 0.5f
-                        && _underlineRunColor == effU32 && pos.X > _underlineRunEndX)
+                    if (_uRunEndX >= 0f && MathF.Abs(_uRunLineY - lineY) < 0.5f
+                        && _uRunColor == effU32)
                     {
-                        startX = _underlineRunEndX;
+                        startX = MathF.Max(_lineStartX, _uRunEndX - 2f * scale);
                     }
-                    drawList.AddLine(new Vector2(startX, lineY), new Vector2(pos.X + wordW, lineY),
+                    var endX = pos.X + wordW + trailingSpaces * ImGui.CalcTextSize(" ").X;
+                    drawList.AddLine(new Vector2(startX, lineY), new Vector2(endX, lineY),
                         effU32, MathF.Max(1f, scale));
-                    _underlineRunEndX = pos.X + wordW;
-                    _underlineRunY = pos.Y;
-                    _underlineRunColor = effU32;
+                    _uRunEndX = pos.X + wordW;
+                    _uRunLineY = lineY;
+                    _uRunColor = effU32;
                 }
                 else
                 {
-                    _underlineRunEndX = -1f;
+                    ResetUnderlineRun();
                 }
                 if (style.Strike)
                 {
