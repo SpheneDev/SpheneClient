@@ -674,15 +674,26 @@ public static partial class SpheneUI
             int maxLength, Vector2 size, ImGuiInputTextFlags flags,
             ImGui.ImGuiInputTextCallbackRefContextDelegate<TContext> callback,
             ref TContext context,
-            float trailingWidth = 0f, float preferredWidth = -1f)
+            float trailingWidth = 0f, float preferredWidth = -1f,
+            Helpers.Emoji.EmojiTextCodec? encodedEmoji = null)
         {
             using var style = PushValueControlStyle();
             // same 16-bit ImWchar boundary as the single-line overload:
             // emoji placeholders ride the buffer, the model keeps real text.
             var codec = context is Helpers.Emoji.EmojiEditQueue q ? q.Codec : null;
             var view = codec?.Encode(value) ?? value;
-            var changed = ImGui.InputTextMultiline(PrepareLabeledControl(label, trailingWidth, preferredWidth),
-                ref view, maxLength, size, flags, callback, ref context);
+            var widgetLabel = PrepareLabeledControl(label, trailingWidth, preferredWidth);
+            var renderCodec = encodedEmoji ?? codec;
+            var drawSprites = renderCodec != null && renderCodec.HasPlaceholders(view);
+            var textColor = ImGui.GetColorU32(ImGuiCol.Text);
+            var widgetId = drawSprites ? ImGui.GetID(widgetLabel) : 0u;
+            if (drawSprites) ImGui.PushStyleColor(ImGuiCol.Text, Vector4.Zero);
+            var changed = ImGui.InputTextMultiline(widgetLabel, ref view, maxLength, size, flags, callback, ref context);
+            if (drawSprites)
+            {
+                ImGui.PopStyleColor();
+                Emoji.DrawEditorText(widgetId, view, renderCodec!, textColor);
+            }
             // the write-back is unconditional: the codec path expands
             // placeholders into the model, the passthrough path hands the
             // buffer content back verbatim - a null codec must never turn

@@ -275,7 +275,7 @@ public static class EmojiCore
             {
                 sb.Append('_');
             }
-            sb.Append(cp.ToString("x"));
+            sb.Append(cp.ToString("x4"));
         }
         return sb.ToString();
     }
@@ -329,7 +329,7 @@ public static class EmojiCore
             {
                 sb.Append('_');
             }
-            sb.Append(cps[i].ToString("x"));
+            sb.Append(cps[i].ToString("x4"));
         }
         return sb.ToString();
     }

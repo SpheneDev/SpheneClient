@@ -54,6 +54,15 @@ public sealed class EmojiTextCodec
         return cp;
     }
 
+    public bool HasPlaceholders(string view)
+    {
+        if (_byPua.Count == 0) return false;
+        foreach (char c in view)
+            if (c is >= (char)PlaceholderStart and <= (char)PlaceholderEnd && _byPua.ContainsKey(c))
+                return true;
+        return false;
+    }
+
     /// <summary>Buffer view: every emoji sequence becomes its placeholder.</summary>
     public string Encode(string text)
     {

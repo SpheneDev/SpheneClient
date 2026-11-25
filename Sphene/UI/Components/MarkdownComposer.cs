@@ -94,7 +94,7 @@ public sealed class MarkdownComposer
 
     private EditContext _edit = new();
     private bool _refocus;
-    private string? _pendingInsert;
+    private readonly Queue<string> _pendingInserts = new();
     private int _editEpoch;
     private (string Body, MarkdownSelection Selection) _colorTarget;
     private (string Body, MarkdownSelection Selection) _sizeTarget;
@@ -153,22 +153,8 @@ public sealed class MarkdownComposer
         {
             SpheneUI.Text.Colored(_error, SpheneUI.Palette.Warning);
         }
-        // markup edits are applied to the model synchronously at click time -
-        // the refocus merely returns the caret to the input so the caret
-        // target lands and typing continues where the edit left off
-        if (_refocus)
-        {
-            _refocus = false;
-            ImGui.SetKeyboardFocusHere();
-        }
-        if (_pendingInsert != null)
-        {
-            // the pick landed outside the body's ref scope - splice it now,
-            // one frame later, through the same managed path
-            var insert = _pendingInsert;
-            _pendingInsert = null;
+        while (_pendingInserts.TryDequeue(out var insert))
             body = ApplyInsert(body, insert);
-        }
         if (!_undoBaselineInit)
         {
             _undoBaselineInit = true;
@@ -194,9 +180,16 @@ public sealed class MarkdownComposer
             // widget state re-initializes from the edited text instead of
             // resurrecting the stale pre-edit buffer over the model.
             var view = _edit.Codec.Encode(body);
+            // Keep the picker open for consecutive picks. ApplySplice already advanced the
+            // selection in the model, even while the search box owns keyboard focus.
+            if (_refocus && !SpheneUI.Popups.IsFlyoutOpen($"emoji-{_id}"))
+            {
+                ImGui.SetKeyboardFocusHere();
+                _refocus = false;
+            }
             SpheneUI.Controls.InputTextMultiline(label + "##me" + _editEpoch, ref view, maxLength,
                 new Vector2(inputW, h), flags, OnInputCallback, ref _edit,
-                trailingWidth: 0f, preferredWidth: -1f);
+                encodedEmoji: _edit.Codec);
             _inputWasActive = ImGui.IsItemActive();
             var expanded = _edit.Codec.Expand(view);
             if (!string.Equals(expanded, body, StringComparison.Ordinal))
@@ -247,8 +240,7 @@ public sealed class MarkdownComposer
     /// same managed path the toolbar edits use.</summary>
     public void QueueInsertText(string insert)
     {
-        _pendingInsert = insert;
-        _refocus = true;
+        _pendingInserts.Enqueue(insert);
     }
 
     private string ApplySplice(string body, (string View, int Caret) edit)
@@ -598,8 +590,7 @@ public sealed class MarkdownComposer
     {
         if (PendingInserts.TryRemove(_id, out var ins))
         {
-            _pendingInsert = ins;
-            _refocus = true;
+            QueueInsertText(ins);
         }
     }
 
@@ -635,8 +626,7 @@ public sealed class MarkdownComposer
         {
             if (SpheneUI.Icons.TextButton(FontAwesomeIcon.Plus, "Insert"))
             {
-                _pendingInsert = " " + token;
-            _refocus = true;
+                QueueInsertText(" " + token);
                 _refInput = null;
                 SpheneUI.Popups.CloseFlyout("ref-" + _id);
             }

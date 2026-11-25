@@ -541,6 +541,76 @@ public static partial class SpheneUI
             ImGui.PopClipRect();
         }
 
+        /// <summary>Paints the encoded multiline field inside its native child. Using the same
+        /// glyph advances as InputText keeps the sprites aligned with mouse selection and the caret.</summary>
+        internal static void DrawEditorText(uint id, string view, EmojiTextCodec codec, uint textColor)
+        {
+            ref var children = ref ImGuiP.GetCurrentWindow().DC.ChildWindows;
+            if (children.Size == 0) return;
+            var child = children[children.Size - 1];
+            if (child.ChildId != id || child.SkipItems) return;
+
+            var active = ImGui.IsItemActive();
+            var state = ImGuiP.GetInputTextState(id);
+            var scrollX = active && !state.IsNull ? state.ScrollX : 0f;
+            var caret = active && !state.IsNull && (!ImGui.GetIO().ConfigInputTextCursorBlink
+                || state.CursorAnim <= 0f || state.CursorAnim % 1.2f <= 0.8f)
+                ? ImGuiP.GetCursorPos(state) : -1;
+            var origin = child.Pos + ImGui.GetStyle().FramePadding - new Vector2(scrollX, child.Scroll.Y);
+            var clip = child.InnerClipRect;
+            var dl = child.DrawList;
+            var font = ImGui.GetFont();
+            var height = ImGui.GetFontSize();
+            var scale = height / font.FontSize;
+            var atlas = Atlas();
+            var tint = (textColor & 0xff000000u) | 0x00ffffffu;
+
+            dl.PushClipRect(clip.Min, clip.Max, true);
+            int start = 0;
+            float y = origin.Y;
+            while (start <= view.Length)
+            {
+                if (y >= clip.Max.Y) break;
+                int newline = view.IndexOf('\n', start);
+                int end = newline < 0 ? view.Length : newline;
+                if (y + height > clip.Min.Y)
+                {
+                    float x = origin.X;
+                    int plain = start;
+                    float plainX = x;
+                    for (int i = start; i <= end; i++)
+                    {
+                        if (i == caret)
+                            dl.AddLine(new Vector2(x, y + 1), new Vector2(x, y + height - 1), textColor);
+                        var c = i < end ? view[i] : '\0';
+                        var advance = c is '\r' or '\0' ? 0f : font.GetCharAdvance(c) * scale;
+                        var isEmoji = codec.TryResolve(c, out var sequence);
+                        if (i == end || isEmoji)
+                        {
+                            if (i > plain)
+                                dl.AddText(new Vector2(plainX, y), textColor, view[plain..i]);
+                            if (isEmoji)
+                            {
+                                var side = MathF.Min(height, advance);
+                                var pos = new Vector2(x + (advance - side) * 0.5f, y + (height - side) * 0.5f);
+                                if (atlas != null && TrySprite(sequence, out var uv0, out var uv1))
+                                    dl.AddImage(atlas.Handle, pos, pos + new Vector2(side), uv0, uv1, tint);
+                                else
+                                    dl.AddText(pos, textColor, sequence);
+                            }
+                            plain = i + 1;
+                            plainX = x + advance;
+                        }
+                        x += advance;
+                    }
+                }
+                if (newline < 0) break;
+                start = newline + 1;
+                y += height;
+            }
+            dl.PopClipRect();
+        }
+
         /// <summary>Render width of everything before <paramref name="charEnd"/>,
         /// matching the overlay's own slot math (emoji occupy <paramref name="emojiW"/>).</summary>
         private static float MeasurePrefix(string value, List<EmojiCore.Run> runs,
