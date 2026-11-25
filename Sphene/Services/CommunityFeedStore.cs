@@ -17,7 +17,7 @@ namespace Sphene.Services;
 public sealed class CommunityFeedStore
 {
     /// <summary>One in-flight request bound to the generation + cursor it started on.</summary>
-    public readonly record struct FeedRequest(int Generation, string? Cursor)
+    public readonly record struct FeedRequest(int Generation, string? Cursor, int ChangeVersion = 0, int VisibleCount = 0)
     {
         public bool IsFirstPage => Cursor == null;
     }
@@ -32,6 +32,7 @@ public sealed class CommunityFeedStore
     private bool _loading;
     private bool _requested;
     private int _generation;
+    private int _changeVersion;
     private DateTime _nextRetryUtc;
     private bool _refreshFailed;
     private bool _pageFailed;
@@ -44,34 +45,6 @@ public sealed class CommunityFeedStore
     public IReadOnlyList<SyncshellCommunityFeedItemDto> Items
     {
         get { lock (_lock) { return _items; } }
-    }
-
-    /// <summary>Patches engagement state on every row matching
-    /// (<paramref name="kind"/>, <paramref name="itemId"/>) in a fresh
-    /// snapshot - the in-place like toggle updates counts without a refetch.
-    /// Rows are records, so the patch rebinds the list; readers holding the
-    /// previous snapshot keep a stable view.</summary>
-    public void PatchReaction(SyncshellFeedItemKind kind, long itemId,
-        ReactionSummaryDto summary)
-    {
-        lock (_lock)
-        {
-            var copy = new List<SyncshellCommunityFeedItemDto>(_items.Count);
-            var touched = false;
-            foreach (var item in _items)
-            {
-                if (item.Kind == kind && (item.ItemId ?? item.Id) == itemId)
-                {
-                    copy.Add(WithReactionSummary(item, summary));
-                    touched = true;
-                }
-                else
-                {
-                    copy.Add(item);
-                }
-            }
-            if (touched) _items = copy;
-        }
     }
 
     /// <summary>True while a fetch is in flight.</summary>
@@ -203,6 +176,39 @@ public sealed class CommunityFeedStore
         lock (_lock) { _requested = true; }
     }
 
+    /// <summary>Schedule a quiet refresh of the loaded part of the stream. A push
+    /// received during a fetch stays pending after that fetch completes.</summary>
+    public void ActivityChanged(DateTime now)
+    {
+        lock (_lock)
+        {
+            if (!_loading && !_requested && _items.Count == 0) return;
+            _changeVersion++;
+            _requested = false;
+            if (_nextRetryUtc == default) _nextRetryUtc = now.AddSeconds(2);
+        }
+    }
+
+    public async Task ReadVisiblePages(FeedRequest request,
+        Func<FeedPageRequestDto, Task<SyncshellCommunityFeedPageDto>> fetch)
+    {
+        var items = new List<SyncshellCommunityFeedItemDto>();
+        var cursor = request.Cursor;
+        do
+        {
+            lock (_lock)
+            {
+                if (request.Generation != _generation) return;
+            }
+            var page = await fetch(new(cursor)).ConfigureAwait(false);
+            items.AddRange(page.Items);
+            if (page.NextCursor != null && string.Equals(page.NextCursor, cursor, StringComparison.Ordinal))
+                throw new InvalidOperationException("Activity feed returned the same continuation cursor.");
+            cursor = page.NextCursor;
+        } while (request.IsFirstPage && cursor != null && items.Count < request.VisibleCount);
+        ApplyPage(request, items, cursor);
+    }
+
     /// <summary>Drops the cache and bumps the generation - responses bound to
     /// older generations are discarded on arrival.</summary>
     public void Invalidate()
@@ -238,7 +244,7 @@ public sealed class CommunityFeedStore
                 return false;
             }
             _loading = true;
-            request = new FeedRequest(_generation, null);
+            request = new FeedRequest(_generation, null, _changeVersion, _items.Count);
             return true;
         }
     }
@@ -271,8 +277,8 @@ public sealed class CommunityFeedStore
             if (request.IsFirstPage)
             {
                 _items = items;
-                _requested = true;
-                _nextRetryUtc = default;
+                _requested = request.ChangeVersion == _changeVersion;
+                if (_requested) _nextRetryUtc = default;
                 _refreshFailed = false;
             }
             else

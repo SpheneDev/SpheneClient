@@ -332,9 +332,9 @@ public static partial class SpheneUI
         /// <summary>Banner strip height in unscaled pixels, shared across hero renderers · density-aware.</summary>
         public static float HeroBannerHeight => Density.Current switch
         {
-            DensityProfile.Compact => 74f,
-            DensityProfile.Comfortable => 104f,
-            _ => 92f,
+            DensityProfile.Compact => 108f,
+            DensityProfile.Comfortable => 146f,
+            _ => 128f,
         };
 
         /// <summary>Avatar size in unscaled pixels, shared across hero renderers · density-aware.</summary>
@@ -347,7 +347,6 @@ public static partial class SpheneUI
 
         /// <summary>Fraction of the banner height that dissolves into the
         /// card body via a fade of the card's own accent tint.</summary>
-        private const float HeroBannerBodyFade = 0.45f;
 
         /// <summary>
         /// The profile hero surface: a full-bleed banner dissolving into the
@@ -400,20 +399,25 @@ public static partial class SpheneUI
                 fallbackAccentA, fallbackAccentB, watermark,
                 rounding: bannerRounding, corners: bannerCorners);
             drawList.PopClipRect();
-            var fadeH = bannerHeight * HeroBannerBodyFade;
+            // Identity rides the banner, so the bottom edge is a hard scrim
+            // for legibility - the dissolve-into-surface fade belonged to
+            // the split hero where content continued below the cover.
+            var fadeH = bannerHeight * 0.62f;
             Media.FillRoundedGradient(drawList,
                 new Vector2(bannerMin.X, bannerMax.Y - fadeH), bannerMax,
-                ColorUtils.WithAlpha(surface, 0f), ColorUtils.WithAlpha(surface, 0f),
-                surface, surface,
+                ColorUtils.WithAlpha(Vector4.Zero, 0f), ColorUtils.WithAlpha(Vector4.Zero, 0f),
+                new Vector4(0f, 0f, 0f, 0.52f), new Vector4(0f, 0f, 0f, 0.52f),
                 bannerRounding, bannerCorners & ImDrawFlags.RoundCornersBottom);
 
             ImGui.Dummy(new Vector2(contentWidth, bannerMax.Y - cursor.Y));
             var editing = edit?.Enabled == true;
 
-            // The avatar punches out of the banner · a surface-colored ring
-            // reads as a cut-out, the thin rim keeps the silhouette crisp.
+            // The avatar sits fully inside the banner's bottom-left -
+            // community-style, so the hero ends at the banner edge and the
+            // tab strip docks flush below it. The surface-colored ring
+            // keeps the silhouette crisp against the art.
             var avatarPos = cursor + new Vector2(10f * scale,
-                bannerMax.Y - cursor.Y - avatarSize * 0.45f);
+                bannerMax.Y - cursor.Y - avatarSize - 10f * scale);
             ImGui.SetCursorScreenPos(avatarPos);
             Media.Avatar(avatar, avatarSize);
             var ringT = MathF.Max(2f, 3f * scale);
@@ -479,14 +483,11 @@ public static partial class SpheneUI
             }
 
             var textMin = new Vector2(avatarPos.X + avatarSize + 10f * scale,
-                bannerMax.Y + 4f * scale);
+                avatarPos.Y + 1f * scale);
             var textMaxX = cursor.X + contentWidth - 10f * scale;
             var lineH = ImGui.GetTextLineHeight();
             var hasStatus = !string.IsNullOrWhiteSpace(profile.StatusMessage);
             var hasTags = !string.IsNullOrWhiteSpace(profile.Tags);
-            var hasDesc = !string.IsNullOrWhiteSpace(profile.Description)
-                && !string.Equals(profile.Description,
-                    SpheneProfileManager.NoDescriptionPlaceholder, StringComparison.Ordinal);
             // Thought bubble · a comic trail of three growing dots rises on
             // a curved arc from the avatar's upper-right rim into the status
             // bubble, which sits above-right of the avatar inside the cover
@@ -539,18 +540,7 @@ public static partial class SpheneUI
                     thoughtBubble = true;
                 }
             }
-            // Bio panel on the right · the description leaves the identity
-            // column for a bounded About-me card whenever the header is
-            // wide enough to host it; narrow headers keep the inline preview.
-            // Bio panel on the right · the description leaves the identity
-            // column for a bounded About-me card whenever the header is
-            // wide enough to host it; narrow headers keep the inline preview.
-            var bioGap = 16f * scale;
-            var bioW = MathF.Min(300f * scale,
-                MathF.Max(180f * scale, (textMaxX - textMin.X) * 0.36f));
-            var bioPanel = (editing || hasDesc)
-                && textMaxX - textMin.X - bioW - bioGap >= 190f * scale;
-            var columnMaxX = bioPanel ? textMaxX - bioW - bioGap : textMaxX;
+            var columnMaxX = textMaxX;
             // No child window here on purpose: a fixed-size frame keeps
             // claiming the mouse over its empty tail and shadows whatever
             // follows the hero (the tab bar's top half died under it).
@@ -559,10 +549,12 @@ public static partial class SpheneUI
             // alone leaves wrapped lines snapping back to the window's own
             // origin (which sits under the nav rail in the fixed zone).
             ContentBounds.Push(new Vector2(textMin.X, columnMaxX));
-            ImGui.SetCursorScreenPos(textMin + heroTextPad);
+            // On-banner identity: no vertical window pad - the text block
+            // must end near the avatar's bottom edge inside the cover.
+            ImGui.SetCursorScreenPos(textMin + new Vector2(heroTextPad.X, 0f));
             var textIndent = Layout.FlowIndentTo(textMin.X + heroTextPad.X);
             var inputWidth = MathF.Max(140f, textMaxX - textMin.X);
-            var nameWidth = MathF.Max(140f, columnMaxX - textMin.X);
+            var nameWidth = inputWidth;
             DrawHeroName(displayName, metaLine, accent, editing ? edit : null,
                 nameWidth, scale);
             var onNsfw = edit?.OnNsfwToggled;
@@ -596,129 +588,11 @@ public static partial class SpheneUI
             {
                 DrawHeroTags(profile.Tags, editing ? edit : null, accent, scale);
             }
-            if (editing && !bioPanel)
-            {
-                // narrow header fallback · the About-me slot does not fit,
-                // so the bio edit keeps the inline block
-                var descBuf = edit!.DescriptionBuffer;
-                // Keystrokes only update the buffer - committing per char
-                // stages the draft early, pops the unsaved toast window into
-                // existence and that new window steals nav focus mid-typing.
-                if (edit.EmojiQueue.ConsumeRefocus())
-                {
-                    ImGui.SetKeyboardFocusHere();
-                }
-                var emojiHook = EmojiPickerHook;
-                var descW = inputWidth - (emojiHook != null
-                    ? ImGui.GetFrameHeight() + 4f * scale : 0f);
-                _ = Controls.InputTextMultiline("##hero-desc",
-                    ref descBuf, 2000,
-                    new Vector2(descW, lineH * 3f + 8f * scale),
-                    ImGuiInputTextFlags.CallbackAlways,
-                    Helpers.Emoji.EmojiEditQueue.OnCallback, ref edit.EmojiQueue);
-                if (emojiHook != null)
-                {
-                    ImGui.SameLine(0f, 4f * scale);
-                    emojiHook.TriggerButton("profile-bio-emoji",
-                        edit.EmojiQueue.Enqueue);
-                }
-                if (descBuf.Length == 0 && !ImGui.IsItemActive())
-                {
-                    // multiline inputs carry no hint flag · painted placeholder
-                    drawList.AddText(ImGui.GetItemRectMin()
-                            + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
-                        ColorUtils.ToU32(Colors.TextMuted),
-                        "Your bio · tell others about yourself...");
-                }
-                edit.DescriptionBuffer = descBuf;
-                if (ImGui.IsItemDeactivatedAfterEdit())
-                {
-                    edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
-                }
-            }
-            else if (hasDesc && !bioPanel)
-            {
-                var preview = profile.Description;
-                if (preview.Length > 140) preview = preview[..140] + "...";
-                Emoji.Wrapped(preview,
-                    columnMaxX - ImGui.GetWindowPos().X, Colors.TextMuted);
-            }
             var textActualBottom = ImGui.GetCursorScreenPos().Y;
             Layout.FlowUnindent(textIndent);
             ContentBounds.Pop();
             var floatRestore = ImGui.GetCursorScreenPos();
 
-            // Right-side About-me panel + its anchored full-bio flyout. In
-            // edit mode the same frame hosts the bio input at the exact spot
-            // the text later renders - no jump when committing.
-            var bioPanelBottom = 0f;
-            var bioEditMin = Vector2.Zero;
-            var bioEditMax = Vector2.Zero;
-            var hasBioEditZone = false;
-            var bioFlyoutId = $"profile-bio-{displayName}";
-            if (bioPanel && editing)
-            {
-                var bMin = new Vector2(textMaxX - bioW,
-                    textMin.Y + heroTextPad.Y);
-                var bPad = 10f * scale;
-                var bGap = 6f * scale;
-                var bEditH = lineH * 3f + 8f * scale;
-                var bMax = bMin + new Vector2(bioW,
-                    bPad * 2f + lineH + bGap + bEditH);
-                var bRounding = 10f * scale;
-                drawList.AddRectFilled(bMin, bMax,
-                    ColorUtils.ToU32(Layout.NavRailBandColor()), bRounding);
-                drawList.AddRect(bMin, bMax,
-                    ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.30f)),
-                    bRounding);
-                drawList.AddText(bMin + new Vector2(bPad, bPad),
-                    ColorUtils.ToU32(Colors.TextMuted), "About me");
-                var bInputMin = bMin + new Vector2(bPad, bPad + lineH + bGap);
-                ImGui.SetCursorScreenPos(bInputMin);
-                var bIndent = Layout.FlowIndentTo(bInputMin.X);
-                var descBuf = edit!.DescriptionBuffer;
-                if (edit.EmojiQueue.ConsumeRefocus())
-                {
-                    ImGui.SetKeyboardFocusHere();
-                }
-                var bioEmojiHook = EmojiPickerHook;
-                var bioInputW = bioW - bPad * 2f - (bioEmojiHook != null
-                    ? ImGui.GetFrameHeight() + 4f * scale : 0f);
-                _ = Controls.InputTextMultiline("##hero-desc",
-                    ref descBuf, 2000,
-                    new Vector2(bioInputW, bEditH),
-                    ImGuiInputTextFlags.CallbackAlways,
-                    Helpers.Emoji.EmojiEditQueue.OnCallback, ref edit.EmojiQueue);
-                if (bioEmojiHook != null)
-                {
-                    ImGui.SameLine(0f, 4f * scale);
-                    bioEmojiHook.TriggerButton("profile-bio-emoji",
-                        edit.EmojiQueue.Enqueue);
-                }
-                if (descBuf.Length == 0 && !ImGui.IsItemActive())
-                {
-                    drawList.AddText(ImGui.GetItemRectMin()
-                            + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
-                        ColorUtils.ToU32(Colors.TextMuted),
-                        "Your bio · tell others about yourself...");
-                }
-                edit.DescriptionBuffer = descBuf;
-                if (ImGui.IsItemDeactivatedAfterEdit())
-                {
-                    edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
-                }
-                Layout.FlowUnindent(bIndent);
-                bioPanelBottom = bMax.Y;
-                bioEditMin = bMin;
-                bioEditMax = bMax;
-                hasBioEditZone = true;
-            }
-            else if (bioPanel)
-            {
-                bioPanelBottom = DrawBioPanel(drawList, profile.Description,
-                    new Vector2(textMaxX - bioW, textMin.Y + heroTextPad.Y),
-                    bioW, accent, scale, bioFlyoutId);
-            }
             ImGui.SetCursorScreenPos(floatRestore);
 
             // Thought bubble - drawn after the identity flow so its dots
@@ -812,19 +686,18 @@ public static partial class SpheneUI
             // keep hover/click priority where they overlap it.
             if (editing && edit!.OnBannerClicked != null)
             {
-                var bannerSize = bannerMax - bannerMin;
+                // The zone ends above the identity strip - the in-place
+                // name/tag inputs live on the banner now and must win hover.
+                var bannerSize = new Vector2(bannerMax.X - bannerMin.X,
+                    MathF.Max(0f, avatarPos.Y - 4f * scale - bannerMin.Y));
                 ImGui.SetCursorScreenPos(bannerMin);
                 var clicked = ImGui.InvisibleButton($"##hero-banner-edit-{displayName}",
                         bannerSize);
                 var overInteractables =
-                    (edit!.OnAvatarClicked != null && ImGui.IsMouseHoveringRect(
-                        avatarPos, avatarPos + new Vector2(avatarSize)))
-                    || (hasActionsZone && ImGui.IsMouseHoveringRect(
+                    (hasActionsZone && ImGui.IsMouseHoveringRect(
                         actionsZoneMin, actionsZoneMax))
                     || (hasStatusEditZone && ImGui.IsMouseHoveringRect(
-                        statusEditMin, statusEditMax))
-                    || (hasBioEditZone && ImGui.IsMouseHoveringRect(
-                        bioEditMin, bioEditMax));
+                        statusEditMin, statusEditMax));
                 if (clicked && !overInteractables)
                 {
                     edit.OnBannerClicked();
@@ -882,28 +755,11 @@ public static partial class SpheneUI
             // The text child reserves a worst-case estimate · the page must
             // advance from what was actually drawn or empty optional lines
             // leave a dead band between hero and the tab menu.
-            var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
-                MathF.Max(textActualBottom, MathF.Max(bioPanelBottom,
-                    hasActionsZone ? actionsZoneMax.Y : 0f)) + 4f * scale);
-            // Anchored full-bio flyout · opens from the panel's "More..."
-            // trigger without moving the header.
-            if (bioPanel && Popups.BeginFlyout(bioFlyoutId))
-            {
-                var flyW = MathF.Min(380f * scale,
-                    ImGui.GetIO().DisplaySize.X * 0.4f);
-                var flyH = Math.Clamp(
-                    Emoji.Measure(profile.Description,
-                        flyW - 8f * scale).Y + 8f * scale,
-                    lineH * 2f, 280f * scale);
-                if (Layout.BeginScrollArea("bio-text",
-                        new Vector2(flyW, flyH)))
-                {
-                    Emoji.Wrapped(profile.Description,
-                        flyW - 8f * scale, Colors.TextSecondary);
-                }
-                Layout.EndScrollArea();
-                Popups.EndFlyout();
-            }
+            // The hero ends at the banner edge - the identity rides the
+            // scrim inside. Overflow text (wrapping tags) extends the block
+            // past the banner rather than clipping mid-glyph.
+            var contentBottom = MathF.Max(bannerMax.Y,
+                textActualBottom + 4f * scale);
             if (drawStats != null)
             {
                 // Stats/meta align to the avatar's left edge · one continuous
@@ -979,7 +835,6 @@ public static partial class SpheneUI
             var drawList = ImGui.GetWindowDrawList();
             var cursor = ImGui.GetCursorScreenPos();
             var contentWidth = ImGui.GetContentRegionAvail().X;
-            var surface = ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg];
             var lineH = ImGui.GetTextLineHeight();
             var barR = lineH * 0.30f;
 
@@ -992,17 +847,19 @@ public static partial class SpheneUI
                 accent, accent, rounding: bannerRounding, corners: bannerCorners);
             SkeletonSheen(drawList, bannerMin, bannerMax, phase);
             drawList.PopClipRect();
-            var fadeH = bannerHeight * HeroBannerBodyFade;
+            // Same scrim edge + interior identity the live hero renders -
+            // the skeleton must silhouette the layout it stands in for.
+            var fadeH = bannerHeight * 0.62f;
             Media.FillRoundedGradient(drawList,
                 new Vector2(bannerMin.X, bannerMax.Y - fadeH), bannerMax,
-                ColorUtils.WithAlpha(surface, 0f), ColorUtils.WithAlpha(surface, 0f),
-                surface, surface,
+                ColorUtils.WithAlpha(Vector4.Zero, 0f), ColorUtils.WithAlpha(Vector4.Zero, 0f),
+                new Vector4(0f, 0f, 0f, 0.52f), new Vector4(0f, 0f, 0f, 0.52f),
                 bannerRounding, bannerCorners & ImDrawFlags.RoundCornersBottom);
 
             ImGui.Dummy(new Vector2(contentWidth, bannerMax.Y - cursor.Y));
 
             var avatarPos = cursor + new Vector2(10f * scale,
-                bannerMax.Y - cursor.Y - avatarSize * 0.45f);
+                bannerMax.Y - cursor.Y - avatarSize - 10f * scale);
             ImGui.SetCursorScreenPos(avatarPos);
             ImGui.Dummy(new Vector2(avatarSize));
             SkeletonBlock(drawList, avatarPos, avatarPos + new Vector2(avatarSize),
@@ -1010,7 +867,7 @@ public static partial class SpheneUI
 
             var textX = avatarPos.X + avatarSize + 10f * scale;
             var textW = MathF.Max(60f * scale, cursor.X + contentWidth - 10f * scale - textX);
-            var nameY = bannerMax.Y + 4f * scale;
+            var nameY = avatarPos.Y + 4f * scale;
             SkeletonBlock(drawList, new Vector2(textX, nameY),
                 new Vector2(textX + textW * 0.55f, nameY + lineH * 1.15f), barR, phase + 0.12f);
             var metaY = nameY + lineH * 1.15f + 3f * scale;
@@ -1020,8 +877,7 @@ public static partial class SpheneUI
             SkeletonBlock(drawList, new Vector2(textX, statusY),
                 new Vector2(textX + textW * 0.85f, statusY + lineH), barR, phase + 0.36f);
 
-            var contentBottom = MathF.Max(avatarPos.Y + avatarSize + 6f * scale,
-                statusY + lineH + 4f * scale);
+            var contentBottom = bannerMax.Y;
             for (var row = 0; row < statsRows; row++)
             {
                 var rowW = contentWidth - 12f * scale;
@@ -1258,64 +1114,7 @@ public static partial class SpheneUI
             }
         }
 
-        /// <summary>
-        /// Right-side "About me" preview panel · a restrained tonal card with
-        /// a muted label, a clipped three-line bio preview and, only when the
-        /// text overflows, a "More..." trigger that opens the anchored flyout
-        /// (<paramref name="flyoutId"/>) instead of growing the header.
-        /// Returns the panel's bottom screen Y.
-        /// </summary>
-        private static float DrawBioPanel(ImDrawListPtr drawList, string bio,
-            Vector2 min, float width, Vector4 accent, float scale,
-            string flyoutId)
-        {
-            var pad = 10f * scale;
-            var innerW = width - pad * 2f;
-            var lineH = ImGui.GetTextLineHeight();
-            var gap = 6f * scale;
-            var maxPreviewH = lineH * 3f;
-            var textSize = Emoji.Measure(bio, innerW);
-            var truncated = textSize.Y > maxPreviewH + 1f;
-            var previewH = MathF.Min(textSize.Y, maxPreviewH);
-            var panelH = pad * 2f + lineH + gap + previewH
-                + (truncated ? gap + lineH : 0f);
-            var max = new Vector2(min.X + width, min.Y + panelH);
-            var rounding = 10f * scale;
-            drawList.AddRectFilled(min, max,
-                ColorUtils.ToU32(Layout.NavRailBandColor()), rounding);
-            drawList.AddRect(min, max,
-                ColorUtils.ToU32(ColorUtils.WithAlpha(Colors.Border, 0.30f)),
-                rounding);
-            drawList.AddText(min + new Vector2(pad, pad),
-                ColorUtils.ToU32(Colors.TextMuted), "About me");
-            var textMin = min + new Vector2(pad, pad + lineH + gap);
-            var restore = ImGui.GetCursorScreenPos();
-            ImGui.SetCursorScreenPos(textMin);
-            var indent = Layout.FlowIndentTo(textMin.X);
-            drawList.PushClipRect(textMin,
-                new Vector2(textMin.X + innerW, textMin.Y + previewH), true);
-            Emoji.DrawAt(drawList, textMin, bio, innerW, Colors.TextSecondary);
-            drawList.PopClipRect();
-            Layout.FlowUnindent(indent);
-            ImGui.SetCursorScreenPos(restore);
-            if (truncated)
-            {
-                const string moreLabel = "More...";
-                var morePos = new Vector2(min.X + pad,
-                    textMin.Y + previewH + gap);
-                ImGui.SetCursorScreenPos(morePos);
-                if (ImGui.InvisibleButton($"##{flyoutId}-trigger",
-                        ImGui.CalcTextSize(moreLabel)))
-                {
-                    Popups.ToggleFlyout(flyoutId);
-                }
-                drawList.AddText(morePos, ColorUtils.ToU32(
-                    ImGui.IsItemHovered() ? accent : Colors.TextSecondary),
-                    moreLabel);
-                ImGui.SetCursorScreenPos(restore);
-            }
-            return max.Y;
-        }
+
 
         /// <summary>
         /// Non-edit name line: the big font when it fits the column, the

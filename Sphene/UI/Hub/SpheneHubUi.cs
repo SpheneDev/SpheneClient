@@ -146,7 +146,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// <summary>Bounded per-shell community cache (MRU) - survives hub
     /// navigation so revisits don't refetch the full aggregate.</summary>
     private readonly ConcurrentDictionary<string, CommunityEntry> _communityMap = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> _communityLoadingMap = new(StringComparer.Ordinal);
+    private readonly System.Threading.Lock _communityGate = new();
+    private readonly ConcurrentDictionary<string, object> _communityLoadingMap = new(StringComparer.Ordinal);
     /// <summary>Failure latch per gid - backs off retries instead of
     /// re-firing the request every frame.</summary>
     private readonly ConcurrentDictionary<string, DateTimeOffset> _communityFailedAt = new(StringComparer.Ordinal);
@@ -245,10 +246,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private bool _favoritesLoading;
     private string _discoverSearch = string.Empty;
     private int _discoverSort;
-    private List<SyncshellCommunityFeedItemDto>? _friendActivityItems;
-    private string? _friendActivityCursor;
-    private bool _friendActivityLoading;
-    private bool _friendActivityPageFailed;
+    private readonly CommunityFeedStore _friendActivity = new();
     private Pair? _viewingFriend;
     private readonly Dictionary<string, SyncshellAdminUI> _embeddedAdminPanels = new(StringComparer.Ordinal);
     private byte[] _lastAvatarBytes = [];
@@ -477,6 +475,16 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             SpheneUI.Chrome.ResetFold(this, WindowName);
             IsOpen = true;
         });
+        // Comment-author deep-links from standalone windows (community
+        // window, admin planner) land here - the hub resolves pair vs
+        // public profile exactly like its own feed rows do.
+        Mediator.Subscribe<OpenAuthorProfileMessage>(this, (msg) =>
+        {
+            if (string.IsNullOrEmpty(msg.Uid)) return;
+            NavigateToAuthor(msg.Uid);
+            SpheneUI.Chrome.ResetFold(this, WindowName);
+            IsOpen = true;
+        });
         // A follow/unfollow from any community page reloads the Followed
         // section - and the directory's star flags go stale at the same time.
         Mediator.Subscribe<SyncshellFavoritesChangedMessage>(this, (_) =>
@@ -496,22 +504,38 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // one being viewed. Other shells' caches stay stale until opened.
         Mediator.Subscribe<LifestreamTravelStateChangedMessage>(this, (_) =>
             _communityPage.TravelVersion++);
+        Mediator.Subscribe<CommunityReactionWrittenMessage>(this, _ => _friendActivity.ActivityChanged(DateTime.UtcNow));
+        Mediator.Subscribe<UserReactionChangedMessage>(this, _ => _friendActivity.ActivityChanged(DateTime.UtcNow));
         Mediator.Subscribe<CommunityChangedMessage>(this, (msg) =>
         {
             var gid = msg.Community.Group.GID;
-            _shellMediaCache.TryRemove(gid, out _);
+            var change = msg.Community;
+            _friendActivity.ActivityChanged(DateTime.UtcNow);
             // cached thread pages only refetch on invalidate - the pushed
             // change names its target, so drop it even when a different
             // group is on screen (same fix as _blogComments below).
-            _communityPage.Comments.InvalidateForChange(msg.Community);
+            // Reaction-only pushes invalidate summaries inside the call and
+            // must never reach the page caches below - a count moving is not
+            // a reason to collapse the whole community page into a reload.
+            _communityPage.Comments.InvalidateForChange(change);
+            if (change.ReactionsOnly)
+            {
+                return;
+            }
+            _shellMediaCache.TryRemove(gid, out _);
             if (string.Equals(_communityCacheGid, gid, StringComparison.Ordinal))
             {
-                _ = RefreshCommunity();
+                _ = FetchCommunityAsync(gid, refresh: true);
             }
             else
             {
-                _communityMap.TryRemove(gid, out _);
-                _communityNoPage.TryRemove(gid, out _);
+                lock (_communityGate)
+                {
+                    _communityLoadingMap.TryRemove(gid, out _);
+                    _communityRefreshScheduled.TryRemove(gid, out _);
+                    _communityMap.TryRemove(gid, out _);
+                    _communityNoPage.TryRemove(gid, out _);
+                }
             }
         });
         Mediator.Subscribe<ClearProfileDataMessage>(this, (msg) =>
@@ -529,9 +553,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 SpheneUI.Media.Evict(FriendBannerKey);
                 _friendAvatarBytes = [];
                 _friendBannerBytes = [];
-                _friendActivityItems = null;
-                _friendActivityCursor = null;
-                _friendActivityPageFailed = false;
+                _friendActivity.Invalidate();
             }
             // Comment threads cache per post and only refetch on invalidate -
             // a profile push for ANY user (own chronicles included) can mean
@@ -1539,11 +1561,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         _communityTab = 0;
         _overviewFeedTab = 0;
         _communityCacheGid = null;
-        _communityMap.Clear();
-        _communityLoadingMap.Clear();
-        _communityFailedAt.Clear();
-        _communityNoPage.Clear();
-        _communityRefreshScheduled.Clear();
+        _friendActivity.Invalidate();
+        lock (_communityGate)
+        {
+            _communityMap.Clear();
+            _communityLoadingMap.Clear();
+            _communityFailedAt.Clear();
+            _communityNoPage.Clear();
+            _communityRefreshScheduled.Clear();
+        }
         _shellMediaCache.Clear();
         _shellMediaLoading.Clear();
         _profileViewerImages.Clear();
@@ -2366,9 +2392,9 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 DrawOwnProfileBlog(accent);
                 break;
             default:
-                DrawProfileAboutMe(renderProfile, accent, canEdit: true);
                 if (_profileEditMode)
                 {
+                    DrawProfileAboutMe(renderProfile, accent, canEdit: true);
                     _editProfileUi.DrawEmbedded();
                 }
                 else
@@ -2446,15 +2472,38 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     {
         var me = new UserData(_apiController.UID);
         var extras = _spheneProfileManager.GetProfileExtras(me);
-        DrawChroniclePreviewSection(extras, accent, isOwn: true,
-            () => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
-                SubPage: 2)),
-            id =>
+        void DrawChronicles()
+        {
+            DrawChroniclePreviewSection(extras, accent, isOwn: true,
+                () => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
+                    SubPage: 2)),
+                id =>
+                {
+                    _expandedChronicles.Add(id);
+                    NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
+                        SubPage: 2));
+                });
+        }
+        // About-me rides beside Recent Chronicles when a bio is set - unset
+        // bios leave the chronicles spanning the full width, no empty card.
+        if (HasVisibleBio(renderProfile))
+        {
+            using var cols = SpheneUI.Layout.BeginCardColumns("##own-overview-cols", 2);
+            if (cols.Success)
             {
-                _expandedChronicles.Add(id);
-                NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
-                    SubPage: 2));
-            });
+                ImGui.TableSetupColumn("chronicles", ImGuiTableColumnFlags.WidthStretch, 1.5f);
+                ImGui.TableSetupColumn("aboutme", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                DrawChronicles();
+                ImGui.TableSetColumnIndex(1);
+                DrawProfileAboutMe(renderProfile, accent, canEdit: true);
+            }
+        }
+        else
+        {
+            DrawChronicles();
+        }
         DrawPhotoPreviewSection(extras, _apiController.UID, $"own:{me.UID}",
             accent, isOwn: true,
             () => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
@@ -2464,9 +2513,20 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             "This is how your profile looks to others · hit Edit in the banner to restyle it, or add photos and Chronicles on the other tabs.");
     }
 
-    /// <summary>About-me card · the full bio as markdown, or a compact prompt.
-    /// Editing lives in the hero's About-me panel (same field) - the pen here
-    /// just enters that edit flow. Same card chrome as the community widgets.</summary>
+    /// <summary>True when the profile carries a real bio - the placeholder
+    /// string and whitespace count as unset.</summary>
+    private static bool HasVisibleBio(SpheneProfileData? profile)
+    {
+        var bio = profile?.Description;
+        return !string.IsNullOrWhiteSpace(bio)
+            && !string.Equals(bio, SpheneProfileManager.NoDescriptionPlaceholder,
+                StringComparison.Ordinal);
+    }
+
+    /// <summary>About-me card · the full bio as markdown. Unset bios render
+    /// nothing at all - except in edit mode, where the card hosts the bio
+    /// input itself (the hero no longer carries it). Same card chrome as the
+    /// community widgets.</summary>
     private void DrawProfileAboutMe(SpheneProfileData? profile, Vector4 accent,
         bool canEdit)
     {
@@ -2474,6 +2534,11 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var hasBio = !string.IsNullOrWhiteSpace(bio)
             && !string.Equals(bio, SpheneProfileManager.NoDescriptionPlaceholder,
                 StringComparison.Ordinal);
+        var editing = canEdit && _profileEditMode && profile is { IsFlagged: false };
+        if (!hasBio && !editing)
+        {
+            return;
+        }
         var actions = canEdit && !_profileEditMode && profile is { IsFlagged: false }
             ? new (FontAwesomeIcon, string, Action)?[]
             { (FontAwesomeIcon.Pen, "Edit your bio", EnterProfileEditMode) }
@@ -2481,15 +2546,51 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         SyncshellCommunityView.Widget("profile-about-me", "About me",
             FontAwesomeIcon.User, null, accent, () =>
             {
-                if (hasBio)
+                if (editing)
+                {
+                    // The bio edit lives here now - keystrokes only update the
+                    // buffer; committing per char would stage the draft early
+                    // and pop the unsaved toast window into existence, which
+                    // steals nav focus mid-typing.
+                    var edit = _heroEdit;
+                    if (edit.EmojiQueue.ConsumeRefocus())
+                    {
+                        ImGui.SetKeyboardFocusHere();
+                    }
+                    var scale = SpheneUI.Scale;
+                    var emojiHook = SpheneUI.EmojiPickerHook;
+                    var availW = ImGui.GetContentRegionAvail().X;
+                    var descW = availW - (emojiHook != null
+                        ? ImGui.GetFrameHeight() + 4f * scale : 0f);
+                    var descBuf = edit.DescriptionBuffer;
+                    _ = SpheneUI.Controls.InputTextMultiline("##profile-bio-edit",
+                        ref descBuf, 2000,
+                        new Vector2(descW, ImGui.GetTextLineHeight() * 5f + 8f * scale),
+                        ImGuiInputTextFlags.CallbackAlways,
+                        Helpers.Emoji.EmojiEditQueue.OnCallback, ref edit.EmojiQueue);
+                    if (emojiHook != null)
+                    {
+                        ImGui.SameLine(0f, 4f * scale);
+                        emojiHook.TriggerButton("profile-bio-emoji",
+                            edit.EmojiQueue.Enqueue);
+                    }
+                    if (descBuf.Length == 0 && !ImGui.IsItemActive())
+                    {
+                        // multiline inputs carry no hint flag · painted placeholder
+                        ImGui.GetWindowDrawList().AddText(ImGui.GetItemRectMin()
+                                + ImGui.GetStyle().FramePadding + new Vector2(1f, 1f),
+                            SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted),
+                            "Your bio · tell others about yourself...");
+                    }
+                    edit.DescriptionBuffer = descBuf;
+                    if (ImGui.IsItemDeactivatedAfterEdit())
+                    {
+                        edit.OnDescriptionCommitted?.Invoke(descBuf.Trim());
+                    }
+                }
+                else if (hasBio)
                 {
                     MarkdownRenderer.RenderMarkdown(bio!);
-                }
-                else
-                {
-                    SpheneUI.Text.MutedWrapped(canEdit
-                        ? "Tell others a little about yourself."
-                        : "No introduction yet.");
                 }
             }, null, actions);
     }
@@ -3241,7 +3342,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 profileFor: ProfileForUid, shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
                         {
                             NavigateFeedItem(item);
                         }
@@ -5783,7 +5884,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
             {
                 NavigateFeedItem(item);
             }
@@ -5819,7 +5920,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
             {
                 NavigateFeedItem(item);
             }
@@ -6052,7 +6153,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
             {
                 NavigateFeedItem(item);
             }
@@ -6096,7 +6197,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
             {
                 NavigateFeedItem(item);
             }
@@ -7491,9 +7592,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _friendPageUid = pair.UserData.UID;
             _friendPageTab = _pendingFriendTab ?? 0;
             _profileViewerImages.Clear();
-            _friendActivityItems = null;
-            _friendActivityCursor = null;
-            _friendActivityPageFailed = false;
+            _friendActivity.Invalidate();
         }
         else if (_pendingFriendTab is { } friendTab)
         {
@@ -7566,32 +7665,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// </summary>
     private void DrawFriendActivity(Pair pair, Vector4 accent)
     {
-        if (_friendActivityItems == null && !_friendActivityLoading
-            && _apiController.IsConnected)
+        if (_apiController.IsConnected && _friendActivity.ShouldRequest(DateTime.UtcNow)
+            && _friendActivity.TryBeginRefresh(out var request))
         {
-            _friendActivityLoading = true;
-            var uid = pair.UserData.UID;
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    var page = await _apiController.UserGetProfileActivity(
-                        uid, new FeedPageRequestDto()).ConfigureAwait(false);
-                    _friendActivityItems = page.Items;
-                    _friendActivityCursor = page.NextCursor;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to load profile activity for {UID}", uid);
-                    _friendActivityItems = [];
-                }
-                finally { _friendActivityLoading = false; }
-            });
+            _ = FetchFriendActivity(pair.UserData.UID, request);
         }
-
+        var items = _friendActivity.Items;
         SpheneUI.Layout.SectionCard(() =>
         {
-            if (_friendActivityItems == null)
+            if (items.Count == 0 && _friendActivity.IsLoading)
             {
                 for (var i = 0; i < 3; i++)
                 {
@@ -7599,15 +7681,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 }
                 return;
             }
-            if (_friendActivityItems.Count == 0)
+            if (items.Count == 0)
             {
                 SpheneUI.Layout.EmptyState(FontAwesomeIcon.Bolt,
                     "No recent activity", "Posts and interactions will land here.");
                 return;
             }
-            for (var i = 0; i < _friendActivityItems.Count; i++)
+            for (var i = 0; i < items.Count; i++)
             {
-                var item = _friendActivityItems[i];
+                var item = items[i];
                 if (i > 0)
                 {
                     SpheneUI.Layout.ItemSeparator();
@@ -7618,13 +7700,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
                 {
                     NavigateFeedItem(item);
                 }
             }
-            DrawFeedLoadTail("factmore", _friendActivityCursor != null,
-                _friendActivityLoading, _friendActivityPageFailed,
+            DrawFeedLoadTail("factmore", _friendActivity.HasMore,
+                _friendActivity.IsLoading, _friendActivity.PageFailed,
                 () => LoadMoreFriendActivity(pair), accent);
         }, title: "Activity", icon: FontAwesomeIcon.Bolt, accentColor: accent);
     }
@@ -7633,30 +7715,23 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// view; failures keep the cursor so the tail's retry reuses it.</summary>
     private Task LoadMoreFriendActivity(Pair pair)
     {
-        if (_friendActivityLoading || _friendActivityCursor == null)
+        return _friendActivity.TryBeginPage(out var request)
+            ? FetchFriendActivity(pair.UserData.UID, request) : Task.CompletedTask;
+    }
+
+    private async Task FetchFriendActivity(string uid, CommunityFeedStore.FeedRequest request)
+    {
+        try
         {
-            return Task.CompletedTask;
+            await _friendActivity.ReadVisiblePages(request, dto => _apiController.UserGetProfileActivity(uid, dto))
+                .ConfigureAwait(false);
         }
-        _friendActivityLoading = true;
-        _friendActivityPageFailed = false;
-        var uid = pair.UserData.UID;
-        var cursor = _friendActivityCursor;
-        return Task.Run(async () =>
+        catch (Exception ex)
         {
-            try
-            {
-                var page = await _apiController.UserGetProfileActivity(
-                    uid, new FeedPageRequestDto(cursor)).ConfigureAwait(false);
-                _friendActivityItems?.AddRange(page.Items);
-                _friendActivityCursor = page.NextCursor;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to page profile activity for {UID}", uid);
-                _friendActivityPageFailed = true;
-            }
-            finally { _friendActivityLoading = false; }
-        });
+            _friendActivity.ApplyFailure(request, DateTime.UtcNow);
+            _logger.LogDebug(ex, "Failed to load profile activity for {UID}", uid);
+        }
+        finally { _friendActivity.EndRequest(request); }
     }
 
     /// <summary>The Profile sub-tab of the friend view · connection status and privacy hints.</summary>
@@ -7673,16 +7748,38 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // the same server-gated extras the dedicated tabs use.
         var friendProfile = _spheneProfileManager.GetSpheneProfile(pair.UserData);
         var friendExtras = _spheneProfileManager.GetProfileExtras(pair.UserData);
-        DrawProfileAboutMe(friendProfile, accent, canEdit: false);
-        DrawChroniclePreviewSection(friendExtras, accent, isOwn: false,
-            () => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
-                SubPage: 2)),
-            id =>
+        void DrawFriendChronicles()
+        {
+            DrawChroniclePreviewSection(friendExtras, accent, isOwn: false,
+                () => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
+                    SubPage: 2)),
+                id =>
+                {
+                    _expandedChronicles.Add(id);
+                    NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
+                        SubPage: 2));
+                });
+        }
+        // About-me beside Recent Chronicles - same composition as the own
+        // profile overview; unset bios never render a card at all.
+        if (HasVisibleBio(friendProfile))
+        {
+            using var cols = SpheneUI.Layout.BeginCardColumns("##friend-overview-cols", 2);
+            if (cols.Success)
             {
-                _expandedChronicles.Add(id);
-                NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
-                    SubPage: 2));
-            });
+                ImGui.TableSetupColumn("chronicles", ImGuiTableColumnFlags.WidthStretch, 1.5f);
+                ImGui.TableSetupColumn("aboutme", ImGuiTableColumnFlags.WidthStretch, 1f);
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                DrawFriendChronicles();
+                ImGui.TableSetColumnIndex(1);
+                DrawProfileAboutMe(friendProfile, accent, canEdit: false);
+            }
+        }
+        else
+        {
+            DrawFriendChronicles();
+        }
         DrawPhotoPreviewSection(friendExtras, pair.UserData.UID,
             $"friend:{pair.UserData.UID}", accent, isOwn: false,
             () => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
@@ -7954,13 +8051,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// this row's counts in place.</summary>
     private void ToggleFeedItemReaction(SyncshellCommunityFeedItemDto item, string emoji)
     {
-        var targetKind = item.Kind switch
-        {
-            SyncshellFeedItemKind.News => ReactionTargetKind.News,
-            SyncshellFeedItemKind.Event => ReactionTargetKind.Event,
-            SyncshellFeedItemKind.Blog => ReactionTargetKind.Blog,
-            _ => (ReactionTargetKind?)null,
-        };
+        var targetKind = ReactionKindFor(item.Kind);
         if (targetKind == null) return;
         var targetId = item.ItemId ?? item.Id;
         var isThumbs = emoji.StartsWith(ReactionEmojiMap.ThumbsUp, StringComparison.Ordinal);
@@ -7968,22 +8059,40 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             ? !item.LikedByMe
             : item.ReactionEmojis?.FirstOrDefault(e => string.Equals(e.Emoji, emoji,
                 StringComparison.Ordinal)) is not { ByMe: true };
-        _ = Task.Run(async () =>
+        _ = SaveFeedReaction(item, targetKind.Value, targetId, emoji, set);
+    }
+
+    private static ReactionTargetKind? ReactionKindFor(SyncshellFeedItemKind kind)
+        => kind switch
         {
-            try
-            {
-                var summary = await _apiController.SetReaction(new ReactionSetDto(
-                    targetKind.Value, targetId, ReactionKind.Like, set,
-                    OwnerUid: item.TargetOwnerUid,
-                    Emoji: emoji, Toggle: true)).ConfigureAwait(false);
-                _communityFeed.ApplyReactionSummary(item.Kind, targetId, summary);
-                _publicProfiles.ApplyReactionSummary(item.Kind, targetId, summary);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Feed reaction toggle failed");
-            }
-        });
+            SyncshellFeedItemKind.News => ReactionTargetKind.News,
+            SyncshellFeedItemKind.Event => ReactionTargetKind.Event,
+            SyncshellFeedItemKind.Blog => ReactionTargetKind.Blog,
+            _ => (ReactionTargetKind?)null,
+        };
+    private SyncshellCommunityFeedItemDto LiveFeedRow(SyncshellCommunityFeedItemDto item)
+    {
+        if (ReactionKindFor(item.Kind) is not { } kind) return item;
+        var owner = kind == ReactionTargetKind.Blog ? item.TargetOwnerUid ?? item.ActorUid : null;
+        var summary = _apiController.Reactions.Read(kind, item.ItemId ?? item.Id, owner,
+            string.IsNullOrEmpty(item.GroupGID) ? null : new GroupData(item.GroupGID));
+        return summary == null ? item : CommunityFeedStore.WithReactionSummary(item, summary);
+    }
+
+    private async Task SaveFeedReaction(SyncshellCommunityFeedItemDto item, ReactionTargetKind kind,
+        long id, string emoji, bool set)
+    {
+        try
+        {
+            await _apiController.SetReaction(new ReactionSetDto(kind, id, ReactionKind.Like, set,
+                OwnerUid: kind == ReactionTargetKind.Blog ? item.TargetOwnerUid ?? item.ActorUid : null,
+                Group: string.IsNullOrEmpty(item.GroupGID) ? null : new GroupData(item.GroupGID),
+                Emoji: emoji, Toggle: true)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Feed reaction toggle failed");
+        }
     }
 
     /// <summary>
@@ -8307,13 +8416,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             null, captured.UpdatedAt,
                             ActorUid: me.UID,
                             ActorDisplayName: OwnHeroName(),
-                            ThumbnailMediaHash: captured.CoverMediaHash);
+                            ThumbnailMediaHash: captured.CoverMediaHash,
+                            CommentCount: captured.CommentCount, ViewCount: captured.ViewCount);
                         if (FeedItemRow.Draw($"own-chron-{captured.Id}", item,
                                 "chron:", accent, ChronicleRowMeta(captured),
                                 profileFor: ProfileForUid,
                                 onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
                         {
                             _openChronicle = (me.UID, captured.Id);
                         }
@@ -8455,13 +8565,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             ActorUid: pair.UserData.UID,
                             ActorDisplayName: SyncshellCommunityView.HumanName(pair.UserData)
                                 ?? "Unknown user",
-                            ThumbnailMediaHash: post.CoverMediaHash);
+                            ThumbnailMediaHash: post.CoverMediaHash,
+                            CommentCount: post.CommentCount, ViewCount: post.ViewCount);
                         if (FeedItemRow.Draw($"friend-chron-{post.Id}", item,
                                 "chron:", accent, ChronicleRowMeta(post),
                                 profileFor: ProfileForUid,
                                 onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
                         {
                             _openChronicle = (pair.UserData.UID, post.Id);
                             _ = Task.Run(async () =>
@@ -10802,73 +10913,72 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private bool CanLeave(GroupFullInfoDto group)
         => !string.Equals(group.OwnerUID, _apiController.UID, StringComparison.Ordinal);
 
-    /// <summary>Force-refetch after an inline community edit (composer saves).</summary>
-    /// <summary>Coalesced community refresh - every mutation path lands here
-    /// (composer saves AND pushed <c>CommunityChanged</c>), so a burst of
-    /// changes collapses into one aggregate fetch per shell instead of one
-    /// fetch per mutation per viewer.</summary>
     private Task RefreshCommunity()
-    {
-        var gid = _communityCacheGid;
-        if (gid == null)
-        {
-            return Task.CompletedTask;
-        }
-        if (_communityRefreshScheduled.TryAdd(gid, 0))
-        {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(CommunityRefreshDebounce).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _communityRefreshScheduled.TryRemove(gid, out _);
-                }
-                await FetchCommunityAsync(gid).ConfigureAwait(false);
-            });
-        }
-        return Task.CompletedTask;
-    }
+        => _communityCacheGid is { } gid ? FetchCommunityAsync(gid, refresh: true) : Task.CompletedTask;
 
-    /// <summary>The single community fetch - deduped per gid, bounded timeout,
-    /// failure latch so a dead server can't spin the request loop.</summary>
-    private async Task FetchCommunityAsync(string gid)
+    private async Task FetchCommunityAsync(string gid, bool refresh = false)
     {
-        if (!_communityLoadingMap.TryAdd(gid, 0))
+        var request = new object();
+        lock (_communityGate)
         {
-            return;
+            if (refresh)
+            {
+                if (!_communityRefreshScheduled.TryAdd(gid, 0)) return;
+                _communityLoadingMap[gid] = request;
+            }
+            else if (!_communityLoadingMap.TryAdd(gid, request)) return;
+            _communityFailedAt.TryRemove(gid, out _);
         }
-        _communityFailedAt.TryRemove(gid, out _);
+        bool IsCurrent() => _communityLoadingMap.TryGetValue(gid, out var current) && current == request;
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
+            if (refresh)
+            {
+                await Task.Delay(CommunityRefreshDebounce).ConfigureAwait(false);
+                lock (_communityGate)
+                {
+                    if (!IsCurrent()) return;
+                    _communityRefreshScheduled.TryRemove(gid, out _);
+                }
+            }
             using var cts = new CancellationTokenSource(CommunityFetchTimeout);
             var fresh = await _apiController
                 .GroupGetCommunity(new GroupDto(new GroupData(gid)), cts.Token)
                 .ConfigureAwait(false);
-            if (fresh != null)
+            lock (_communityGate)
             {
-                PutCommunity(gid, fresh);
-                _logger.LogDebug("Community {GID} loaded · {ms}ms · gallery={G} events={E} albums={A}",
-                    gid, sw.ElapsedMilliseconds, fresh.Gallery?.Count ?? 0,
-                    fresh.Events?.Count ?? 0, fresh.Albums?.Count ?? 0);
-            }
-            else
-            {
-                _communityNoPage[gid] = 0;
+                if (!IsCurrent()) return;
+                if (fresh != null)
+                {
+                    PutCommunity(gid, fresh);
+                    _logger.LogDebug("Community {GID} loaded · {ms}ms · gallery={G} events={E} albums={A}",
+                        gid, sw.ElapsedMilliseconds, fresh.Gallery?.Count ?? 0,
+                        fresh.Events?.Count ?? 0, fresh.Albums?.Count ?? 0);
+                }
+                else
+                {
+                    _communityMap.TryRemove(gid, out _);
+                    _communityNoPage[gid] = 0;
+                }
             }
         }
         catch (Exception ex)
         {
-            _communityFailedAt[gid] = DateTimeOffset.UtcNow;
+            lock (_communityGate)
+            {
+                if (!IsCurrent()) return;
+                _communityFailedAt[gid] = DateTimeOffset.UtcNow;
+            }
             _logger.LogDebug(ex, "Failed to load syncshell community for {GID} · {ms}ms",
                 gid, sw.ElapsedMilliseconds);
         }
         finally
         {
-            _communityLoadingMap.TryRemove(gid, out _);
+            lock (_communityGate)
+            {
+                if (IsCurrent()) _communityLoadingMap.TryRemove(gid, out _);
+            }
         }
     }
 
@@ -11065,6 +11175,15 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         var openPost = _openChronicle is { OwnerUid: var openOwner, Id: var openId }
             && string.Equals(openOwner, uid, StringComparison.Ordinal)
             ? chronicles.FirstOrDefault(b => b.Id == openId) : null;
+        // The hero no longer carries the bio - surface it as the About-me
+        // card above the chronicle list so public profiles keep their intro.
+        if (openPost == null && !string.IsNullOrWhiteSpace(dto.Description))
+        {
+            var bioProfile = new SpheneProfileData(false, dto.IsNsfw,
+                string.Empty, string.Empty, dto.Description, string.Empty,
+                string.Empty, string.Empty);
+            DrawProfileAboutMe(bioProfile, accent, canEdit: false);
+        }
         // One headed card owns the section - same structure as the own and
         // friend profile Chronicles cards.
         SpheneUI.Layout.SectionCard(() =>
@@ -11124,13 +11243,14 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         ? "Untitled Chronicle" : captured.Title,
                     null, captured.UpdatedAt,
                     ActorUid: uid, ActorDisplayName: displayName,
-                    ThumbnailMediaHash: captured.CoverMediaHash);
+                    ThumbnailMediaHash: captured.CoverMediaHash,
+                            CommentCount: captured.CommentCount, ViewCount: captured.ViewCount);
                 if (FeedItemRow.Draw($"public-chron-{uid}-{captured.Id}", item,
                         "pub:", accent, ChronicleRowMeta(captured),
                         onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                         onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
                         PublicUid: uid, ChroniclePostId: captured.Id));
@@ -11195,7 +11315,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                             onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem))
+                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
                     {
                         NavigateFeedItem(item);
                     }

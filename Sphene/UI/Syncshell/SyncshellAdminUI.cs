@@ -50,7 +50,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
 
     // Community aggregate - lazily pulled so member rows can show staff roles.
     private SyncshellCommunityDto? _community;
-    private Task<SyncshellCommunityDto?>? _communityTask;
+    private readonly Services.CommunityPageReload _communityReload = new();
 
     // Event Planner - same wiring the community popout uses: shared composers,
     // travel hooks and a per-window page state so planner filters/selection
@@ -145,6 +145,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
         _housingOwnershipService = housingOwnershipService;
         _spheneProfileManager = spheneProfileManager;
         _composers = new CommunityComposers(apiController, mediator, logger, communityMedia);
+        _composers.OnAuthorClick = uid => mediator.Publish(new OpenAuthorProfileMessage(uid));
         _lifestreamTravel = lifestreamTravel;
         _ipcManager = ipcManager;
         _isOwner = string.Equals(GroupFullInfo.OwnerUID, _apiController.UID, StringComparison.Ordinal);
@@ -171,7 +172,12 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
             }
             _plannerPage.Comments.InvalidateForChange(msg.Community);
             _staffPageState.Comments.InvalidateForChange(msg.Community);
-            _ = RefreshCommunityAsync();
+            // reactions patch inside their threads - a full community
+            // refetch per like is pure reload cost with zero payoff
+            if (!msg.Community.ReactionsOnly)
+            {
+                _ = RefreshCommunityAsync();
+            }
         });
 
         _ = Task.Run(async () =>
@@ -1022,24 +1028,17 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
     /// </summary>
     private void EnsureCommunityLoaded()
     {
-        if (_community == null && _communityTask == null)
-        {
-            _communityTask = _apiController.GroupGetCommunity(new GroupDto(GroupFullInfo.Group));
-        }
-        if (_communityTask is { IsCompleted: true })
-        {
-            _community = _communityTask.IsCompletedSuccessfully ? _communityTask.Result : null;
-            _communityTask = null;
-        }
+        if (_community == null) _ = LoadCommunity(refresh: false);
     }
 
-    /// <summary>Refetches the community aggregate after a staff mutation.</summary>
-    private async Task RefreshCommunityAsync()
+    private Task RefreshCommunityAsync() => LoadCommunity(refresh: true);
+
+    private async Task LoadCommunity(bool refresh)
     {
         try
         {
-            _community = await _apiController.GroupGetCommunity(
-                new GroupDto(GroupFullInfo.Group)).ConfigureAwait(false);
+            await _communityReload.Run(() => _apiController.GroupGetCommunity(new GroupDto(GroupFullInfo.Group)),
+                page => _community = page, refresh).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1744,7 +1743,7 @@ public class SyncshellAdminUI : WindowMediatorSubscriberBase
                 await _apiController.GroupSetCommunityStaffAssignment(
                     new SyncshellStaffAssignmentUpdateDto(group, uid, null,
                         roleIds.ToList())).ConfigureAwait(false);
-                _community = null;
+                await RefreshCommunityAsync().ConfigureAwait(false);
             }
             catch (Exception ex)
             {

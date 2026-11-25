@@ -430,8 +430,7 @@ internal sealed class CommunityComposers
         {
             ops.LoadRoots = _ => Task.FromResult<CommentPageDto?>(null);
             ops.LoadReplies = (_, _) => Task.FromResult<CommentPageDto?>(null);
-            ops.LoadTargetSummary = null;
-            ops.LoadCommentSummary = null;
+            ops.ReadReactions = null;
         }
         return ops;
     }
@@ -523,53 +522,18 @@ internal sealed class CommunityComposers
                     return null;
                 }
             }),
-            SetReaction = dto => Task.Run(async () =>
+            SetReaction = async dto =>
             {
                 try
                 {
-                    return await _apiController.SetReaction(dto).ConfigureAwait(false);
+                    await _apiController.SetReaction(dto with { Group = group }).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to set reaction on {Kind} {Id}", dto.TargetKind, dto.TargetId);
-                    return new ReactionSummaryDto(dto.TargetKind, dto.TargetId, [], [], 0);
                 }
-            }),
-            LoadTargetSummary = id => Task.Run(async () =>
-            {
-                try
-                {
-                    var rk = kind switch
-                    {
-                        CommentTargetKind.News => ReactionTargetKind.News,
-                        CommentTargetKind.Event => ReactionTargetKind.Event,
-                        _ => ReactionTargetKind.Blog,
-                    };
-                    return (ReactionSummaryDto?)await _apiController.GetReactionSummary(
-                        new ReactionSetDto(rk, id, ReactionKind.Like, true, null, null, group))
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to load reactions for {Kind} {Id}", kind, id);
-                    return null;
-                }
-            }),
-            LoadCommentSummary = id => Task.Run(async () =>
-            {
-                try
-                {
-                    return (ReactionSummaryDto?)await _apiController.GetReactionSummary(
-                        new ReactionSetDto(ReactionTargetKind.Comment, id, ReactionKind.Like,
-                            true, null, null, group))
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to load reactions for comment {Id}", id);
-                    return null;
-                }
-            }),
+            },
+            ReadReactions = (rk, id) => _apiController.Reactions.Read(rk, id, null, group),
             Report = dto => Task.Run(async () =>
             {
                 try
@@ -680,47 +644,19 @@ internal sealed class CommunityComposers
                     return null;
                 }
             }),
-            SetReaction = dto => Task.Run(async () =>
+            SetReaction = async dto =>
             {
                 try
                 {
-                    return await _apiController.SetReaction(dto with
+                    await _apiController.SetReaction(dto with
                         { OwnerUid = ownerUid }).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to set reaction on blog {Id}", postId);
-                    return new ReactionSummaryDto(dto.TargetKind, dto.TargetId, [], [], 0);
                 }
-            }),
-            LoadTargetSummary = id => Task.Run(async () =>
-            {
-                try
-                {
-                    return (ReactionSummaryDto?)await _apiController.GetReactionSummary(
-                        new ReactionSetDto(ReactionTargetKind.Blog, id, ReactionKind.Like,
-                            true, null, ownerUid)).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to load reactions for blog {Id}", id);
-                    return null;
-                }
-            }),
-            LoadCommentSummary = id => Task.Run(async () =>
-            {
-                try
-                {
-                    return (ReactionSummaryDto?)await _apiController.GetReactionSummary(
-                        new ReactionSetDto(ReactionTargetKind.Comment, id, ReactionKind.Like,
-                            true, null, ownerUid)).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to load reactions for comment {Id}", id);
-                    return null;
-                }
-            }),
+            },
+            ReadReactions = (rk, id) => _apiController.Reactions.Read(rk, id, ownerUid, null),
             Report = dto => Task.Run(async () =>
             {
                 try

@@ -27,9 +27,8 @@ public sealed class CommentThreadView
         public Func<CommentUpsertDto, Task<CommunityCommentDto?>>? Save { get; set; }
         public Func<long, Task<bool>>? Delete { get; set; }
         public Func<CommentModerationDto, Task<CommunityCommentDto?>>? Moderate { get; set; }
-        public Func<ReactionSetDto, Task<ReactionSummaryDto>>? SetReaction { get; set; }
-        public Func<long, Task<ReactionSummaryDto?>>? LoadCommentSummary { get; set; }
-        public Func<long, Task<ReactionSummaryDto?>>? LoadTargetSummary { get; set; }
+        public Func<ReactionSetDto, Task>? SetReaction { get; set; }
+        public Func<ReactionTargetKind, long, ReactionSummaryDto?>? ReadReactions { get; set; }
         public Func<ReportCreateDto, Task<bool>>? Report { get; set; }
         public Func<string, string?>? DisplayName { get; set; }
         /// <summary>Resolves the author's community profile for the inline
@@ -51,6 +50,8 @@ public sealed class CommentThreadView
         /// takes this gate for a tiny section; Draw holds it across the
         /// render so a completion can never modify a collection mid-foreach.</summary>
         public readonly Lock Gate = new();
+        public int Generation;
+        public long RetryAt;
         public bool Loaded, Loading;
         public List<CommunityCommentDto> Roots = [];
         public readonly Dictionary<long, List<CommunityCommentDto>> Replies = [];
@@ -62,10 +63,6 @@ public sealed class CommentThreadView
         public string ReplyDraft = string.Empty;
         public long? EditingId;
         public string EditDraft = string.Empty;
-        public readonly Dictionary<long, ReactionSummaryDto> CommentSummaries = [];
-        public ReactionSummaryDto? TargetSummary;
-        public bool TargetSummaryLoaded;
-        public readonly HashSet<long> SummariesLoading = [];
         /// <summary>Deep-link target - scrolls to this comment once loaded;
         /// auto-paginates roots/replies while searching. Survives Reset so a
         /// mid-flight invalidate cannot lose the destination.</summary>
@@ -82,15 +79,14 @@ public sealed class CommentThreadView
         {
             lock (Gate)
             {
+                Generation++;
+                RetryAt = 0;
+                FocusBusy = false;
                 Loaded = false;
                 Loading = false;
                 Roots = [];
                 Replies.Clear();
                 NextCursor = null;
-                CommentSummaries.Clear();
-                TargetSummary = null;
-                TargetSummaryLoaded = false;
-                SummariesLoading.Clear();
                 FocusExhaustedRoots.Clear();
             }
         }
@@ -153,12 +149,12 @@ public sealed class CommentThreadView
     }
 
     /// <summary>Invalidates the thread matching a pushed community change;
-    /// pushes without a mappable section/target (reactions, page-wide
-    /// refreshes) drop every thread for safety.</summary>
+    /// pushes without a mappable section/target (page-wide refreshes) drop
+    /// every thread for safety. Reaction-only pushes never drop content -
+    /// they move counts, so only the reaction summaries of the affected
+    /// thread invalidate and the lazy loader refetches them live.</summary>
     public void InvalidateForChange(CommunityChangedDto change)
     {
-        // reaction-only pushes move counts, not content - open threads keep
-        // their state and pick up fresh summaries on the next open
         if (change.ReactionsOnly) return;
         var kind = change.Section switch
         {
@@ -194,10 +190,11 @@ public sealed class CommentThreadView
         }
         lock (st.Gate)
         {
-            if (!st.Loaded && !st.Loading && ops.LoadRoots != null)
+            if (!st.Loaded && !st.Loading && Environment.TickCount64 >= st.RetryAt && ops.LoadRoots != null)
             {
                 st.Loading = true;
                 var captured = st;
+                var generation = st.Generation;
                 _ = Task.Run(async () =>
                 {
                     var page = await ops.LoadRoots(null).ConfigureAwait(false);
@@ -205,6 +202,7 @@ public sealed class CommentThreadView
                     // collections on the UI thread every frame.
                     lock (captured.Gate)
                     {
+                        if (captured.Generation != generation) return;
                         if (page != null)
                         {
                             captured.Roots = page.Roots;
@@ -214,7 +212,8 @@ public sealed class CommentThreadView
                                 captured.Replies[kv.Key] = kv.Value;
                             }
                         }
-                        captured.Loaded = true;
+                        captured.Loaded = page != null;
+                        if (page == null) captured.RetryAt = Environment.TickCount64 + 5000;
                         captured.Loading = false;
                     }
                 });
@@ -234,7 +233,7 @@ public sealed class CommentThreadView
     {
         ImGui.PushID($"cmt-{key}");
         var statsShown = DrawTargetReactions(kind, targetId, ownerUid, groupGid,
-            ops, st, commentCount, viewCount);
+            ops, commentCount, viewCount);
         if (!statsShown)
         {
             // read-only surfaces get no stats capsule - the muted line is
@@ -453,7 +452,15 @@ public sealed class CommentThreadView
         }
         if (authorClick != null)
         {
-            if (SpheneUI.Text.Link(name)) authorClick(authorUid!);
+            // Author names wear the author's own profile accent - the feed
+            // idiom: full color at rest, underline + hand on hover, click
+            // opens the profile. Viewers without a resolved profile fall
+            // back to the theme accent, matching the shell rows' fallback.
+            var authorAccent = authorUid != null && ops.Profile != null
+                ? ops.Profile(authorUid)?.ProfileTheme.Value.AccentColor(SpheneUI.Colors.Accent)
+                    ?? SpheneUI.Colors.Accent
+                : SpheneUI.Colors.Accent;
+            if (DrawAccentAuthorLink(name, authorAccent)) authorClick(authorUid!);
             SpheneUI.AttachTooltip("View profile");
         }
         else
@@ -711,95 +718,45 @@ public sealed class CommentThreadView
             {
                 if (c.IsMine)
                 {
-                    EnsureCommentSummary(c.Id, ops, st);
                     ReactionBar.DrawReadOnly(ReactionTargetKind.Comment, c.Id,
-                        st.CommentSummaries.GetValueOrDefault(c.Id));
+                        ops.ReadReactions?.Invoke(ReactionTargetKind.Comment, c.Id));
                 }
                 else if (showReactions)
                 {
-                    DrawCommentReactions(c, ops, st);
+                    DrawCommentReactions(c, ops);
                 }
             });
     }
 
-    /// <summary>Lazy-loads the reaction summary once per comment - shared
-    /// by the interactive bar and the read-only strip on own comments.</summary>
-    private static void EnsureCommentSummary(long id, CommentOps ops, ThreadState st)
+    private static void DrawCommentReactions(CommunityCommentDto c, CommentOps ops)
     {
-        if (!st.CommentSummaries.ContainsKey(id) && !st.SummariesLoading.Contains(id)
-            && ops.LoadCommentSummary != null)
-        {
-            st.SummariesLoading.Add(id);
-            _ = Task.Run(async () =>
-            {
-                var s = await ops.LoadCommentSummary(id).ConfigureAwait(false);
-                lock (st.Gate)
-                {
-                    if (s != null) st.CommentSummaries[id] = s;
-                    st.SummariesLoading.Remove(id);
-                }
-            });
-        }
-    }
-
-    private static void DrawCommentReactions(CommunityCommentDto c, CommentOps ops,
-        ThreadState st)
-    {
-        EnsureCommentSummary(c.Id, ops, st);
-        var summary = st.CommentSummaries.GetValueOrDefault(c.Id);
+        var summary = ops.ReadReactions?.Invoke(ReactionTargetKind.Comment, c.Id);
         ReactionBar.DrawInline(ReactionTargetKind.Comment, c.Id, summary,
             (emoji, set) =>
             {
                 var dto = new ReactionSetDto(ReactionTargetKind.Comment, c.Id,
                     ReactionKind.Like, set, Emoji: emoji, Toggle: true);
-                _ = Task.Run(async () =>
-                {
-                    var s = await ops.SetReaction!(dto).ConfigureAwait(false);
-                    lock (st.Gate)
-                    {
-                        st.CommentSummaries[c.Id] = s;
-                    }
-                });
+                _ = ops.SetReaction!(dto);
             });
     }
 
     private static bool DrawTargetReactions(CommentTargetKind kind, long targetId,
-        string? ownerUid, string? groupGid, CommentOps ops, ThreadState st,
+        string? ownerUid, string? groupGid, CommentOps ops,
         int commentCount, int? viewCount)
     {
-        if (ops.SetReaction == null || ops.LoadTargetSummary == null) return false;
-        if (!st.TargetSummaryLoaded)
-        {
-            st.TargetSummaryLoaded = true;
-            var captured = st;
-            _ = Task.Run(async () =>
-            {
-                var summary = await ops.LoadTargetSummary(targetId).ConfigureAwait(false);
-                lock (captured.Gate)
-                {
-                    captured.TargetSummary = summary;
-                }
-            });
-        }
+        if (ops.SetReaction == null || ops.ReadReactions == null) return false;
         var rk = kind switch
         {
             CommentTargetKind.News => ReactionTargetKind.News,
             CommentTargetKind.Event => ReactionTargetKind.Event,
             _ => ReactionTargetKind.Blog,
         };
-        ReactionBar.DrawInline(rk, targetId, st.TargetSummary, (emoji, set) =>
+        ReactionBar.DrawInline(rk, targetId, ops.ReadReactions(rk, targetId), (emoji, set) =>
         {
             var dto = new ReactionSetDto(rk, targetId, ReactionKind.Like, set, null, ownerUid,
                 groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null,
                 Emoji: emoji, Toggle: true);
-            _ = Task.Run(async () =>
-            {
-                var summary = await ops.SetReaction(dto).ConfigureAwait(false);
-                lock (st.Gate)
-                {
-                    st.TargetSummary = summary;
-                }
-            });
+            _ = ops.SetReaction(dto);
         }, commentCount, viewCount);
         ImGui.SameLine(0f, SpheneUI.Spacing.X12.Scaled);
         return true;
@@ -819,7 +776,7 @@ public sealed class CommentThreadView
                 if (parentId == null)
                 {
                     st.Draft = string.Empty;
-                    st.Roots.Insert(0, saved);
+                    if (!st.Roots.Any(root => root.Id == saved.Id)) st.Roots.Insert(0, saved);
                 }
                 else
                 {
@@ -829,8 +786,11 @@ public sealed class CommentThreadView
                     {
                         st.Replies[parentId.Value] = replies = [];
                     }
-                    replies.Add(saved);
-                    BumpRootReplyCount(st, parentId.Value, +1);
+                    if (!replies.Any(reply => reply.Id == saved.Id))
+                    {
+                        replies.Add(saved);
+                        BumpRootReplyCount(st, parentId.Value, +1);
+                    }
                 }
             }
         });
@@ -910,6 +870,7 @@ public sealed class CommentThreadView
     private static void AdvanceFocusLoad(CommentOps ops, ThreadState st, long? rootId)
     {
         st.FocusBusy = true;
+        var generation = st.Generation;
         _ = Task.Run(async () =>
         {
             try
@@ -919,12 +880,14 @@ public sealed class CommentThreadView
                     long? cursor;
                     lock (st.Gate)
                     {
+                        if (st.Generation != generation) return;
                         cursor = st.NextCursor;
                     }
                     var page = await ops.LoadRoots!(cursor).ConfigureAwait(false);
                     if (page == null) return;
                     lock (st.Gate)
                     {
+                        if (st.Generation != generation) return;
                         st.Roots.AddRange(page.Roots);
                         st.NextCursor = page.NextCursor;
                         foreach (var kv in page.ReplyPreviews ?? [])
@@ -938,6 +901,7 @@ public sealed class CommentThreadView
                     long? cursor;
                     lock (st.Gate)
                     {
+                        if (st.Generation != generation) return;
                         cursor = st.Replies.TryGetValue(rootId.Value, out var list)
                             && list.Count > 0 ? list[^1].Id : (long?)null;
                     }
@@ -946,12 +910,14 @@ public sealed class CommentThreadView
                     {
                         lock (st.Gate)
                         {
+                            if (st.Generation != generation) return;
                             st.FocusExhaustedRoots.Add(rootId.Value);
                         }
                         return;
                     }
                     lock (st.Gate)
                     {
+                        if (st.Generation != generation) return;
                         if (!st.Replies.TryGetValue(rootId.Value, out var replies))
                         {
                             st.Replies[rootId.Value] = replies = [];
@@ -964,7 +930,7 @@ public sealed class CommentThreadView
             {
                 lock (st.Gate)
                 {
-                    st.FocusBusy = false;
+                    if (st.Generation == generation) st.FocusBusy = false;
                 }
             }
         });
@@ -1017,12 +983,14 @@ public sealed class CommentThreadView
     private static void LoadMoreRoots(CommentOps ops, ThreadState st)
     {
         var cursor = st.NextCursor;
+        var generation = st.Generation;
         _ = Task.Run(async () =>
         {
             var page = await ops.LoadRoots!(cursor).ConfigureAwait(false);
             if (page == null) return;
             lock (st.Gate)
             {
+                if (st.Generation != generation) return;
                 st.Roots.AddRange(page.Roots);
                 st.NextCursor = page.NextCursor;
                 foreach (var kv in page.ReplyPreviews ?? [])
@@ -1035,12 +1003,14 @@ public sealed class CommentThreadView
 
     private static void LoadMoreReplies(CommentOps ops, ThreadState st, long rootId, long? cursor)
     {
+        var generation = st.Generation;
         _ = Task.Run(async () =>
         {
             var page = await ops.LoadReplies!(rootId, cursor).ConfigureAwait(false);
             if (page == null) return;
             lock (st.Gate)
             {
+                if (st.Generation != generation) return;
                 if (!st.Replies.TryGetValue(rootId, out var list))
                 {
                     st.Replies[rootId] = list = [];
@@ -1061,6 +1031,28 @@ public sealed class CommentThreadView
         }
         c.MentionProvider = () => ops.MentionCandidates?.Invoke() ?? [];
         return c;
+    }
+
+    /// <summary>The feed's author-name idiom as a widget: the name rides the
+    /// author's own profile accent at full strength, hover adds the underline
+    /// and the hand cursor. Returns true on click. The text rides the
+    /// drawlist while a Dummy reserves the layout rect, so the row flow and
+    /// the hit-test footprint match exactly.</summary>
+    private static bool DrawAccentAuthorLink(string name, Vector4 accent)
+    {
+        var pos = ImGui.GetCursorScreenPos();
+        var size = ImGui.CalcTextSize(name);
+        var drawList = ImGui.GetWindowDrawList();
+        drawList.AddText(pos, SpheneUI.ColorUtils.ToU32(accent), name);
+        ImGui.Dummy(size);
+        if (ImGui.IsItemHovered())
+        {
+            drawList.AddLine(new Vector2(pos.X, pos.Y + size.Y - 1f),
+                new Vector2(pos.X + size.X, pos.Y + size.Y - 1f),
+                SpheneUI.ColorUtils.ToU32(accent));
+            ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+        }
+        return ImGui.IsItemClicked();
     }
 
     /// <summary>Small author avatar via the host's profile hook - texture

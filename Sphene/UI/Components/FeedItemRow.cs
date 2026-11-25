@@ -51,7 +51,8 @@ public static class FeedItemRow
         Action<SyncshellCommunityFeedItemDto>? onThumbClick = null,
         Action<SyncshellCommunityFeedItemDto>? onLikeClick = null,
         Action<SyncshellCommunityFeedItemDto>? onCommentClick = null,
-        Action<SyncshellCommunityFeedItemDto, string>? onReactionClick = null)
+        Action<SyncshellCommunityFeedItemDto, string>? onReactionClick = null,
+        Func<SyncshellCommunityFeedItemDto, SyncshellCommunityFeedItemDto>? liveReactions = null)
     {
         var drawList = ImGui.GetWindowDrawList();
         var scale = SpheneUI.Scale;
@@ -134,6 +135,7 @@ public static class FeedItemRow
         var origin = ImGui.GetCursorScreenPos();
         var clicked = ImGui.InvisibleButton(id, new Vector2(availX, rowH));
         var rowHovered = ImGui.IsItemHovered();
+        if (liveReactions != null && ImGui.IsItemVisible()) item = liveReactions(item);
 
         var nameW = ImGui.CalcTextSize(name).X;
         var nameX = origin.X + padX + avatarD + gutter;

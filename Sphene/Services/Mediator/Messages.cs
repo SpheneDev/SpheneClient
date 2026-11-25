@@ -324,6 +324,9 @@ public record AnnouncementsChangedMessage : MessageBase;
 
 // Community content changed on a syncshell · caches for that shell invalidate.
 public record CommunityChangedMessage(Sphene.API.Dto.Group.CommunityChangedDto Community) : MessageBase;
+public record CommunityReactionWrittenMessage : MessageBase;
+public record UserReactionChangedMessage(Sphene.API.Dto.Group.UserReactionChangedDto Reaction) : MessageBase;
+public record OpenAuthorProfileMessage(string Uid) : MessageBase;
 
 // A durable user notification was pushed by the server.
 public record UserNotificationReceivedMessage(Sphene.API.Dto.User.UserNotificationDto Notification) : MessageBase;

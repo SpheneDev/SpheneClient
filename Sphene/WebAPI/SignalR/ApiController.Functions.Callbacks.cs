@@ -659,6 +659,20 @@ public partial class ApiController
         _spheneHub!.On(nameof(Client_AnnouncementsChanged), act);
     }
 
+    /// <summary>A reaction changed on profile-owned content · surfaces patch
+    /// counts in place - nothing invalidates, nothing reloads.</summary>
+    public Task Client_UserReactionChanged(UserReactionChangedDto dto)
+    {
+        ExecuteSafely(() => Mediator.Publish(new UserReactionChangedMessage(dto)));
+        return Task.CompletedTask;
+    }
+
+    public void OnUserReactionChanged(Action<UserReactionChangedDto> act)
+    {
+        if (_initialized) return;
+        _spheneHub!.On(nameof(Client_UserReactionChanged), act);
+    }
+
     /// <summary>A syncshell's community content changed · the hub invalidates that shell's cache.</summary>
     public Task Client_CommunityChanged(CommunityChangedDto dto)
     {

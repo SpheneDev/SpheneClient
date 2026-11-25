@@ -1,4 +1,5 @@
 using Sphene.API.Data.Enum;
+using Sphene.API.Dto.Group;
 
 namespace Sphene.UI.Components;
 
@@ -42,6 +43,20 @@ public static class FeedItemSemantics
         }
         return null;
     }
+
+    /// <summary>Maps a reaction host kind (reaction/comment ordinals) onto
+    /// the feed-row kind it patches. NOT a cast: the feed enum inserts
+    /// Photo at 2, so Blog is 3 there while reactions carry 2 - a blind
+    /// cast patches photo rows with blog reaction counts. Null when the
+    /// kind has no feed row (comments never render as patchable rows).</summary>
+    public static SyncshellFeedItemKind? FeedKindForReactionHost(int hostKind)
+        => hostKind switch
+        {
+            (int)ReactionTargetKind.News => SyncshellFeedItemKind.News,
+            (int)ReactionTargetKind.Event => SyncshellFeedItemKind.Event,
+            (int)ReactionTargetKind.Blog => SyncshellFeedItemKind.Blog,
+            _ => null,
+        };
 
     /// <summary>Server reaction rows arrive titled "Reaction on {target}" -
     /// renders as the activity phrase "Reacted to {target}"; any other

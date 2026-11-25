@@ -31,6 +31,7 @@ public sealed class SyncshellCommunityUI : WindowMediatorSubscriberBase
     private readonly Services.LifestreamTravelService _lifestreamTravel;
     private readonly Interop.Ipc.IpcManager _ipcManager;
     private SyncshellCommunityDto _community;
+    private readonly Services.CommunityPageReload _reload = new();
     private GroupFullInfoDto? _group;
     private readonly bool _joinPopup;
     private readonly SyncshellCommunityView.CommunityPageState _page = new();
@@ -67,6 +68,9 @@ public sealed class SyncshellCommunityUI : WindowMediatorSubscriberBase
         _lifestreamTravel = lifestreamTravel;
         _ipcManager = ipcManager;
         _composers = new CommunityComposers(apiController, mediator, logger, communityMedia);
+        // author deep-links resolve in the hub - pair rows land on friend
+        // pages, everyone else on the public profile
+        _composers.OnAuthorClick = uid => mediator.Publish(new OpenAuthorProfileMessage(uid));
         // The hub's "Preview" action lands staff/owners straight in visitor
         // mode - they can flip back via the page's preview toggle.
         _page.PreviewAsVisitor = previewAsVisitor;
@@ -81,7 +85,13 @@ public sealed class SyncshellCommunityUI : WindowMediatorSubscriberBase
                     StringComparison.Ordinal))
             {
                 _page.Comments.InvalidateForChange(msg.Community);
-                _ = Reload();
+                // reaction pushes move counts inside open threads - the page
+                // itself carries no reaction state, so reloading it would be
+                // pure flicker
+                if (!msg.Community.ReactionsOnly)
+                {
+                    _ = Reload();
+                }
             }
         });
 
@@ -418,25 +428,21 @@ public sealed class SyncshellCommunityUI : WindowMediatorSubscriberBase
     }
 
     /// <summary>Refetches the aggregate after a contextual edit so the page re-renders.</summary>
-    private Task Reload()
+    private async Task Reload()
     {
-        return Task.Run(async () =>
+        var gid = _community.Profile.GroupGID;
+        try
         {
-            try
+            await _reload.Run(() => _apiController.GroupGetCommunity(new GroupDto(new GroupData(gid))), page =>
             {
-                var fresh = await _apiController.GroupGetCommunity(
-                    new GroupDto(new GroupData(_community.Profile.GroupGID))).ConfigureAwait(false);
-                if (fresh != null)
-                {
-                    _community = fresh;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Failed to reload syncshell community for {GID}",
-                    _community.Profile.GroupGID);
-            }
-        });
+                if (page != null) _community = page;
+                else IsOpen = false;
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to reload syncshell community for {GID}", gid);
+        }
     }
 
     /// <summary>

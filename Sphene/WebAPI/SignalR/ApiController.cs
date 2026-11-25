@@ -1,6 +1,7 @@
 using Dalamud.Utility;
 using Sphene.API.Data;
 using Sphene.API.Data.Extensions;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto;
 using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
@@ -86,11 +87,28 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         _circuitBreaker = circuitBreaker;
         _connectionCancellationTokenSource = new CancellationTokenSource();
 
+        Reactions = new(GetReactionSummary, ex => Logger.LogDebug(ex, "Reaction summary fetch failed"), TimeProvider.System);
+        Mediator.Subscribe<DisconnectedMessage>(this, _ => Reactions.Clear());
+        Mediator.Subscribe<ConnectedMessage>(this, _ => Reactions.Clear());
+        Mediator.Subscribe<CommunityChangedMessage>(this, msg =>
+        {
+            var change = msg.Community;
+            var kind = (ReactionTargetKind?)change.ReactionTargetKind;
+            Reactions.Invalidate(kind, change.ReactionTargetId, change.Group.GID, null);
+        });
+        Mediator.Subscribe<UserReactionChangedMessage>(this, msg =>
+        {
+            var change = msg.Reaction;
+            Reactions.Invalidate(change.CommentLevel ? ReactionTargetKind.Comment : (ReactionTargetKind)change.HostKind,
+                change.CommentLevel ? null : change.HostId, null, change.Owner.UID);
+        });
+        Mediator.Subscribe<ClearProfileDataMessage>(this, msg => Reactions.Invalidate(null, null, null, msg.UserData?.UID));
+
         Mediator.Subscribe<DalamudLoginMessage>(this, (_) => DalamudUtilOnLogIn());
         Mediator.Subscribe<DalamudLogoutMessage>(this, (_) => DalamudUtilOnLogOut());
         Mediator.Subscribe<RequestSpheneReconnectMessage>(this, (msg) => { _ = Task.Run(() => CreateConnectionsAsync()); });
-        Mediator.Subscribe<HubClosedMessage>(this, (msg) => SpheneHubOnClosed(msg.Exception));
-        Mediator.Subscribe<HubReconnectedMessage>(this, (msg) => _ = SpheneHubOnReconnectedAsync());
+        Mediator.Subscribe<HubClosedMessage>(this, (msg) => { Reactions.Clear(); SpheneHubOnClosed(msg.Exception); });
+        Mediator.Subscribe<HubReconnectedMessage>(this, (msg) => { Reactions.Clear(); _ = SpheneHubOnReconnectedAsync(); });
         Mediator.Subscribe<HubReconnectingMessage>(this, (msg) => SpheneHubOnReconnecting(msg.Exception));
         Mediator.Subscribe<CyclePauseMessage>(this, (msg) => _ = CyclePauseAsync(msg.UserData));
         Mediator.Subscribe<CensusUpdateMessage>(this, (msg) => _lastCensus = msg);
@@ -722,6 +740,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
         OnAnnouncementPublished((dto) => _ = Client_AnnouncementPublished(dto));
         OnAnnouncementsChanged(() => _ = Client_AnnouncementsChanged());
         OnCommunityChanged((dto) => _ = Client_CommunityChanged(dto));
+        OnUserReactionChanged((dto) => _ = Client_UserReactionChanged(dto));
         OnUserNotification((dto) => _ = Client_UserNotification(dto));
 
         if (_healthCheckTokenSource is not null)

@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.SignalR.Client;
+using Sphene.API.Data;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Group;
 
 namespace Sphene.WebAPI;
@@ -7,6 +9,8 @@ namespace Sphene.WebAPI;
 /// queues and notification mutes. Mirrors ApiController.Functions.Groups.cs.</summary>
 public partial class ApiController
 {
+    internal Sphene.Services.ReactionSummaryCache Reactions { get; }
+
     /// <summary>Root comments page - keyset cursor on dto.Cursor.</summary>
     public async Task<CommentPageDto> GetComments(CommentPageRequestDto dto)
     {
@@ -25,28 +29,56 @@ public partial class ApiController
     public async Task<CommunityCommentDto?> UpsertComment(CommentUpsertDto dto)
     {
         CheckConnection();
-        return await _spheneHub!.InvokeAsync<CommunityCommentDto?>(nameof(UpsertComment), dto).ConfigureAwait(false);
+        var hub = _spheneHub!;
+        var result = await hub.InvokeAsync<CommunityCommentDto?>(nameof(UpsertComment), dto).ConfigureAwait(false);
+        if (result != null && ReferenceEquals(hub, _spheneHub))
+            NotifyCommentChanged(dto.TargetKind, dto.TargetId, dto.GroupGID ?? dto.Group?.GID, dto.OwnerUid);
+        return result;
     }
 
     /// <summary>Author soft-delete (tombstone).</summary>
     public async Task<bool> DeleteComment(CommentUpsertDto dto)
     {
         CheckConnection();
-        return await _spheneHub!.InvokeAsync<bool>(nameof(DeleteComment), dto).ConfigureAwait(false);
+        var hub = _spheneHub!;
+        var result = await hub.InvokeAsync<bool>(nameof(DeleteComment), dto).ConfigureAwait(false);
+        if (result && ReferenceEquals(hub, _spheneHub))
+            NotifyCommentChanged(dto.TargetKind, dto.TargetId, dto.GroupGID ?? dto.Group?.GID, dto.OwnerUid);
+        return result;
     }
 
     /// <summary>Moderation action - hide/restore/remove/lock/unlock.</summary>
     public async Task<CommunityCommentDto?> SetCommentModeration(CommentModerationDto dto)
     {
         CheckConnection();
-        return await _spheneHub!.InvokeAsync<CommunityCommentDto?>(nameof(SetCommentModeration), dto).ConfigureAwait(false);
+        var hub = _spheneHub!;
+        var result = await hub.InvokeAsync<CommunityCommentDto?>(nameof(SetCommentModeration), dto).ConfigureAwait(false);
+        if (result != null && ReferenceEquals(hub, _spheneHub))
+            NotifyCommentChanged(result.TargetKind, result.TargetId, result.GroupGID, dto.OwnerUid);
+        return result;
+    }
+
+    private void NotifyCommentChanged(CommentTargetKind kind, long id, string? gid, string? owner)
+    {
+        if (gid != null)
+        {
+            var section = kind == CommentTargetKind.Event ? SyncshellCommunitySection.Events : SyncshellCommunitySection.News;
+            Mediator.Publish(new Services.Mediator.CommunityChangedMessage(new(new GroupData(gid), section, id)));
+        }
+        else if (owner != null)
+        {
+            Mediator.Publish(new Services.Mediator.ClearProfileDataMessage(new UserData(owner)));
+        }
     }
 
     /// <summary>State-based reaction write - Set=true ensures the row exists.</summary>
     public async Task<ReactionSummaryDto> SetReaction(ReactionSetDto dto)
     {
         CheckConnection();
-        return await _spheneHub!.InvokeAsync<ReactionSummaryDto>(nameof(SetReaction), dto).ConfigureAwait(false);
+        var hub = _spheneHub!;
+        var summary = await Reactions.Write(dto, request => hub.InvokeAsync<ReactionSummaryDto>(nameof(SetReaction), request)).ConfigureAwait(false);
+        if (ReferenceEquals(hub, _spheneHub)) Mediator.Publish(new Services.Mediator.CommunityReactionWrittenMessage());
+        return summary;
     }
 
     /// <summary>Aggregate counts + viewer kinds for one target.</summary>

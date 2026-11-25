@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Sphene.API.Data.Enum;
 using Sphene.API.Dto.Group;
 using Sphene.API.Dto.User;
 using Sphene.Services.Mediator;
@@ -295,13 +296,6 @@ public class PublicProfileService : DisposableMediatorSubscriberBase, IHostedSer
     }
 
     public void InvalidateFollowing() => _store.FollowingFeed.Invalidate();
-
-    /// <summary>Patches a like toggle's authoritative result into the
-    /// Following feed - same in-place update the community stores get, so
-    /// a liked chronicle flips its heart without a refetch.</summary>
-    public void ApplyReactionSummary(SyncshellFeedItemKind kind, long itemId,
-        ReactionSummaryDto summary)
-        => _store.FollowingFeed.PatchReaction(kind, itemId, summary);
 
     public async Task RefreshFollowing()
     {
