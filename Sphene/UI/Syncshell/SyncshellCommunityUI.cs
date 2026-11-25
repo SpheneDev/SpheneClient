@@ -377,7 +377,7 @@ public sealed class SyncshellCommunityUI : WindowMediatorSubscriberBase
                     Mediator.Publish(new NotificationMessage("Travel unavailable",
                         st.Detail ?? "Lifestream could not start travel to this area.",
                         SpheneConfiguration.Models.NotificationType.Warning,
-                        TimeSpan.FromSeconds(5), SuppressInbox: true));
+                        TimeSpan.FromSeconds(5)));
                 }
             });
 

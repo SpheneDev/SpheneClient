@@ -94,7 +94,7 @@ public class PlayerPerformanceService
             }
 
             _mediator.Publish(new NotificationMessage($"{pairHandler.Pair.PlayerName} ({pairHandler.Pair.UserData.AliasOrUID}) exceeds performance threshold(s)",
-                warningText, SpheneConfiguration.Models.NotificationType.Warning));
+                warningText, SpheneConfiguration.Models.NotificationType.Warning, DiagnosticSource: "Performance"));
         }
 
         return true;
@@ -149,7 +149,7 @@ public class PlayerPerformanceService
                 $"Player {pair.PlayerName} ({pair.UserData.AliasOrUID}) exceeded your configured triangle auto pause threshold (" +
                 $"{triUsage}/{config.TrisAutoPauseThresholdThousands * 1000} triangles)" +
                 $" and has been automatically paused.",
-                SpheneConfiguration.Models.NotificationType.Warning));
+                SpheneConfiguration.Models.NotificationType.Warning, DiagnosticSource: "Performance"));
 
             _mediator.Publish(new EventMessage(new Event(pair.PlayerName, pair.UserData, nameof(PlayerPerformanceService), EventSeverity.Warning,
                 $"Exceeds triangle threshold: automatically paused ({triUsage}/{config.TrisAutoPauseThresholdThousands * 1000} triangles)")));
@@ -232,7 +232,7 @@ public class PlayerPerformanceService
                 $"Player {pair.PlayerName} ({pair.UserData.AliasOrUID}) exceeded your configured VRAM auto pause threshold (" +
                 $"{UiSharedService.ByteToString(vramUsage, addSuffix: true)}/{config.VRAMSizeAutoPauseThresholdMiB}MiB)" +
                 $" and has been automatically paused.",
-                SpheneConfiguration.Models.NotificationType.Warning));
+                SpheneConfiguration.Models.NotificationType.Warning, DiagnosticSource: "Performance"));
 
             _mediator.Publish(new PauseMessage(pair.UserData));
 

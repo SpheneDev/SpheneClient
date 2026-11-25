@@ -60,7 +60,7 @@ public class ConnectionHealthMonitor : IDisposable
                     "Connection to server has been restored",
                     NotificationType.Success,
                     TimeSpan.FromSeconds(5)
-                ));
+                , DiagnosticSource: "Connection"));
             }
         }
         finally
@@ -89,7 +89,7 @@ public class ConnectionHealthMonitor : IDisposable
                     $"Connection has failed {_consecutiveFailures} times consecutively",
                     NotificationType.Error,
                     TimeSpan.FromSeconds(15)
-                ));
+                , DiagnosticSource: "Connection"));
             }
         }
         finally

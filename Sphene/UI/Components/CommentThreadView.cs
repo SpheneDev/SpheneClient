@@ -108,6 +108,13 @@ public sealed class CommentThreadView
     private readonly Dictionary<string, ThreadState> _threads = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MarkdownComposer> _composers = new(StringComparer.Ordinal);
 
+    // The host replaces this one-shot destination on navigation. It also works
+    // before the roots load, including a discussion that has no first comment.
+    public (CommentTargetKind Kind, long Id)? PendingDiscussion { get; set; }
+
+    private static void ScrollToDiscussion()
+        => ImGui.SetScrollFromPosY(ImGui.GetCursorScreenPos().Y - ImGui.GetWindowPos().Y, 0.12f);
+
     /// <summary>Drops the cached thread for one target - the next Draw
     /// reloads roots, replies and reaction summaries.</summary>
     public void Invalidate(CommentTargetKind kind, long targetId)
@@ -218,6 +225,12 @@ public sealed class CommentThreadView
                     }
                 });
             }
+            if (PendingDiscussion == (kind, targetId))
+            {
+                st.PendingFocusCommentId = null;
+                PendingDiscussion = null;
+                ScrollToDiscussion();
+            }
             ResolveFocus(ops, st);
             DrawThread(kind, targetId, ownerUid, groupGid, ops, locked,
                 commentCount, viewCount, key, st);
@@ -233,7 +246,7 @@ public sealed class CommentThreadView
     {
         ImGui.PushID($"cmt-{key}");
         var statsShown = DrawTargetReactions(kind, targetId, ownerUid, groupGid,
-            ops, commentCount, viewCount);
+            ops, commentCount, viewCount, ScrollToDiscussion);
         if (!statsShown)
         {
             // read-only surfaces get no stats capsule - the muted line is
@@ -742,7 +755,7 @@ public sealed class CommentThreadView
 
     private static bool DrawTargetReactions(CommentTargetKind kind, long targetId,
         string? ownerUid, string? groupGid, CommentOps ops,
-        int commentCount, int? viewCount)
+        int commentCount, int? viewCount, Action onComments)
     {
         if (ops.SetReaction == null || ops.ReadReactions == null) return false;
         var rk = kind switch
@@ -757,7 +770,7 @@ public sealed class CommentThreadView
                 groupGid != null ? new Sphene.API.Data.GroupData(groupGid) : null,
                 Emoji: emoji, Toggle: true);
             _ = ops.SetReaction(dto);
-        }, commentCount, viewCount);
+        }, commentCount, viewCount, onComments);
         ImGui.SameLine(0f, SpheneUI.Spacing.X12.Scaled);
         return true;
     }

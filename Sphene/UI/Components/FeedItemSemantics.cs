@@ -58,6 +58,17 @@ public static class FeedItemSemantics
             _ => null,
         };
 
+    /// <summary>A Chronicle list row identifies the post by Id. Activity rows
+    /// identify the host separately from the comment or reaction that generated them.</summary>
+    public static (string Owner, long PostId)? ChronicleTarget(SyncshellCommunityFeedItemDto item)
+    {
+        if (item.Kind is not (SyncshellFeedItemKind.Blog or SyncshellFeedItemKind.Comment or SyncshellFeedItemKind.Reaction))
+            return null;
+        var owner = item.TargetOwnerUid ?? item.ActorUid;
+        var id = item.ItemId ?? (item.Kind == SyncshellFeedItemKind.Blog ? item.Id : (long?)null);
+        return owner != null && id.HasValue ? (owner, id.Value) : null;
+    }
+
     /// <summary>Server reaction rows arrive titled "Reaction on {target}" -
     /// renders as the activity phrase "Reacted to {target}"; any other
     /// title passes through unchanged.</summary>

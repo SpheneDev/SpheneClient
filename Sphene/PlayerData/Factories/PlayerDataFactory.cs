@@ -342,7 +342,7 @@ public class PlayerDataFactory
 
             _spheneMediator.Publish(new NotificationMessage("Skeleton Bone Count Mismatch",
                 detailedMessage,
-                NotificationType.Warning, TimeSpan.FromSeconds(15)));
+                NotificationType.Warning, TimeSpan.FromSeconds(15), DiagnosticSource: "Character sync"));
         }
     }
 

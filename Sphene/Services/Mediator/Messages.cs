@@ -63,9 +63,7 @@ public record HaltScanMessage(string Source) : MessageBase;
 public record ResumeScanMessage(string Source) : MessageBase;
 public record NotificationMessage
     (string Title, string Message, NotificationType Type, TimeSpan? TimeShownOnScreen = null,
-    /// <summary>Skip the session inbox row - used when the publisher already
-    /// maintains its own inbox entry (chat unread rows).</summary>
-    bool SuppressInbox = false) : MessageBase;
+    string? DiagnosticSource = null) : MessageBase;
 public record PlayNotificationSoundTestMessage(NotificationSoundConfig Config) : SameThreadMessage;
 public record CreateCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
 public record ClearCacheForObjectMessage(GameObjectHandler ObjectToCreateFor) : SameThreadMessage;
@@ -85,6 +83,7 @@ public record DebugLogEventMessage(LogLevel Level, string Category, string Messa
 public record DownloadReadyMessage(Guid RequestId) : MessageBase;
 public record DownloadStartedMessage(GameObjectHandler DownloadId, Dictionary<string, FileDownloadStatus> DownloadStatus) : MessageBase;
 public record DownloadFinishedMessage(GameObjectHandler DownloadId) : MessageBase;
+public record OpenEventLogMessage : MessageBase;
 public record UiToggleMessage(Type UiType) : MessageBase;
 public record QueryWindowOpenStateMessage(Type UiType, Action<bool> Respond) : SameThreadMessage;
 public record OpenSyncshellImageViewerMessage(List<SyncshellGalleryImageDto> Images, int StartIndex, string GroupGid, string? Title = null) : MessageBase;
@@ -236,7 +235,7 @@ public record OpenSpheneHubMessage(SpheneHubPage? Page = null, string? GroupGid 
     /// profile for this uid (neutral unavailable state when not shared).
     /// Optional <paramref name="ChroniclePostId"/>/<paramref name="FocusCommentId"/>
     /// land inside the public reader.</summary>
-    string? PublicProfileUid = null) : MessageBase;
+    string? PublicProfileUid = null, bool OpenDiscussion = false, long? NewsArticleId = null) : MessageBase;
 
 /// <summary>The user opened a DM conversation - unread surfaces (inbox row,
 /// badges) for that peer should clear.</summary>

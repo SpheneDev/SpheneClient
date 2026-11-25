@@ -105,6 +105,17 @@ public class SpheneProfileManager : MediatorSubscriberBase
         return profile ?? _loadingProfileData;
     }
 
+    internal SpheneProfileData? GetAvatarProfile(UserData data)
+    {
+        var profile = GetSpheneProfile(data);
+        return ReferenceEquals(profile, _loadingProfileData) || ReferenceEquals(profile, _defaultProfileData)
+            || ReferenceEquals(profile, _nsfwProfileData) || profile.IsFlagged
+            || (profile.IsNSFW && !_SpheneConfigService.Current.ProfilesAllowNsfw)
+            || string.IsNullOrEmpty(profile.Base64ProfilePicture)
+            || string.Equals(profile.Base64ProfilePicture, _spheneLogo, StringComparison.Ordinal)
+            ? null : profile;
+    }
+
     /// <summary>True while <paramref name="data"/>'s profile is still being fetched from the server.</summary>
     public bool IsProfileLoading(UserData data)
         => !_spheneProfiles.TryGetValue(data, out var profile)

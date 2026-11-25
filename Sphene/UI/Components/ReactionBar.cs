@@ -60,7 +60,7 @@ public static class ReactionBar
     /// Summary may be null while loading - the pills still render.</summary>
     public static void DrawInline(ReactionTargetKind targetKind, long targetId,
         ReactionSummaryDto? summary, Action<string, bool> onSet,
-        int? commentCount = null, int? viewCount = null)
+        int? commentCount = null, int? viewCount = null, Action? onComments = null)
     {
         ImGui.PushID($"rxn-{targetKind}-{targetId}");
         var scale = SpheneUI.Scale;
@@ -96,7 +96,7 @@ public static class ReactionBar
             if (commentCount != null)
             {
                 segments.Add(new ReactionPillBar.StatsSegment(
-                    FontAwesomeIcon.Comment, commentCount, false, false));
+                    FontAwesomeIcon.Comment, commentCount, false, onComments != null));
             }
             if (viewCount is > 0)
             {
@@ -130,7 +130,7 @@ public static class ReactionBar
                 segments, statRects);
             x += statsW + (rxnW > 0f ? pillGap : 0f);
         }
-        var chipRects = new List<(string Emoji, Vector4 Rect)>();
+        var chipRects = new List<ReactionPillBar.ChipHit>();
         Vector4 addRect = Vector4.Zero;
         if (rxnW > 0f)
         {
@@ -139,55 +139,37 @@ public static class ReactionBar
                 SpheneUI.Colors.Accent, chips, clickable: true,
                 out addRect, chipRects);
         }
-        if (clicked)
+        var hovered = ImGui.IsItemHovered();
+        if (clicked || hovered)
         {
             var mouse = ImGui.GetIO().MousePos;
-            if (!RouteStatsClick(statRects, mouse, segments, onSet)
-                && !RouteChipClick(chipRects, mouse, chips, onSet)
-                && MouseIn(addRect, mouse))
+            var stat = statRects.Find(hit => ReactionPillBar.Contains(hit.Rect, mouse));
+            string? tooltip = null;
+            if (stat.Rect != Vector4.Zero && stat.Slot == 0)
             {
-                SpheneUI.EmojiPickerHook?.OpenFlyout(flyoutId, emoji => onSet(emoji, true));
+                var active = segments[0].Active;
+                tooltip = active ? "Remove your like" : "Like";
+                if (clicked) onSet(ReactionEmojiMap.ThumbsUp, !active);
             }
-        }
-        if (ImGui.IsItemHovered() && MouseIn(addRect, ImGui.GetIO().MousePos))
-        {
-            SpheneUI.AttachTooltip("Add reaction");
+            else if (stat.Rect != Vector4.Zero && stat.Slot == 1)
+            {
+                tooltip = "Open comments";
+                if (clicked) onComments?.Invoke();
+            }
+            else if (chipRects.Find(hit => ReactionPillBar.Contains(hit.Rect, mouse)) is { Emoji: not null } chip)
+            {
+                tooltip = ReactionPillBar.ChipTooltip(chip);
+                if (clicked) onSet(chip.Emoji, !chip.ByMe);
+            }
+            else if (ReactionPillBar.Contains(addRect, mouse))
+            {
+                tooltip = "Add reaction";
+                if (clicked) SpheneUI.EmojiPickerHook?.OpenFlyout(flyoutId, emoji => onSet(emoji, true));
+            }
+            if (tooltip != null) SpheneUI.AttachTooltip(tooltip, hovered);
         }
         SpheneUI.EmojiPickerHook?.Draw(flyoutId);
         ImGui.PopID();
-
-        static bool MouseIn(Vector4 r, Vector2 m)
-            => r != Vector4.Zero && m.X >= r.X && m.X < r.Z && m.Y >= r.Y && m.Y < r.W;
-
-        static bool RouteStatsClick(List<(int Slot, Vector4 Rect)> rects, Vector2 m,
-            List<ReactionPillBar.StatsSegment> segs, Action<string, bool> set)
-        {
-            foreach (var (slot, r) in rects)
-            {
-                if (m.X < r.X || m.X >= r.Z || m.Y < r.Y || m.Y >= r.W) continue;
-                // slot 0 is the thumb - the like toggle; likes flip through
-                // the same server-authoritative reaction path as chips
-                if (slot == 0)
-                {
-                    set(ReactionEmojiMap.ThumbsUp, !segs[0].Active);
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        static bool RouteChipClick(List<(string Emoji, Vector4 Rect)> rects, Vector2 m,
-            List<(string Emoji, int Count, bool ByMe)> chips, Action<string, bool> set)
-        {
-            foreach (var (emoji, r) in rects)
-            {
-                if (m.X < r.X || m.X >= r.Z || m.Y < r.Y || m.Y >= r.W) continue;
-                var active = chips.Any(c => string.Equals(c.Emoji, emoji, StringComparison.Ordinal) && c.ByMe);
-                set(emoji, !active);
-                return true;
-            }
-            return false;
-        }
     }
 
     /// <summary>Chips ordered most-reacted first as the shared tuple shape

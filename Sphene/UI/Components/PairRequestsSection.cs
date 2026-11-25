@@ -63,7 +63,7 @@ internal static class PairRequestsSection
         }
     }
 
-    private static void DrawRequestRow(Pair pair, PairManager pairManager,
+    internal static void DrawRequestRow(Pair pair, PairManager pairManager,
         ApiController apiController, SpheneMediator mediator)
     {
         var uid = pair.UserData.UID;
@@ -83,8 +83,10 @@ internal static class PairRequestsSection
         }
 
         var displayName = !string.IsNullOrEmpty(pair.PlayerName)
-            ? pair.PlayerName : pair.UserData.AliasOrUID;
-        SpheneUI.Text.Plain(displayName);
+            ? pair.PlayerName : pair.UserData.PreferredName;
+        var nameWidth = Math.Max(1f, SpheneUI.Controls.BoundedAvailX() - rowIconsWidth - spacing);
+        SpheneUI.Text.Plain(SpheneUI.Text.Ellipsize(displayName, nameWidth));
+        SpheneUI.AttachTooltip(displayName);
 
         SpheneUI.Controls.DockToCardEdge(rowIconsWidth);
 
@@ -124,7 +126,7 @@ internal static class PairRequestsSection
         var rowIconsWidth = iconButtonSize * 2f + spacing;
 
         var displayName = !string.IsNullOrEmpty(pair.PlayerName)
-            ? pair.PlayerName : pair.UserData.AliasOrUID;
+            ? pair.PlayerName : pair.UserData.PreferredName;
         SpheneUI.Text.Plain(displayName);
 
         SpheneUI.Controls.DockToCardEdge(rowIconsWidth);

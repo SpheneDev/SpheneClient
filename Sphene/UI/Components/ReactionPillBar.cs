@@ -74,6 +74,29 @@ internal static class ReactionPillBar
         return w;
     }
 
+    internal readonly record struct ChipHit(string Emoji, bool ByMe, Vector4 Rect);
+
+    internal static bool Contains(Vector4 rect, Vector2 point) => rect != Vector4.Zero
+        && point.X >= rect.X && point.X < rect.Z && point.Y >= rect.Y && point.Y < rect.W;
+
+    private static string? _lastGlyph;
+    private static string? _lastName;
+
+    internal static string ChipTooltip(ChipHit chip)
+    {
+        if (!string.Equals(chip.Emoji, _lastGlyph, StringComparison.Ordinal))
+        {
+            _lastGlyph = chip.Emoji;
+            _lastName = SpheneUI.Emoji.Catalog?.FirstOrDefault(e =>
+                string.Equals(e.Glyph, chip.Emoji, StringComparison.Ordinal)
+                || e.ToneTexts?.Contains(chip.Emoji, StringComparer.Ordinal) == true)?.Name ?? chip.Emoji;
+        }
+        return chip.ByMe ? $"Remove your {_lastName} reaction" : $"React with {_lastName}";
+    }
+
+    private static float ChipWidth(int count, float lineH, float scale)
+        => lineH + 4f * scale + ImGui.CalcTextSize(count.ToString()).X;
+
     /// <summary>The width the reactions capsule will occupy for these
     /// chips within <paramref name="maxWidth"/> - runs the same trailing-
     /// chip drop pass as Draw, so hit zones sized from it always match the
@@ -92,16 +115,13 @@ internal static class ReactionPillBar
         IReadOnlyList<(string Emoji, int Count, bool ByMe)> chips, bool clickable,
         float maxWidth)
     {
-        var iconGap = 4f * scale;
         var segGap = 6f * scale;
         var padX = 8f * scale;
         var addW = clickable ? AddWidth(lineH, scale) : 0f;
         var widths = new List<float>(chips.Count);
         foreach (var chip in chips)
         {
-            var countText = chip.Count > 1 ? chip.Count.ToString() : null;
-            widths.Add(lineH + (countText != null
-                ? iconGap + ImGui.CalcTextSize(countText).X : 0f));
+            widths.Add(ChipWidth(chip.Count, lineH, scale));
         }
         float chipsW = 0f;
         for (var i = 0; i < widths.Count; i++)
@@ -110,7 +130,10 @@ internal static class ReactionPillBar
         }
         float PillWidth()
         {
-            var inner = chipsW + (addW > 0f && chipsW > 0f ? segGap : 0f) + addW;
+            var hidden = chips.Count - widths.Count;
+            var inner = chipsW;
+            if (hidden > 0) inner += (inner > 0f ? segGap : 0f) + ImGui.CalcTextSize(hidden + "...").X;
+            if (addW > 0f) inner += (inner > 0f ? segGap : 0f) + addW;
             return padX * 2f + inner;
         }
         while (widths.Count > 0 && PillWidth() > maxWidth)
@@ -118,13 +141,10 @@ internal static class ReactionPillBar
             chipsW -= widths[^1] + (widths.Count > 1 ? segGap : 0f);
             widths.RemoveAt(widths.Count - 1);
         }
-        if (widths.Count == 0 && addW <= 0f) return (0f, 0);
-        var pillW = MathF.Min(PillWidth(), maxWidth);
-        if (addW > 0f && padX * 2f + addW > maxWidth && widths.Count == 0)
-        {
-            pillW = padX * 2f + addW;
-        }
-        return (pillW, widths.Count);
+        var width = PillWidth();
+        if (width <= maxWidth && (chips.Count > 0 || clickable)) return (width, widths.Count);
+        var addOnly = 2f * padX + addW;
+        return (clickable && addOnly <= maxWidth ? addOnly : 0f, 0);
     }
 
     /// <summary>Add-affordance width - the smiley+plus composite plus its
@@ -147,7 +167,7 @@ internal static class ReactionPillBar
     public static float Draw(ImDrawListPtr drawList, Vector2 pos, float maxWidth,
         float lineH, float scale, Vector4 accent,
         IReadOnlyList<(string Emoji, int Count, bool ByMe)> chips, bool clickable,
-        out Vector4 addRect, List<(string Emoji, Vector4 Rect)>? chipRects)
+        out Vector4 addRect, List<ChipHit>? chipRects)
     {
         var mutedU = SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted);
         var accentU = SpheneUI.ColorUtils.ToU32(accent);
@@ -185,9 +205,7 @@ internal static class ReactionPillBar
         var widths = new List<float>(measured.Visible);
         for (var c = 0; c < measured.Visible; c++)
         {
-            var ct = chips[c].Count > 1 ? chips[c].Count.ToString() : null;
-            widths.Add(chipH + (ct != null
-                ? iconGap + ImGui.CalcTextSize(ct).X : 0f));
+            widths.Add(ChipWidth(chips[c].Count, chipH, scale));
         }
 
         drawList.AddRectFilled(pos, pos + new Vector2(pillW, pillH), surfaceU, pillH * 0.5f);
@@ -199,7 +217,6 @@ internal static class ReactionPillBar
         {
             var chip = chips[c];
             var cw = widths[c];
-            var countText = chip.Count > 1 ? chip.Count.ToString() : null;
             var chipHovered = clickable && ImGui.IsMouseHoveringRect(
                 new Vector2(rx, pos.Y), new Vector2(rx + cw, pos.Y + pillH));
             if (chipHovered || chip.ByMe)
@@ -215,20 +232,16 @@ internal static class ReactionPillBar
                 ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             }
             SpheneUI.Emoji.SpriteAt(drawList, new Vector2(rx, contentY), chipH, chip.Emoji);
-            if (countText != null)
-            {
-                drawList.AddText(new Vector2(rx + chipH + iconGap,
-                    OpticalTextY(centerY, lineH)),
-                    chipHovered || chip.ByMe ? accentU : mutedU, countText);
-            }
+            drawList.AddText(new Vector2(rx + chipH + iconGap, OpticalTextY(centerY, lineH)),
+                chipHovered || chip.ByMe ? accentU : mutedU, chip.Count.ToString());
             if (clickable)
             {
-                chipRects?.Add((chip.Emoji, new Vector4(rx, pos.Y, rx + cw, pos.Y + pillH)));
+                chipRects?.Add(new(chip.Emoji, chip.ByMe, new Vector4(rx, pos.Y, rx + cw, pos.Y + pillH)));
             }
             rx += cw + segGap;
         }
         var hidden = chips.Count - widths.Count;
-        if (hidden > 0)
+        if (hidden > 0 && (widths.Count > 0 || !clickable || pillW > 2f * padX + addW))
         {
             var more = hidden + "...";
             drawList.AddText(new Vector2(rx, OpticalTextY(centerY, lineH)), mutedU, more);

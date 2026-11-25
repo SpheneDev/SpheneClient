@@ -52,7 +52,7 @@ public static class FeedItemRow
         Action<SyncshellCommunityFeedItemDto>? onLikeClick = null,
         Action<SyncshellCommunityFeedItemDto>? onCommentClick = null,
         Action<SyncshellCommunityFeedItemDto, string>? onReactionClick = null,
-        Func<SyncshellCommunityFeedItemDto, SyncshellCommunityFeedItemDto>? liveReactions = null)
+        Func<SyncshellCommunityFeedItemDto, SyncshellCommunityFeedItemDto>? liveReactions = null, Func<string, bool>? isMember = null)
     {
         var drawList = ImGui.GetWindowDrawList();
         var scale = SpheneUI.Scale;
@@ -168,15 +168,12 @@ public static class FeedItemRow
             new Vector2(thumbRect.X, thumbRect.Y),
             new Vector2(thumbRect.Z, thumbRect.W));
 
-        if (rowHovered || actorHovered)
+        if (rowHovered)
         {
             ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             drawList.AddRectFilled(origin, origin + new Vector2(availX, rowH),
                 SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
                     SpheneUI.Colors.TextPrimary, 0.05f)), 4f * scale);
-            ImGui.SetTooltip(thumbHovered ? "Open photo"
-                : actorLinkable && actorHovered ? name!
-                : tsText.Length > 0 ? $"{kindLabel} · {tsText}" : kindLabel);
         }
 
         if (avatar != null)
@@ -315,13 +312,12 @@ public static class FeedItemRow
         }
         var likeRect = Vector4.Zero;
         var commentRect = Vector4.Zero;
-        var chipRects = new List<(string Emoji, Vector4 Rect)>();
+        var chipRects = new List<ReactionPillBar.ChipHit>();
         var addRect = Vector4.Zero;
         if (hasTail)
         {
             var engageable = item.Kind is SyncshellFeedItemKind.News
                 or SyncshellFeedItemKind.Event or SyncshellFeedItemKind.Blog;
-            chipRects.Clear();
             DrawStatsLine(drawList, item, nameX,
                 tailAnchor + lineH + lineGap, lineH, scale, accent, textW,
                 likeClickable: engageable && onLikeClick != null,
@@ -348,48 +344,49 @@ public static class FeedItemRow
         }
 
         ImGui.SetCursorScreenPos(origin + new Vector2(0f, rowH));
-        if (!clicked) return false;
+        if (!rowHovered && !clicked) return false;
         var mouse = ImGui.GetIO().MousePos;
-        bool Inside(Vector4 r) => r != Vector4.Zero
-            && mouse.X >= r.X && mouse.X < r.Z
-            && mouse.Y >= r.Y && mouse.Y < r.W;
+        bool Inside(Vector4 rect) => ReactionPillBar.Contains(rect, mouse);
+        string tooltip;
         if (Inside(likeRect))
         {
-            onLikeClick!(item);
-            return false;
+            tooltip = item.LikedByMe ? "Remove your like" : "Like";
+            if (clicked) onLikeClick!(item);
         }
-        if (Inside(commentRect))
+        else if (Inside(commentRect))
         {
-            onCommentClick!(item);
-            return false;
+            var allowed = string.IsNullOrEmpty(item.GroupGID) || isMember?.Invoke(item.GroupGID) != false;
+            tooltip = allowed ? "Open comments" : "Join this community to view comments";
+            if (clicked && allowed) onCommentClick!(item);
         }
-        foreach (var (emoji, rect) in chipRects)
+        else if (chipRects.Find(hit => Inside(hit.Rect)) is { Emoji: not null } chip)
         {
-            if (!Inside(rect)) continue;
-            onReactionClick!(item, emoji);
-            return false;
+            tooltip = ReactionPillBar.ChipTooltip(chip);
+            if (clicked) onReactionClick!(item, chip.Emoji);
         }
-        if (addRect != Vector4.Zero && Inside(addRect))
+        else if (Inside(addRect))
         {
-            SpheneUI.EmojiPickerHook?.OpenFlyout(FeedPickerId(id),
+            tooltip = "Add reaction";
+            if (clicked) SpheneUI.EmojiPickerHook?.OpenFlyout(FeedPickerId(id),
                 emoji => onReactionClick!(item, emoji));
-            return false;
         }
-        if (thumbRect != Vector4.Zero
-            && mouse.X >= thumbRect.X && mouse.X < thumbRect.Z
-            && mouse.Y >= thumbRect.Y && mouse.Y < thumbRect.W)
+        else if (Inside(thumbRect))
         {
-            onThumbClick!(item);
-            return false;
+            tooltip = "Open photo";
+            if (clicked) onThumbClick!(item);
         }
-        if (actorRect != Vector4.Zero
-            && mouse.X >= actorRect.X && mouse.X < actorRect.Z
-            && mouse.Y >= actorRect.Y && mouse.Y < actorRect.W)
+        else if (Inside(actorRect))
         {
-            onActorClick!(item.ActorUid!);
-            return false;
+            tooltip = name!;
+            if (clicked) onActorClick!(item.ActorUid!);
         }
-        return true;
+        else
+        {
+            SpheneUI.AttachTooltip(tsText.Length > 0 ? $"{kindLabel} · {tsText}" : kindLabel, rowHovered);
+            return clicked;
+        }
+        SpheneUI.AttachTooltip(tooltip, rowHovered);
+        return false;
     }
 
     /// <summary>Optional content the row appends under the base stack:
@@ -448,7 +445,7 @@ public static class FeedItemRow
         bool likeClickable, bool commentClickable,
         out Vector4 likeRect, out Vector4 commentRect, out Vector4 addRect,
         bool chipsClickable = false,
-        List<(string Emoji, Vector4 Rect)>? chipRects = null)
+        List<ReactionPillBar.ChipHit>? chipRects = null)
     {
         // Two capsules: the stats pill (like/comment/views) and the reactions
         // pill (emoji chips + trailing add affordance). Both render inside

@@ -303,7 +303,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         long? ChroniclePostId = null, long? FocusCommentId = null,
         /// <summary>Public-profile surface - the uid whose shared profile
         /// is on screen (only while Page == PublicProfile).</summary>
-        string? PublicUid = null);
+        string? PublicUid = null, bool OpenDiscussion = false);
     /// <summary>Back/forward history - each entry pairs the location with
     /// the content scroll offset it was captured at, so back/forward lands
     /// where the user actually was (best effort: the offset clamps to the
@@ -404,7 +404,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 NavigateTo(new HubLocation(SpheneHubPage.Syncshells, msg.GroupGid, null,
                     msg.DetailTab,
                     CommunitySection: msg.CommunitySection, CommunityItemId: msg.CommunityItemId,
-                    FocusCommentId: msg.FocusCommentId));
+                    FocusCommentId: msg.FocusCommentId, OpenDiscussion: msg.OpenDiscussion));
                 if (msg.EditEventId is { } editEventId)
                 {
                     // The community cache may still be loading - the planner
@@ -425,7 +425,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
                     PublicUid: pubUid, ChroniclePostId: msg.ChroniclePostId,
-                    FocusCommentId: msg.FocusCommentId));
+                    FocusCommentId: msg.FocusCommentId, OpenDiscussion: msg.OpenDiscussion));
             }
             else if (msg.ChroniclePostId is { } chronId)
             {
@@ -437,13 +437,13 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 if (owner == null || string.Equals(owner, ownUid, StringComparison.Ordinal))
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null, 2,
-                        ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId));
+                        ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId, OpenDiscussion: msg.OpenDiscussion));
                 }
                 else if (FindPairByUid(owner) is { } ownerPair)
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.Friends, null, ownerPair,
                         (int)FriendHubSubPage.Chronicles,
-                        ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId));
+                        ChroniclePostId: chronId, FocusCommentId: msg.FocusCommentId, OpenDiscussion: msg.OpenDiscussion));
                 }
                 else
                 {
@@ -452,13 +452,17 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     // neutral unavailable state instead of a dead end.
                     NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
                         PublicUid: owner, ChroniclePostId: chronId,
-                        FocusCommentId: msg.FocusCommentId));
+                        FocusCommentId: msg.FocusCommentId, OpenDiscussion: msg.OpenDiscussion));
                 }
             }
             else if (msg.Friend != null)
             {
                 NavigateTo(new HubLocation(SpheneHubPage.Friends, null, msg.Friend,
                     msg.FriendSub is { } friendSub ? (int)friendSub : null));
+            }
+            else if (msg.NewsArticleId is { } articleId)
+            {
+                NavigateTo(new HubLocation(SpheneHubPage.News, null, null, AnnouncementId: articleId));
             }
             else if (msg.Page is { } page)
             {
@@ -1201,7 +1205,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 // Profile-tab surfaces carry their tab in SubPage so
                 // back/forward lands on the same tab - without it the
                 // friend-change path resets to the Profile tab every time.
-                SpheneHubPage.Friends => _friendPageTab,
+                SpheneHubPage.Friends => _pendingFriendTab ?? _friendPageTab,
                 SpheneHubPage.Profile => _profilePageTab,
                 _ => null
             },
@@ -1327,6 +1331,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// <summary>Applies a location · leaving-cleanup of the previous page, then the target state.</summary>
     private void ApplyLocation(HubLocation target)
     {
+        _blogComments.PendingDiscussion = null;
+        _communityPage.Comments.PendingDiscussion = null;
         if (_charaDataVisible)
         {
             _charaDataVisible = false;
@@ -1356,7 +1362,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _communityPage.Tab = target.CommunitySection.Value;
             _communityPage.EventId = target.CommunitySection == SyncshellCommunitySection.Events
                 ? target.CommunityItemId : null;
-            _communityPage.FocusItemId = target.CommunitySection != SyncshellCommunitySection.Events
+            _communityPage.FocusItemId = !target.OpenDiscussion && target.CommunitySection != SyncshellCommunitySection.Events
                 ? target.CommunityItemId : null;
             _communityPage.AlbumId = null;
             _communityPage.ViewerImages = null;
@@ -1367,18 +1373,18 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             _communityPage.SwitchT = 0f;
             // Comment deep-link: arm the shared thread view - it walks the
             // thread to the comment (auto-paginating) once it renders.
-            if (target.FocusCommentId is { } focusCommentId
-                && target.CommunityItemId is { } commentHostId)
+            if (target.CommunityItemId is { } commentHostId)
             {
                 var commentKind = target.CommunitySection == SyncshellCommunitySection.Events
                     ? CommentTargetKind.Event
                     : target.CommunitySection == SyncshellCommunitySection.News
                         ? CommentTargetKind.News
                         : (CommentTargetKind?)null;
-                if (commentKind != null)
+                if (commentKind is { } kind)
                 {
-                    _communityPage.Comments.FocusComment(
-                        commentKind.Value, commentHostId, focusCommentId);
+                    if (target.OpenDiscussion) _communityPage.Comments.PendingDiscussion = (kind, commentHostId);
+                    else if (target.FocusCommentId is { } focusCommentId)
+                        _communityPage.Comments.FocusComment(kind, commentHostId, focusCommentId);
                 }
             }
         }
@@ -1414,7 +1420,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             {
                 _openChronicle = (ownerUid, chronId);
                 _chronicleNotice = null;
-                if (target.FocusCommentId is { } focusId)
+                if (target.OpenDiscussion) _blogComments.PendingDiscussion = (CommentTargetKind.Blog, chronId);
+                else if (target.FocusCommentId is { } focusId)
                 {
                     _blogComments.FocusComment(CommentTargetKind.Blog, chronId, focusId);
                 }
@@ -1841,28 +1848,10 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         // expanding leftward. Flyout (not Dropdown) - the header band has no
         // popup stack, and dropdown windows are Popup-flagged: ImGui::Begin
         // dereferences a garbage PopupId without OpenPopup (native crash).
-        if (SpheneUI.Popups.BeginFlyout("hub-inbox"))
+        if (SpheneUI.Popups.BeginFlyout("hub-inbox", NotificationInbox.Width))
         {
-            var inboxH = Math.Clamp(pending * 58f * scale
-                + SpheneUI.Spacing.X12.Scaled, 0f, 360f * scale);
-            // 0-height scroll area = "fill remaining" → flyout grows forever
-            if (pending == 0)
-            {
-                ImGui.Dummy(new Vector2(310f * scale, 0f));
-                SpheneUI.Layout.EmptyState(FontAwesomeIcon.BellSlash,
-                    "All caught up",
-                    "Pair requests, transfers and updates land here.");
-            }
-            else
-            {
-                if (SpheneUI.Layout.BeginScrollArea("hub-inbox-scroll",
-                        new Vector2(310f * scale, inboxH)))
-                {
-                    NotificationInbox.Draw(_notificationInbox, _pairManager,
-                        _apiController, Mediator);
-                }
-                SpheneUI.Layout.EndScrollArea();
-            }
+            NotificationInbox.DrawPanel("hub-inbox", _notificationInbox, _pairManager,
+                _apiController, Mediator, _spheneProfileManager);
             SpheneUI.Popups.EndFlyout();
         }
 
@@ -3342,7 +3331,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 profileFor: ProfileForUid, shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
                         {
                             NavigateFeedItem(item);
                         }
@@ -3376,32 +3365,27 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     /// post or activity on one - route through the same deep-link the
     /// notification inbox uses: the TARGET owner decides the host profile
     /// (never the interactor's), with the post id and comment focus attached.</summary>
-    private void NavigateFeedItem(SyncshellCommunityFeedItemDto item)
+    private bool IsCommunityMember(string gid)
+        => _pairManager.GroupPairs.Keys.Any(group => string.Equals(group.Group.GID, gid, StringComparison.Ordinal));
+
+    private void OpenFeedComments(SyncshellCommunityFeedItemDto item) => NavigateFeedItem(item, openDiscussion: true);
+
+    private void NavigateFeedItem(SyncshellCommunityFeedItemDto item, bool openDiscussion = false)
     {
         if (item.Section != null && !string.IsNullOrEmpty(item.GroupGID))
         {
             NavigateTo(new HubLocation(SpheneHubPage.Syncshells, item.GroupGID, null,
-                CommunitySection: item.Section, CommunityItemId: item.ItemId,
-                FocusCommentId: item.SubItemId));
+                SubPage: (int)SyncshellDetailTab.Community,
+                CommunitySection: item.Section, CommunityItemId: item.ItemId ?? item.Id,
+                FocusCommentId: item.SubItemId, OpenDiscussion: openDiscussion));
             return;
         }
-        // Who owns the chronicle this lands on: blog rows are owned by their
-        // author; comment/reaction rows carry the host owner - ActorUid is
-        // only the person who interacted. Pre-TargetOwnerUid servers fall
-        // back to the actor, the best available guess.
-        var chronicleOwner = item.Kind switch
-        {
-            SyncshellFeedItemKind.Blog => item.ActorUid,
-            SyncshellFeedItemKind.Comment or SyncshellFeedItemKind.Reaction
-                => item.TargetOwnerUid ?? item.ActorUid,
-            _ => null,
-        };
-        if (chronicleOwner != null && item.ItemId is { } chronicleId)
+        if (FeedItemSemantics.ChronicleTarget(item) is { } target)
         {
             Mediator.Publish(new OpenSpheneHubMessage(
-                ChronicleOwnerUid: chronicleOwner,
-                ChroniclePostId: chronicleId,
-                FocusCommentId: item.SubItemId));
+                ChronicleOwnerUid: target.Owner,
+                ChroniclePostId: target.PostId,
+                FocusCommentId: item.SubItemId, OpenDiscussion: openDiscussion));
             return;
         }
         if (!string.IsNullOrEmpty(item.GroupGID))
@@ -5884,7 +5868,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
             {
                 NavigateFeedItem(item);
             }
@@ -5920,7 +5904,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
             {
                 NavigateFeedItem(item);
             }
@@ -6153,7 +6137,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
             {
                 NavigateFeedItem(item);
             }
@@ -6197,7 +6181,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
             {
                 NavigateFeedItem(item);
             }
@@ -7700,7 +7684,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         shellAvatarFor: ShellAvatar,
                     onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
                 {
                     NavigateFeedItem(item);
                 }
@@ -8423,7 +8407,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 profileFor: ProfileForUid,
                                 onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
                         {
                             _openChronicle = (me.UID, captured.Id);
                         }
@@ -8572,7 +8556,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                                 profileFor: ProfileForUid,
                                 onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
                         {
                             _openChronicle = (pair.UserData.UID, post.Id);
                             _ = Task.Run(async () =>
@@ -11250,7 +11234,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                         onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
                 {
                     NavigateTo(new HubLocation(SpheneHubPage.PublicProfile, null, null,
                         PublicUid: uid, ChroniclePostId: captured.Id));
@@ -11315,7 +11299,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                             onActorClick: NavigateToAuthor, profileFor: ProfileForUid,
                             onThumbClick: OpenFeedItemPhoto,
                     onLikeClick: ToggleFeedItemLike, onReactionClick: ToggleFeedItemReaction,
-                    onCommentClick: NavigateFeedItem, liveReactions: LiveFeedRow))
+                    onCommentClick: OpenFeedComments, liveReactions: LiveFeedRow, isMember: IsCommunityMember))
                     {
                         NavigateFeedItem(item);
                     }

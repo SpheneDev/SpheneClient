@@ -107,7 +107,7 @@ public class ChatService : DisposableMediatorSubscriberBase, IHostedService
                 Mediator.Publish(new NotificationMessage("New message",
                     $"{name} sent you a message",
                     SpheneConfiguration.Models.NotificationType.Info,
-                    TimeSpan.FromSeconds(5), SuppressInbox: true));
+                    TimeSpan.FromSeconds(5)));
             }
         });
         // Device keys restored from the account key backup can open rows

@@ -46,7 +46,7 @@ public class ForeverRetryPolicy : IRetryPolicy
                 $"Connection lost to server. Retrying... (Attempt {retryCount + 1})", 
                 NotificationType.Warning, 
                 TimeSpan.FromSeconds(10)
-            ));
+            , DiagnosticSource: "Connection"));
             _mediator.Publish(new DisconnectedMessage());
             _sentDisconnected = true;
         }

@@ -537,7 +537,7 @@ public static partial class SpheneUI
         /// render content after it and always pair with
         /// <see cref="EndFlyout"/>.
         /// </summary>
-        public static bool BeginFlyout(string id)
+        public static bool BeginFlyout(string id, float? width = null)
         {
             if (!_flyouts.TryGetValue(id, out var st))
             {
@@ -561,12 +561,16 @@ public static partial class SpheneUI
             // horizontal edge guard · the panel normally expands leftward from
             // the anchor's right edge - near the left screen edge it mirrors
             // and expands rightward from the anchor's left edge instead.
-            var flipX = st.AnchorMin.X - 280f * Scale < 4f;
-            ImGui.SetNextWindowPos(
-                new Vector2(flipX ? st.AnchorMin.X : st.AnchorMax.X,
-                    flip ? st.AnchorMin.Y - gap : st.AnchorMax.Y + gap),
-                ImGuiCond.None,
-                new Vector2(flipX ? 0f : 1f, flip ? 1f : 0f));
+            var panelWidth = Math.Clamp(width ?? 280f * Scale, 1f, Math.Max(1f, disp.X - 8f));
+            var flipX = st.AnchorMin.X - panelWidth < 4f;
+            var x = flipX ? st.AnchorMin.X : st.AnchorMax.X;
+            if (width.HasValue)
+            {
+                x = Math.Clamp(flipX ? x : x - panelWidth, 4f, Math.Max(4f, disp.X - panelWidth - 4f));
+                ImGui.SetNextWindowSize(new Vector2(panelWidth, 0f), ImGuiCond.Always);
+            }
+            ImGui.SetNextWindowPos(new Vector2(x, flip ? st.AnchorMin.Y - gap : st.AnchorMax.Y + gap),
+                ImGuiCond.None, new Vector2(width.HasValue || flipX ? 0f : 1f, flip ? 1f : 0f));
             if (st.JustOpened)
             {
                 ImGui.SetNextWindowFocus();

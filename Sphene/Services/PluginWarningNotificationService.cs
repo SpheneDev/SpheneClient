@@ -85,7 +85,7 @@ public class PluginWarningNotificationService
         {
             _mediator.Publish(new NotificationMessage("Missing plugins for " + playerName,
                 $"Received data for {playerName} that contained information for plugins you have not installed. Install {string.Join(", ", missingPluginsForData)} to experience their character fully.",
-                NotificationType.Warning, TimeSpan.FromSeconds(10)));
+                NotificationType.Warning, TimeSpan.FromSeconds(10), DiagnosticSource: "Plugin dependencies"));
         }
     }
 }

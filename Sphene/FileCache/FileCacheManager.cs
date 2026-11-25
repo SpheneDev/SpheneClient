@@ -453,7 +453,7 @@ public sealed class FileCacheManager : IHostedService
             {
                 _spheneMediator.Publish(new NotificationMessage("Penumbra not connected",
                     "Could not load local file cache data. Penumbra is not connected or not properly set up. Please enable and/or configure Penumbra properly to use Sphene. After, reload Sphene in the Plugin installer.",
-                    SpheneConfiguration.Models.NotificationType.Error));
+                    SpheneConfiguration.Models.NotificationType.Error, DiagnosticSource: "Penumbra"));
             }
 
             _logger.LogInformation("{csvPath} found, parsing", _csvPath);

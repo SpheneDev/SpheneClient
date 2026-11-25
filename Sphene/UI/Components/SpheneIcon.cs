@@ -35,6 +35,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     private readonly ICommandManager _commandManager;
     private readonly DalamudUtilService _dalamudUtilService;
     private readonly ShrinkUHostService _shrinkuHostService;
+    private readonly SpheneProfileManager _profiles;
     private readonly NotificationInboxService _notificationInbox;
     private readonly Sphene.PlayerData.Pairs.PairManager _pairManager;
     // Built-in ShrinkU integration
@@ -93,7 +94,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         ShrinkU.UI.ConversionUI shrinkuConversion,
         ShrinkU.UI.SettingsUI shrinkuSettings,
         ShrinkU.UI.FirstRunSetupUI shrinkuFirstRun,
-        NotificationInboxService notificationInbox,
+        SpheneProfileManager profiles, NotificationInboxService notificationInbox,
         Sphene.PlayerData.Pairs.PairManager pairManager)
         : base(logger, mediator, "###SpheneIcon", performanceCollectorService)
     {
@@ -106,6 +107,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         _commandManager = commandManager;
         _dalamudUtilService = dalamudUtilService;
         _shrinkuHostService = shrinkuHostService;
+        _profiles = profiles;
         _notificationInbox = notificationInbox;
         _pairManager = pairManager;
         _shrinkuConfig = shrinkuConfig;
@@ -146,7 +148,6 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // Subscribe to event badge messages
         Mediator.Subscribe<PenumbraModTransferAvailableMessage>(this, OnModTransferAvailable);
         Mediator.Subscribe<PenumbraModTransferCompletedMessage>(this, OnModTransferCompleted);
-        Mediator.Subscribe<NotificationMessage>(this, OnNotification);
         Mediator.Subscribe<TestIconEventMessage>(this, OnTestIconEvent);
 
         // Subscribe to GPose messages to properly hide/show icon
@@ -186,52 +187,11 @@ public class SpheneIcon : WindowMediatorSubscriberBase
     /// content instead of opening a second window; back shrinks it again.
     private bool _menuShowsInbox;
 
-    /// <summary>
-    /// Inbox content swapped into the icon-menu panel · the panel widens
-    /// (flyout auto-resizes), caps at the menu's height and scrolls past
-    /// that. The back arrow returns to the quick menu view.
-    /// </summary>
-    private void DrawMenuInbox(float w, float listH)
-    {
-        // back + title on one line · back is the only exit besides closing
-        if (SpheneUI.Icons.Button(FontAwesomeIcon.ArrowLeft))
-        {
-            _menuShowsInbox = false;
-        }
-        SpheneUI.AttachTooltip("Back to menu");
-        ImGui.SameLine();
-        SpheneUI.Text.Colored("Pending", SpheneUI.Colors.TextPrimary);
-        var pending = NotificationInbox.PendingCount(_notificationInbox, _pairManager);
-        ImGui.SameLine();
-        SpheneUI.Text.Timestamp($"{pending} items");
-        SpheneUI.Layout.Separator();
-
-        // fixed list height handed in by the panel · more items scroll.
-        if (pending == 0)
-        {
-            SpheneUI.Layout.EmptyState(FontAwesomeIcon.BellSlash,
-                "All caught up", "Pair requests, transfers and updates land here.");
-        }
-        else
-        {
-            if (SpheneUI.Layout.BeginScrollArea("menu-inbox-scroll",
-                    new Vector2(w, listH)))
-            {
-                NotificationInbox.Draw(_notificationInbox, _pairManager,
-                    _apiController, Mediator);
-            }
-            SpheneUI.Layout.EndScrollArea();
-        }
-    }
-
     private void DrawContextMenu()
     {
-        if (!SpheneUI.Popups.BeginFlyout("icon-menu"))
+        if (!SpheneUI.Popups.BeginFlyout("icon-menu", _menuShowsInbox ? NotificationInbox.Width : 292f * SpheneUI.Scale))
         {
             _menuShowsInbox = false;
-            // snap the width tween back to menu size · otherwise a closed
-            // inbox-mode tween reopens the panel at inbox width.
-            SpheneUI.Fx.TweenSet("icon-menu:w", 272f * SpheneUI.Scale);
             return;
         }
         var scale = SpheneUI.Scale;
@@ -240,21 +200,16 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         var gap = ImGui.GetStyle().ItemSpacing.X;
         var closeMenu = false;
 
-        // fixed geometry · the panel is exactly 272px wide in the menu and
-        // 304px in the inbox, PanelH tall in both - a dummy pads whatever
-        // the view didn't fill, nothing is left to auto-measurement.
-        // pending button row (~30) + its separator (~10) drops out when
-        // nothing is pending - the panel shrinks by exactly that much.
-        var panelH = pending > 0 ? 384f : 344f;
-        var w = SpheneUI.Fx.Tween("icon-menu:w",
-            _menuShowsInbox ? 304f * scale : 272f * scale);
+        const float panelH = 384f;
+        var w = ImGui.GetContentRegionAvail().X;
         var boundMin = ImGui.GetCursorScreenPos();
         ImGui.Dummy(new Vector2(w, 0f));
         SpheneUI.ContentBounds.Push(
             new Vector2(boundMin.X, boundMin.X + w));
         if (_menuShowsInbox)
         {
-            DrawMenuInbox(w, panelH * scale - 48f * scale);
+            NotificationInbox.DrawPanel("icon-menu", _notificationInbox, _pairManager,
+                _apiController, Mediator, _profiles, () => _menuShowsInbox = false);
         }
         else
         {
@@ -267,20 +222,13 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         ImGui.SameLine();
         SpheneUI.Text.Timestamp(GetStatusText(_apiController.ServerState));
 
-        if (pending > 0)
+        var inboxLabel = pending == 0 ? "Notifications" : $"Notifications ({pending})";
+        if (SpheneUI.Controls.SegmentButton(inboxLabel + "###icon-open-inbox",
+                FontAwesomeIcon.Bell, size: new Vector2(w, 0f), accent: SpheneUI.Palette.SpheneGold))
         {
-            // fixed to the tweened width · a full-avail button would hold
-            // the auto-resize flyout at the wider inbox size on the way back.
-            if (SpheneUI.Controls.SegmentButton(
-                    $"{pending} pending · inbox###icon-open-inbox",
-                    FontAwesomeIcon.Bell, size: new Vector2(w, 0f),
-                    accent: SpheneUI.Palette.SpheneGold))
-            {
-                // swap this panel into the inbox instead of a second window
-                _menuShowsInbox = true;
-            }
-            SpheneUI.Layout.Separator();
+            _menuShowsInbox = true;
         }
+        SpheneUI.Layout.Separator();
 
         // App jump-off · one row of four icon buttons, tooltips carry names
         var appH = 30f * scale;
@@ -836,36 +784,10 @@ public class SpheneIcon : WindowMediatorSubscriberBase
         // actions, transfers, updates, area-bound consents). EndFlyout only
         // pairs with a successful BeginFlyout - an unmatched End pops style
         // vars it never pushed (native crash).
-        if (SpheneUI.Popups.BeginFlyout("icon-inbox"))
+        if (SpheneUI.Popups.BeginFlyout("icon-inbox", NotificationInbox.Width))
         {
-            var flyW = 300f * SpheneUI.Scale;
-            // height follows content · pair rows ~46px, inbox rows ~40px,
-            // capped at 320px before scrolling kicks in.
-            var itemCount = PairRequestsSection.PendingCount(_pairManager)
-                + _notificationInbox.GetItems().Count;
-            // same height as the quick menu so both panels read as one set -
-            // more items just scroll inside it.
-            var flyH = Math.Clamp(itemCount * 58f * SpheneUI.Scale
-                + SpheneUI.Spacing.X12.Scaled, 0f, 240f * SpheneUI.Scale);
-            // a 0-height scroll area means "fill remaining" and grows the
-            // auto-resize flyout forever · draw the empty state directly.
-            if (itemCount == 0)
-            {
-                ImGui.Dummy(new Vector2(flyW, 0f));
-                SpheneUI.Layout.EmptyState(FontAwesomeIcon.BellSlash,
-                    "All caught up",
-                    "Pair requests, transfers and updates land here.");
-            }
-            else
-            {
-                if (SpheneUI.Layout.BeginScrollArea("icon-inbox-scroll",
-                        new Vector2(flyW, flyH)))
-                {
-                    NotificationInbox.Draw(_notificationInbox, _pairManager,
-                        _apiController, Mediator);
-                }
-                SpheneUI.Layout.EndScrollArea();
-            }
+            NotificationInbox.DrawPanel("icon-inbox", _notificationInbox, _pairManager,
+                _apiController, Mediator, _profiles);
             SpheneUI.Popups.EndFlyout();
         }
 
@@ -1529,15 +1451,7 @@ public class SpheneIcon : WindowMediatorSubscriberBase
 
     private void OnModTransferCompleted(PenumbraModTransferCompletedMessage msg)
     {
-        AddEvent(IconEventType.ModTransferCompleted, $"Mod transfer completed: {msg.Notification.ModFolderName ?? "Unknown"}");
-    }
-
-    private void OnNotification(NotificationMessage msg)
-    {
-        if (msg.Type == NotificationType.Error || msg.Type == NotificationType.Warning)
-        {
-            AddEvent(IconEventType.Notification, $"{msg.Type}: {msg.Title}");
-        }
+        if (!msg.Success) AddEvent(IconEventType.ModTransferCompleted, $"Mod transfer failed: {msg.Notification.ModFolderName ?? "Unknown"}");
     }
 
     private sealed record IconEvent(IconEventType Type, string Description, DateTimeOffset Timestamp);

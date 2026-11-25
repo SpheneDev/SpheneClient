@@ -1,7 +1,6 @@
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Colors;
-using Dalamud.Interface.Utility.Raii;
 using Sphene.Services;
 using Sphene.Services.Events;
 using Sphene.Services.Mediator;
@@ -42,6 +41,7 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
         : base(logger, mediator, "Sphene Event Viewer", performanceCollectorService)
     {
         _eventAggregator = eventAggregator;
+        Mediator.Subscribe<OpenEventLogMessage>(this, _ => { IsOpen = true; BringToFront(); });
         SizeConstraints = new()
         {
             MinimumSize = new(600, 500),
@@ -97,9 +97,9 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
 
     protected override void DrawInternal()
     {
-        SpheneUI.Layout.PageHeader("Syncshell Events", "eventviewer", () =>
+        SpheneUI.Layout.PageHeader("Event log", "eventviewer", () =>
         {
-            SpheneUI.Text.MutedWrapped("Upcoming events listed by syncshell communities - open one for details and sign-up.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
+            SpheneUI.Text.MutedWrapped("Connection, plugin and activity diagnostics for this client.", ImGui.GetCursorPosX() + 320f * SpheneUI.Scale);
         });
 
         if (SpheneUI.Layout.BeginScrollArea("event-viewer-content", ImGui.GetContentRegionAvail(),
@@ -112,24 +112,9 @@ internal class EventViewerUI : WindowMediatorSubscriberBase
 
     private void DrawEventContent()
     {
-        using (ImRaii.Disabled(!_eventAggregator.NewEventsAvailable))
-        {
-            if (SpheneUI.Icons.TextButton(FontAwesomeIcon.ArrowsToCircle, "Refresh events"))
-            {
-                CurrentEvents = _eventAggregator.EventList.Value.OrderByDescending(f => f.EventTime).ToList();
-            }
-        }
-
         if (_eventAggregator.NewEventsAvailable)
-        {
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            SpheneUI.Text.ColoredWrapped("New events are available, press refresh to update", ImGuiColors.DalamudYellow);
-        }
+            CurrentEvents = _eventAggregator.EventList.Value.OrderByDescending(f => f.EventTime).ToList();
 
-        var buttonSize = SpheneUI.Icons.TextButtonWidth(FontAwesomeIcon.FolderOpen, "Open EventLog Folder");
-        var dist = ImGui.GetWindowContentRegionMax().X - buttonSize;
-        ImGui.SameLine(dist);
         if (SpheneUI.Icons.TextButton(FontAwesomeIcon.FolderOpen, "Open EventLog folder"))
         {
             ProcessStartInfo ps = new()

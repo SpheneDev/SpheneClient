@@ -534,6 +534,17 @@ public class NotificationService : DisposableMediatorSubscriberBase, IHostedServ
 
     private void ShowNotification(NotificationMessage msg)
     {
+        if (msg.DiagnosticSource is { } source)
+        {
+            var severity = msg.Type switch
+            {
+                NotificationType.Error => EventSeverity.Error,
+                NotificationType.Warning => EventSeverity.Warning,
+                _ => EventSeverity.Informational,
+            };
+            Mediator.Publish(new EventMessage(new Event(source, severity, $"{msg.Title} - {msg.Message}")));
+            return;
+        }
         if (!_dalamudUtilService.IsLoggedIn)
         {
             return;

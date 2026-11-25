@@ -161,10 +161,10 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
             {
                 if (isRenewal)
                     Mediator.Publish(new NotificationMessage("Error refreshing token", "Your authentication token could not be renewed. Try reconnecting to Sphene manually.",
-                    NotificationType.Error));
+                    NotificationType.Error, DiagnosticSource: "Authentication"));
                 else
                     Mediator.Publish(new NotificationMessage("Error generating token", "Your authentication token could not be generated. Check Sphenes Main UI (/sphene in chat) to see the error message.",
-                    NotificationType.Error));
+                    NotificationType.Error, DiagnosticSource: "Authentication"));
                 Mediator.Publish(new DisconnectedMessage());
                 throw new SpheneAuthFailureException(response);
             }
@@ -186,7 +186,7 @@ public sealed class TokenProvider : IDisposable, IMediatorSubscriber
             Mediator.Publish(new NotificationMessage("Invalid system clock", "The clock of your computer is invalid. " +
                 "Sphene will not function properly if the time zone is not set correctly. " +
                 "Please set your computers time zone correctly and keep your clock synchronized with the internet.",
-                NotificationType.Error));
+                NotificationType.Error, DiagnosticSource: "Authentication"));
             throw new InvalidOperationException($"JwtToken is behind DateTime.UtcNow, DateTime.UtcNow is possibly wrong. DateTime.UtcNow is {DateTime.UtcNow}, JwtToken.ValidTo is {jwtToken.ValidTo}");
         }
         return response;

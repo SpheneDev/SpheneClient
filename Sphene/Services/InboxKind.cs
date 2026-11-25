@@ -6,7 +6,7 @@ public enum InboxKind
     ModTransfer = 0,
     ModTransferDone = 1,
     Update = 2,
-    Notification = 3,
+    Announcement = 3,
     AreaBoundConsent = 4,
     /// <summary>Durable server-side notification · read state lives on the server.</summary>
     Server = 5,

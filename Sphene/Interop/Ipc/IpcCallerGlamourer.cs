@@ -98,7 +98,7 @@ public sealed class IpcCallerGlamourer : DisposableMediatorSubscriberBase, IIpcC
             {
                 _shownGlamourerUnavailable = true;
                 _spheneMediator.Publish(new NotificationMessage("Glamourer inactive", "Your Glamourer installation is not active or out of date. Update Glamourer to continue to use Sphene. If you just updated Glamourer, ignore this message.",
-                    NotificationType.Error));
+                    NotificationType.Error, DiagnosticSource: "Glamourer"));
             }
         }
     }

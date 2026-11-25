@@ -1,3 +1,5 @@
+using Sphene.API.Data;
+
 namespace Sphene.Services;
 
 /// <summary>
@@ -13,6 +15,4 @@ public sealed record InboxItem(
     string? Detail,
     DateTimeOffset Timestamp,
     object? Payload = null,
-    /// <summary>Important items bypass the seen-once filter · always land
-    /// in pending until the user dismisses them.</summary>
-    bool Important = false);
+    UserData? Actor = null, string? Source = null, string? GroupGid = null);

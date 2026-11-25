@@ -482,7 +482,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                                 "Sphene, Penumbra, and some other plugins assume your FFXIV installation is unmodified in order to work. " +
                                 "Synchronization with pairs/shells can break because of this. Exit the game, open XIVLauncher, click the arrow next to Log In " +
                                 "and select 'repair game files' to resolve this issue. Afterwards, do not install any mods with TexTools. Your plugin configurations will remain, as will mods enabled in Penumbra.",
-                                NotificationType.Error, TimeSpan.FromSeconds(15)));
+                                NotificationType.Error, TimeSpan.FromSeconds(15), DiagnosticSource: "Game configuration"));
                     }
 
                     if (_dalamudUtil.IsLodEnabled && !_naggedAboutLod)
@@ -494,7 +494,7 @@ public sealed partial class ApiController : DisposableMediatorSubscriberBase, IS
                             Mediator.Publish(new NotificationMessage("Model LOD is enabled",
                                 "You have \"Use low-detail models on distant objects (LOD)\" enabled. Having model LOD enabled is known to be a reason to cause " +
                                 "random crashes when loading in or rendering modded pairs. Disabling LOD has a very low performance impact. Disable LOD while using Sphene: " +
-                                "Go to XIV Menu -> System Configuration -> Graphics Settings and disable the model LOD option.", NotificationType.Warning, TimeSpan.FromSeconds(15)));
+                                "Go to XIV Menu -> System Configuration -> Graphics Settings and disable the model LOD option.", NotificationType.Warning, TimeSpan.FromSeconds(15), DiagnosticSource: "Game configuration"));
                         }
                     }
 
