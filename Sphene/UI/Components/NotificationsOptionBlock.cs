@@ -102,7 +102,7 @@ public static class NotificationsOptionBlock
             configService.Save();
         }
 
-        SpheneUI.Controls.HelpText("When enabled, update checks include testbuild versions and show update hints for them.");
+        SpheneUI.Controls.HelpText("When enabled on a release build, update checks also include testbuild versions. Testbuild clients always show testbuild update hints - the option cannot suppress them there.");
     }
 
     public static bool DrawEnableAreaBoundSyncshellNotificationsOption(SpheneConfigService configService, UiSharedService uiShared, string blockId = "EnableAreaBoundSyncshellNotifications")

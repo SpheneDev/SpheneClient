@@ -20,6 +20,10 @@ public class UpdateCheckService : IHostedService, IDisposable
     private readonly bool _isTestBuildClient;
     private Timer? _updateCheckTimer;
     private const string UPDATE_CHECK_URL = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogonmaster.json";
+    // Test builds publish to their own manifest as "SpheneTest" - the release
+    // pipeline has not maintained plogonmaster's TestingAssemblyVersion since
+    // the split, so watching the stable file never surfaces a test update.
+    private const string TEST_UPDATE_CHECK_URL = "https://raw.githubusercontent.com/SpheneDev/repo/refs/heads/main/plogontest.json";
     private const int UPDATE_CHECK_INTERVAL_MINUTES = 5;
 
     public UpdateCheckService(ILogger<UpdateCheckService> logger, HttpClient httpClient, SpheneMediator mediator, DalamudUtilService dalamudUtilService, SpheneConfigService configService, IDalamudPluginInterface pluginInterface)
@@ -44,38 +48,47 @@ public class UpdateCheckService : IHostedService, IDisposable
                 return null;
             }
             
-            _logger.LogDebug("Checking for updates from {url}", UPDATE_CHECK_URL);
-            
-            var response = await _httpClient.GetStringAsync(UPDATE_CHECK_URL).ConfigureAwait(false);
-            var updateData = JsonSerializer.Deserialize<UpdateData[]>(response);
-            
-            if (updateData == null || updateData.Length == 0)
-            {
-                _logger.LogWarning("No update data found in response");
-                return null;
-            }
-            
-            var spheneData = updateData.FirstOrDefault(x => string.Equals(x.InternalName, "Sphene", StringComparison.Ordinal));
-            if (spheneData == null)
-            {
-                _logger.LogWarning("Sphene data not found in update response");
-                return null;
-            }
-            
             var currentVersion = GetCurrentVersion();
-            var stableVersion = Version.Parse(spheneData.AssemblyVersion);
-            var shouldCheckTestBuilds = ShouldCheckTestBuildUpdates();
-
-            var latestVersion = stableVersion;
+            var latestVersion = new Version(0, 0, 0, 0);
             var isTestBuildUpdate = false;
-            var downloadUrl = spheneData.DownloadLinkUpdate;
-            var changelog = spheneData.Changelog;
+            var downloadUrl = string.Empty;
+            var changelog = string.Empty;
+            var anyChannel = false;
 
-            if (shouldCheckTestBuilds && Version.TryParse(spheneData.TestingAssemblyVersion, out var testingVersion) && testingVersion > latestVersion)
+            // Stable channel - every client watches it.
+            var stableData = await FetchManifestEntry(UPDATE_CHECK_URL, "Sphene").ConfigureAwait(false);
+            if (stableData != null && Version.TryParse(stableData.AssemblyVersion, out var stableVersion))
             {
-                latestVersion = testingVersion;
-                isTestBuildUpdate = true;
-                downloadUrl = string.IsNullOrWhiteSpace(spheneData.DownloadLinkTesting) ? spheneData.DownloadLinkUpdate : spheneData.DownloadLinkTesting;
+                anyChannel = true;
+                latestVersion = stableVersion;
+                downloadUrl = stableData.DownloadLinkUpdate;
+                changelog = stableData.Changelog;
+            }
+
+            // Test channel - test clients ALWAYS watch it (the display option
+            // only gates stable clients opting in), stable clients opt in via
+            // ShowTestBuildUpdates.
+            if (ShouldCheckTestBuildUpdates())
+            {
+                var testData = await FetchManifestEntry(TEST_UPDATE_CHECK_URL, "SpheneTest").ConfigureAwait(false);
+                if (testData != null && Version.TryParse(testData.AssemblyVersion, out var testingVersion))
+                {
+                    anyChannel = true;
+                    if (testingVersion > latestVersion)
+                    {
+                        latestVersion = testingVersion;
+                        isTestBuildUpdate = true;
+                        downloadUrl = string.IsNullOrWhiteSpace(testData.DownloadLinkUpdate)
+                            ? testData.DownloadLinkTesting : testData.DownloadLinkUpdate;
+                        changelog = testData.Changelog;
+                    }
+                }
+            }
+
+            if (!anyChannel)
+            {
+                _logger.LogWarning("No update data found in any channel manifest");
+                return null;
             }
 
             _logger.LogDebug("Current version: {current}, Latest version considered: {latest}, IsTestBuildUpdate: {isTestBuildUpdate}", currentVersion, latestVersion, isTestBuildUpdate);
@@ -127,6 +140,32 @@ public class UpdateCheckService : IHostedService, IDisposable
         }
     }
     
+
+    /// <summary>Fetches one plugin-repository manifest and returns the entry
+    /// matching <paramref name="internalName"/> - null when the file or the
+    /// entry is unreachable/unparseable, so one dead channel never silences
+    /// the other.</summary>
+    private async Task<UpdateData?> FetchManifestEntry(string url, string internalName)
+    {
+        try
+        {
+            _logger.LogDebug("Checking for updates from {url}", url);
+            var response = await _httpClient.GetStringAsync(url).ConfigureAwait(false);
+            var updateData = JsonSerializer.Deserialize<UpdateData[]>(response);
+            var entry = updateData?.FirstOrDefault(x =>
+                string.Equals(x.InternalName, internalName, StringComparison.Ordinal));
+            if (entry == null)
+            {
+                _logger.LogWarning("{name} entry not found in {url}", internalName, url);
+            }
+            return entry;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Update manifest fetch failed for {url}", url);
+            return null;
+        }
+    }
 
     private static Version GetCurrentVersion()
     {
