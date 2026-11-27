@@ -17,8 +17,7 @@ namespace Sphene.UI.Chronicles;
 /// presentation and the draft preview can never diverge. Layout contract:
 /// cover, then ONE header row (author identity left, visibility badge +
 /// optional item actions as a single right-docked group), the title as the
-/// primary line, then the body - full markdown in detail/preview, a bounded
-/// (clipped, still fully formatted) excerpt with Show more/less in list cards.
+/// primary line, then the full markdown body.
 /// </summary>
 public static class ChronicleReaderView
 {
@@ -29,17 +28,15 @@ public static class ChronicleReaderView
     /// <summary>Draws the reader. <paramref name="avatarWrap"/> is the resolved
     /// author avatar texture (may be null); <paramref name="ops"/> drives the
     /// discussion widget - null renders no comment affordance (previews and
-    /// list cards). <paramref name="excerptLines"/> &gt; 0 bounds the body to
-    /// that many rendered lines (full Markdown intact, clipped by a scroll-
-    /// locked child region) and offers a Show more/less toggle through
-    /// <paramref name="isExpanded"/>/<paramref name="toggleExpanded"/>.
+    /// list cards). The body always renders in full - the dedicated reader
+    /// replaced the old bounded excerpt once chronicles stopped living
+    /// inline in the feed.
     /// <paramref name="actions"/> is an optional right-docked control strip
     /// (edit/delete chips on the own list) inside the header's right group.</summary>
     public static void Draw(UserProfileBlogPostDto post, string authorUid,
         string authorDisplayName, IDalamudTextureWrap? avatarWrap, Vector4 accent,
         CommentThreadView comments, CommentThreadView.CommentOps? ops,
-        string? previewNote = null, int excerptLines = 0,
-        Func<long, bool>? isExpanded = null, Action<long>? toggleExpanded = null,
+        string? previewNote = null,
         Action? actions = null, Action<string>? onAuthorClick = null)
     {
         var scale = SpheneUI.Scale;
@@ -83,58 +80,19 @@ public static class ChronicleReaderView
         SpheneUI.Layout.Separator();
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
 
-        var expanded = isExpanded?.Invoke(post.Id) == true;
         if (!string.IsNullOrWhiteSpace(post.Body))
         {
-            if (excerptLines > 0 && !expanded)
-            {
-                // Bounded excerpt: the SAME markdown renderer inside a
-                // scroll-locked child - tags stay valid, styling survives,
-                // content is clipped at the line budget instead of
-                // plain-texted.
-                var lineH = ImGui.GetTextLineHeight();
-                var maxH = lineH * excerptLines
-                    + ImGui.GetStyle().ItemSpacing.Y * (excerptLines - 1);
-                var overflow = false;
-                using (var clip = ImRaii.Child($"##chron-excerpt-{post.Id}",
-                           new Vector2(-1f, maxH), border: false,
-                           ImGuiWindowFlags.NoScrollbar))
-                {
-                    if (clip.Success)
-                    {
-                        MarkdownRenderer.RenderMarkdown(post.Body!, 0,
-                            MarkdownComposer.MediaImageSource);
-                        overflow = ImGui.GetScrollMaxY() > 1f;
-                    }
-                }
-                if (overflow && toggleExpanded != null
-                    && SpheneUI.Icons.TextButton(FontAwesomeIcon.AngleDown,
-                        "Show more"))
-                {
-                    toggleExpanded(post.Id);
-                }
-            }
-            else
-            {
-                MarkdownRenderer.RenderMarkdown(post.Body!, 0,
-                    MarkdownComposer.MediaImageSource);
-                SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                EntityChipList.Draw(post.Body);
-                if (excerptLines > 0 && expanded && toggleExpanded != null
-                    && SpheneUI.Icons.TextButton(FontAwesomeIcon.AngleUp,
-                        "Show less"))
-                {
-                    toggleExpanded(post.Id);
-                }
-            }
+            MarkdownRenderer.RenderMarkdown(post.Body!, 0,
+                MarkdownComposer.MediaImageSource);
+            SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
+            EntityChipList.Draw(post.Body);
         }
         else
         {
             SpheneUI.Text.MutedWrapped("This Chronicle has no body yet.");
         }
 
-        // Discussion always renders when ops are bound - the excerpt
-        // toggle only bounds the body, never the thread.
+        // Discussion always renders when ops are bound.
         if (ops != null)
         {
             SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X8);

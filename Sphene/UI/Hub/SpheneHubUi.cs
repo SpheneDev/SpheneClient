@@ -85,10 +85,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
     private bool _photoDeleteArmed;
     private long? _pendingViewerRemoveId;
     private readonly Sphene.UI.Chronicles.ChronicleComposer _chronicleComposer = new();
-    /// <summary>Post ids whose bounded Chronicle excerpt is expanded in
-    /// place (Show more/less) - per session, shared by own + friend lists.</summary>
-    private readonly HashSet<long> _expandedChronicles = new();
-
     /// <summary>The Chronicle currently open in the detail reader - the
     /// list shows compact feed rows; clicking one opens just that entry
     /// with its full discussion.</summary>
@@ -2485,12 +2481,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             DrawChroniclePreviewSection(extras, accent, isOwn: true,
                 () => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
                     SubPage: 2)),
-                id =>
-                {
-                    _expandedChronicles.Add(id);
-                    NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
-                        SubPage: 2));
-                });
+                id => NavigateTo(new HubLocation(SpheneHubPage.Profile, null, null,
+                    SubPage: 2, ChroniclePostId: id)));
         }
         // About-me rides beside Recent Chronicles when a bio is set - unset
         // bios leave the chronicles spanning the full width, no empty card.
@@ -7756,12 +7748,8 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
             DrawChroniclePreviewSection(friendExtras, accent, isOwn: false,
                 () => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
                     SubPage: 2)),
-                id =>
-                {
-                    _expandedChronicles.Add(id);
-                    NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
-                        SubPage: 2));
-                });
+                id => NavigateTo(new HubLocation(SpheneHubPage.Friends, null, pair,
+                    SubPage: 2, ChroniclePostId: id)));
         }
         // About-me beside Recent Chronicles - same composition as the own
         // profile overview; unset bios never render a card at all.
@@ -8365,9 +8353,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                         uid => CommunityNameFor(uid, null, null), ProfileForUid);
                     Sphene.UI.Chronicles.ChronicleReaderView.Draw(captured, me.UID,
                         OwnHeroName(), avatarWrap, accent,
-                        _blogComments, ops, excerptLines: 8,
-                        isExpanded: id => _expandedChronicles.Contains(id),
-                        toggleExpanded: id => ToggleChronicleExpanded(id),
+                        _blogComments, ops,
                         actions: () =>
                         {
                             using (ImRaii.PushId($"own-blog-post{captured.Id}"))
@@ -8535,9 +8521,7 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     Sphene.UI.Chronicles.ChronicleReaderView.Draw(post,
                         pair.UserData.UID, SyncshellCommunityView.HumanName(pair.UserData)
                             ?? "Unknown user", avatarWrap, accent,
-                        _blogComments, ops, excerptLines: 8,
-                        isExpanded: id => _expandedChronicles.Contains(id),
-                        toggleExpanded: id => ToggleChronicleExpanded(id));
+                        _blogComments, ops);
                 }
                 else
                 {
@@ -8890,14 +8874,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         finally
         {
             _chronicleSaving = false;
-        }
-    }
-
-    private void ToggleChronicleExpanded(long id)
-    {
-        if (!_expandedChronicles.Remove(id))
-        {
-            _expandedChronicles.Add(id);
         }
     }
 
@@ -11213,9 +11189,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                     authorUid => CommunityNameFor(authorUid, null, null), ProfileForUid);
                 Sphene.UI.Chronicles.ChronicleReaderView.Draw(post, uid,
                     displayName, avatarWrap, accent, _blogComments, ops,
-                    excerptLines: 8,
-                    isExpanded: id => _expandedChronicles.Contains(id),
-                    toggleExpanded: id => ToggleChronicleExpanded(id),
                     onAuthorClick: NavigateToAuthor);
                 return;
             }
