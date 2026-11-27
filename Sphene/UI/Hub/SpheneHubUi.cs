@@ -2996,9 +2996,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
         DrawHomeQuickNav();
         SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
 
-        _communityFeed.EnsureRequested();
-        var items = _communityFeed.Items;
-
         // two-column dashboard · feed on the left, a stacked side rail on
         // the right. A single table row gives both columns their own
         // content width + independent auto-height.
@@ -3013,7 +3010,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 DrawHomeFeedCard(accent);
                 ImGui.TableSetColumnIndex(1);
                 DrawHomeGlanceCard(accent);
-                DrawHomeMomentsCard(accent, items);
             }
         }
 
@@ -3144,98 +3140,6 @@ internal sealed class SpheneHubUi : WindowMediatorSubscriberBase
                 hovered ? tint : SpheneUI.Colors.TextPrimary), value);
         dl.AddText(new Vector2(min.X, min.Y + plate + 3f * scale),
             SpheneUI.ColorUtils.ToU32(SpheneUI.Colors.TextMuted), label);
-    }
-
-    /// <summary>
-    /// "Latest moments" - the most recent photo uploads across joined
-    /// syncshells as a 2x2 tile grid of real thumbnails. Tiles deep-link
-    /// into the owning shell's community gallery.
-    /// </summary>
-    private void DrawHomeMomentsCard(Vector4 accent,
-        IReadOnlyList<SyncshellCommunityFeedItemDto> items)
-    {
-        var photos = new List<SyncshellCommunityFeedItemDto>(4);
-        foreach (var i in items)
-        {
-            if (i.Kind == SyncshellFeedItemKind.Photo
-                && (i.ThumbnailMediaHash != null || !string.IsNullOrEmpty(i.ThumbnailBase64)))
-            {
-                photos.Add(i);
-                if (photos.Count == 4) break;
-            }
-        }
-        if (photos.Count == 0)
-        {
-            return;
-        }
-
-        // Leading gap emitted only when the card renders - spacing that outlives
-        // the last card becomes phantom scroll range.
-        SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.CardGap);
-        SpheneUI.Layout.SectionCard(() =>
-        {
-            var scale = SpheneUI.Scale;
-            var dl = ImGui.GetWindowDrawList();
-            var gap = SpheneUI.Spacing.X4.Scaled;
-            var cellW = (ImGui.GetContentRegionAvail().X - gap) * 0.5f;
-            var cellH = cellW * 0.7f;
-            for (var i = 0; i < photos.Count; i++)
-            {
-                var item = photos[i];
-                var pos = ImGui.GetCursorScreenPos();
-                ImGui.PushID($"moment-{item.Id}");
-                var clicked = ImGui.InvisibleButton("##mtile",
-                    new Vector2(cellW, cellH));
-                var hovered = ImGui.IsItemHovered();
-                var rectMax = pos + new Vector2(cellW, cellH);
-                var wrap = item.ThumbnailMediaHash != null
-                    ? SpheneUI.Media.Texture(
-                        $"feed-th:{item.GroupGID}:{item.Id}:{item.ThumbnailMediaHash}",
-                        () => MarkdownComposer.MediaImageSource($"media:{item.ThumbnailMediaHash}"))
-                    : SpheneUI.Media.Texture(
-                        $"feed-th:{item.GroupGID}:{item.Id}",
-                        () => Convert.FromBase64String(item.ThumbnailBase64!));
-                if (wrap != null)
-                {
-                    // cover-crop · the tile keeps its shape, the image is
-                    // cut to fit, never squished
-                    SpheneUI.Media.ImageInRect(dl, wrap, pos, rectMax,
-                        ImageFit.Cover, rounding: 8f * scale,
-                        tint: hovered
-                            ? new Vector4(1f, 1f, 1f, 0.8f) : Vector4.One);
-                }
-                else
-                {
-                    dl.AddRectFilled(pos, rectMax,
-                        SpheneUI.ColorUtils.ToU32(SpheneUI.Layout.NavRailBandColor()),
-                        8f * scale);
-                }
-                dl.AddRect(pos, rectMax,
-                    SpheneUI.ColorUtils.ToU32(SpheneUI.ColorUtils.WithAlpha(
-                        hovered ? accent : SpheneUI.Colors.Border,
-                        hovered ? 0.6f : 0.25f)), 8f * scale);
-                if (hovered)
-                {
-                    ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
-                    SpheneUI.AttachTooltip(item.Title);
-                }
-                if (clicked)
-                {
-                    NavigateTo(new HubLocation(SpheneHubPage.Syncshells,
-                        item.GroupGID, null));
-                }
-                ImGui.PopID();
-                if (i % 2 == 0)
-                {
-                    ImGui.SameLine(0f, gap);
-                }
-                else
-                {
-                    SpheneUI.Layout.VerticalSpace(SpheneUI.Spacing.X4);
-                }
-            }
-        }, title: "Latest moments", icon: FontAwesomeIcon.Images,
-            accentColor: accent);
     }
 
     /// <summary>
